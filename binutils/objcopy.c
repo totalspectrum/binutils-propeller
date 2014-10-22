@@ -216,6 +216,9 @@ static bfd_boolean wildcard = FALSE;
 /* True if --localize-hidden is in effect.  */
 static bfd_boolean localize_hidden = FALSE;
 
+/* True if --localize-text is in effect.  */
+static bfd_boolean localize_text = FALSE;
+
 /* List of symbols to strip, keep, localize, keep-global, weaken,
    or redefine.  */
 static htab_t strip_specific_htab = NULL;
@@ -291,6 +294,7 @@ enum command_line_switch
     OPTION_KEEP_SYMBOLS,
     OPTION_LOCALIZE_HIDDEN,
     OPTION_LOCALIZE_SYMBOLS,
+    OPTION_LOCALIZE_TEXT,
     OPTION_LONG_SECTION_NAMES,
     OPTION_GLOBALIZE_SYMBOL,
     OPTION_GLOBALIZE_SYMBOLS,
@@ -404,6 +408,7 @@ static struct option copy_options[] =
   {"localize-hidden", no_argument, 0, OPTION_LOCALIZE_HIDDEN},
   {"localize-symbol", required_argument, 0, 'L'},
   {"localize-symbols", required_argument, 0, OPTION_LOCALIZE_SYMBOLS},
+  {"localize-text", no_argument, 0, OPTION_LOCALIZE_TEXT},
   {"long-section-names", required_argument, 0, OPTION_LONG_SECTION_NAMES},
   {"no-adjust-warnings", no_argument, 0, OPTION_NO_CHANGE_WARNINGS},
   {"no-change-warnings", no_argument, 0, OPTION_NO_CHANGE_WARNINGS},
@@ -524,6 +529,7 @@ copy_usage (FILE *stream, int exit_status)
   -K --keep-symbol <name>          Do not strip symbol <name>\n\
      --keep-file-symbols           Do not strip file symbol(s)\n\
      --localize-hidden             Turn all ELF hidden symbols into locals\n\
+     --localize-text               Turn all text segment symbols into locals\n\
   -L --localize-symbol <name>      Force symbol <name> to be marked as a local\n\
      --globalize-symbol <name>     Force symbol <name> to be marked as a global\n\
   -G --keep-global-symbol <name>   Localize all symbols except <name>\n\
@@ -1177,6 +1183,15 @@ is_hidden_symbol (asymbol *sym)
   return FALSE;
 }
 
+/* Return true if SYM is a text segment symbol. */
+
+static bfd_boolean
+is_text_symbol (asymbol *sym)
+{
+  int c = bfd_decode_symclass (sym);
+  return (c == 'T' || c == 't');
+}
+
 /* Choose which symbol entries to copy; put the result in OSYMS.
    We don't copy in place, because that confuses the relocs.
    Return the number of symbols to print.  */
@@ -1341,6 +1356,7 @@ filter_symbols (bfd *abfd, bfd *obfd, asymbol **osyms,
 	      && (is_specified_symbol (name, localize_specific_htab)
 		  || (htab_elements (keepglobal_specific_htab) != 0
 		      && ! is_specified_symbol (name, keepglobal_specific_htab))
+		  || (localize_text && is_text_symbol (sym))
 		  || (localize_hidden && is_hidden_symbol (sym))))
 	    {
 	      sym->flags &= ~ (BSF_GLOBAL | BSF_WEAK);
@@ -2079,6 +2095,7 @@ copy_object (bfd *ibfd, bfd *obfd, const bfd_arch_info_type *input_arch)
       || strip_symbols == STRIP_NONDWO
       || discard_locals != LOCALS_UNDEF
       || localize_hidden
+      || localize_text
       || htab_elements (strip_specific_htab) != 0
       || htab_elements (keep_specific_htab) != 0
       || htab_elements (localize_specific_htab) != 0
@@ -4036,6 +4053,10 @@ copy_main (int argc, char *argv[])
 
 	case OPTION_LOCALIZE_SYMBOLS:
 	  add_specific_symbols (optarg, localize_specific_htab);
+	  break;
+
+	case OPTION_LOCALIZE_TEXT:
+	  localize_text = TRUE;
 	  break;
 
 	case OPTION_LONG_SECTION_NAMES:

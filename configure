@@ -3812,6 +3812,9 @@ case "${target}" in
   or1k*-*-*)
     noconfigdirs="$noconfigdirs gdb"
     ;;
+  propeller*)
+    noconfigdirs="$noconfigdirs target-libgloss gdb"
+    ;;
   sh-*-* | sh64-*-*)
     case "${target}" in
       sh*-*-elf)

@@ -362,6 +362,12 @@ ALL_EMULATION_SOURCES = \
 	eppcmacos.c \
 	eppcnw.c \
 	eppcpe.c \
+	epropeller.c \
+	epropeller_cog.c \
+	epropeller_xmm.c \
+	epropeller_xmm_single.c \
+	epropeller_xmm_split.c \
+	epropeller_xmmc.c \
 	eriscix.c \
 	escore3_elf.c \
 	escore7_elf.c \
@@ -1599,6 +1605,24 @@ eppcnw.c:	$(srcdir)/emulparams/ppcnw.sh \
 
 eppcpe.c: $(srcdir)/emulparams/ppcpe.sh \
   $(srcdir)/emultempl/pe.em $(srcdir)/scripttempl/ppcpe.sc ${GEN_DEPENDS}
+
+epropeller.c: $(srcdir)/emulparams/propeller.sh \
+  $(srcdir)/emultempl/propeller.em $(srcdir)/scripttempl/propeller.sc ${GEN_DEPENDS}
+
+epropeller_cog.c: $(srcdir)/emulparams/propeller_cog.sh \
+  $(srcdir)/emultempl/propeller.em $(srcdir)/scripttempl/propeller.sc ${GEN_DEPENDS}
+
+epropeller_xmm.c: $(srcdir)/emulparams/propeller_xmm.sh \
+  $(srcdir)/emultempl/propeller.em $(srcdir)/scripttempl/propeller.sc ${GEN_DEPENDS}
+
+epropeller_xmm_single.c: $(srcdir)/emulparams/propeller_xmm_single.sh \
+  $(srcdir)/emultempl/propeller.em $(srcdir)/scripttempl/propeller.sc ${GEN_DEPENDS}
+
+epropeller_xmm_split.c: $(srcdir)/emulparams/propeller_xmm_split.sh \
+  $(srcdir)/emultempl/propeller.em $(srcdir)/scripttempl/propeller.sc ${GEN_DEPENDS}
+
+epropeller_xmmc.c: $(srcdir)/emulparams/propeller_xmmc.sh \
+  $(srcdir)/emultempl/propeller.em $(srcdir)/scripttempl/propeller.sc ${GEN_DEPENDS}
 
 eriscix.c: $(srcdir)/emulparams/riscix.sh \
   $(srcdir)/emultempl/generic.em $(srcdir)/scripttempl/aout.sc ${GEN_DEPENDS}

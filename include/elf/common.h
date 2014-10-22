@@ -402,6 +402,9 @@
 
 #define EM_ADAPTEVA_EPIPHANY   0x1223  /* Adapteva's Epiphany architecture.  */
 
+/* Parallax Propeller magic number */
+#define EM_PROPELLER           0x5072
+
 /* Old constant that might be in use by some software. */
 #define EM_OPENRISC		EM_OR1K
 

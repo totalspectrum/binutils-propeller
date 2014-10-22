@@ -72,6 +72,7 @@
 #define ARCH_pdp11
 #define ARCH_pj
 #define ARCH_powerpc
+#define ARCH_propeller
 #define ARCH_rs6000
 #define ARCH_rl78
 #define ARCH_rx
@@ -373,6 +374,11 @@ disassembler (abfd)
 	disassemble = print_insn_little_powerpc;
       break;
 #endif
+#ifdef ARCH_propeller
+    case bfd_arch_propeller:
+      disassemble = print_insn_propeller;
+      break;
+#endif
 #ifdef ARCH_rs6000
     case bfd_arch_rs6000:
       if (bfd_get_mach (abfd) == bfd_mach_ppc_620)
@@ -620,6 +626,11 @@ disassemble_init_for_target (struct disassemble_info * info)
 #if defined (ARCH_powerpc) || defined (ARCH_rs6000)
       disassemble_init_powerpc (info);
       break;
+#endif
+#ifdef ARCH_propeller
+    case bfd_arch_propeller:
+	    info->disassembler_needs_relocs = TRUE;
+		break;
 #endif
     default:
       break;
