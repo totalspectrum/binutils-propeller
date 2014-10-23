@@ -7234,6 +7234,9 @@ subject, see the hardware manufacturer's manual.
 @ifset PPC
 * PPC-Dependent::               PowerPC Dependent Features
 @end ifset
+@ifset PROPELLER
+* Propeller-Dependent::         Propeller Dependent Features
+@end ifset
 @ifset RL78
 * RL78-Dependent::              RL78 Dependent Features
 @end ifset
