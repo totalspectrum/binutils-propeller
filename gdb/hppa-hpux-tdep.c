@@ -1,6 +1,6 @@
 /* Target-dependent code for HP-UX on PA-RISC.
 
-   Copyright (C) 2002-2014 Free Software Foundation, Inc.
+   Copyright (C) 2002-2015 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -1367,7 +1367,9 @@ hppa_hpux_supply_save_state (const struct regset *regset,
 static const struct regset hppa_hpux_regset =
 {
   NULL,
-  hppa_hpux_supply_save_state
+  hppa_hpux_supply_save_state,
+  NULL,
+  REGSET_VARIABLE_SIZE
 };
 
 static void

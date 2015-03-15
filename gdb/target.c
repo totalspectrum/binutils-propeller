@@ -1,6 +1,6 @@
 /* Select target systems and architectures at runtime for GDB.
 
-   Copyright (C) 1990-2014 Free Software Foundation, Inc.
+   Copyright (C) 1990-2015 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support.
 
@@ -526,6 +526,40 @@ target_supports_terminal_ours (void)
     }
 
   return 0;
+}
+
+/* Restore the terminal to its previous state (helper for
+   make_cleanup_restore_target_terminal). */
+
+static void
+cleanup_restore_target_terminal (void *arg)
+{
+  enum terminal_state *previous_state = arg;
+
+  switch (*previous_state)
+    {
+    case terminal_is_ours:
+      target_terminal_ours ();
+      break;
+    case terminal_is_ours_for_output:
+      target_terminal_ours_for_output ();
+      break;
+    case terminal_is_inferior:
+      target_terminal_inferior ();
+      break;
+    }
+}
+
+/* See target.h. */
+
+struct cleanup *
+make_cleanup_restore_target_terminal (void)
+{
+  enum terminal_state *ts = xmalloc (sizeof (*ts));
+
+  *ts = terminal_state;
+
+  return make_cleanup_dtor (cleanup_restore_target_terminal, ts, xfree);
 }
 
 static void
@@ -1139,7 +1173,7 @@ memory_xfer_partial_1 (struct target_ops *ops, enum target_object object,
     return TARGET_XFER_E_IO;
 
   if (!ptid_equal (inferior_ptid, null_ptid))
-    inf = find_inferior_pid (ptid_get_pid (inferior_ptid));
+    inf = find_inferior_ptid (inferior_ptid);
   else
     inf = NULL;
 
@@ -2615,7 +2649,7 @@ default_thread_address_space (struct target_ops *self, ptid_t ptid)
   struct inferior *inf;
 
   /* Fall-back to the "main" address space of the inferior.  */
-  inf = find_inferior_pid (ptid_get_pid (ptid));
+  inf = find_inferior_ptid (ptid);
 
   if (inf == NULL || inf->aspace == NULL)
     internal_error (__FILE__, __LINE__,
@@ -3355,10 +3389,18 @@ target_ranged_break_num_registers (void)
 
 /* See target.h.  */
 
-struct btrace_target_info *
-target_enable_btrace (ptid_t ptid)
+int
+target_supports_btrace (enum btrace_format format)
 {
-  return current_target.to_enable_btrace (&current_target, ptid);
+  return current_target.to_supports_btrace (&current_target, format);
+}
+
+/* See target.h.  */
+
+struct btrace_target_info *
+target_enable_btrace (ptid_t ptid, const struct btrace_config *conf)
+{
+  return current_target.to_enable_btrace (&current_target, ptid, conf);
 }
 
 /* See target.h.  */
@@ -3380,11 +3422,19 @@ target_teardown_btrace (struct btrace_target_info *btinfo)
 /* See target.h.  */
 
 enum btrace_error
-target_read_btrace (VEC (btrace_block_s) **btrace,
+target_read_btrace (struct btrace_data *btrace,
 		    struct btrace_target_info *btinfo,
 		    enum btrace_read_type type)
 {
   return current_target.to_read_btrace (&current_target, btrace, btinfo, type);
+}
+
+/* See target.h.  */
+
+const struct btrace_config *
+target_btrace_conf (const struct btrace_target_info *btinfo)
+{
+  return current_target.to_btrace_conf (&current_target, btinfo);
 }
 
 /* See target.h.  */

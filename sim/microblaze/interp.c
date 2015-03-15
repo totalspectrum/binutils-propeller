@@ -1,5 +1,5 @@
 /* Simulator for Xilinx MicroBlaze processor
-   Copyright 2009-2014 Free Software Foundation, Inc.
+   Copyright 2009-2015 Free Software Foundation, Inc.
 
    This file is part of GDB, the GNU debugger.
 
@@ -1019,6 +1019,7 @@ sim_do_command (SIM_DESC sd, const char *cmd)
 	  if ((simargv[1] == NULL) || (simargv[2] == NULL))
 	    {
 	      fprintf (stderr, "Error: missing argument to watch cmd.\n");
+	      freeargv (simargv);
 	      return;
 	    }
 
@@ -1062,6 +1063,8 @@ sim_do_command (SIM_DESC sd, const char *cmd)
 	  fprintf (stderr,"Error: \"%s\" is not a valid M.CORE simulator command.\n",
 		   cmd);
 	}
+
+      freeargv (simargv);
     }
   else
     {

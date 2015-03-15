@@ -1,5 +1,5 @@
 /* Simulator option handling.
-   Copyright (C) 1996-2014 Free Software Foundation, Inc.
+   Copyright (C) 1996-2015 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -993,7 +993,10 @@ sim_args_command (SIM_DESC sd, const char *cmd)
       sim_cpu *cpu;
 
       if (argv [0] == NULL)
-	return SIM_RC_OK; /* FIXME - perhaps help would be better */
+	{
+	  freeargv (argv);
+	  return SIM_RC_OK; /* FIXME - perhaps help would be better */
+	}
 
       /* First check for a cpu selector.  */
       {

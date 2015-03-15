@@ -1,7 +1,7 @@
 
 /* Internal type definitions for GDB.
 
-   Copyright (C) 1992-2014 Free Software Foundation, Inc.
+   Copyright (C) 1992-2015 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support, using pieces from other GDB modules.
 
@@ -183,15 +183,6 @@ enum type_code
     /* * Methods implemented in extension languages.  */
     TYPE_CODE_XMETHOD
   };
-
-/* * For now allow source to use TYPE_CODE_CLASS for C++ classes, as
-   an alias for TYPE_CODE_STRUCT.  This is for DWARF, which has a
-   distinct "class" attribute.  Perhaps we should actually have a
-   separate TYPE_CODE so that we can print "class" or "struct"
-   depending on what the debug info said.  It's not clear we should
-   bother.  */
-
-#define TYPE_CODE_CLASS TYPE_CODE_STRUCT
 
 /* * Some constants representing each bit field in the main_type.  See
    the bit-field-specific macros, below, for documentation of each
@@ -414,6 +405,7 @@ struct dynamic_prop
   {
     PROP_UNDEFINED, /* Not defined.  */
     PROP_CONST,     /* Constant.  */
+    PROP_ADDR_OFFSET, /* Address offset.  */
     PROP_LOCEXPR,   /* Location expression.  */
     PROP_LOCLIST    /* Location list.  */
   } kind;
@@ -447,7 +439,7 @@ enum field_loc_kind
 /* * A discriminant to determine which field in the
    main_type.type_specific union is being used, if any.
 
-   For types such as TYPE_CODE_FLT or TYPE_CODE_FUNC, the use of this
+   For types such as TYPE_CODE_FLT, the use of this
    discriminant is really redundant, as we know from the type code
    which field is going to be used.  As such, it would be possible to
    reduce the size of this enum in order to save a bit or two for
@@ -461,7 +453,9 @@ enum type_specific_kind
   TYPE_SPECIFIC_CPLUS_STUFF,
   TYPE_SPECIFIC_GNAT_STUFF,
   TYPE_SPECIFIC_FLOATFORMAT,
-  TYPE_SPECIFIC_FUNC
+  /* Note: This is used by TYPE_CODE_FUNC and TYPE_CODE_METHOD.  */
+  TYPE_SPECIFIC_FUNC,
+  TYPE_SPECIFIC_SELF_TYPE
 };
 
 /* * Main structure representing a type in GDB.
@@ -512,19 +506,6 @@ struct main_type
      at this location because it packs nicely here.  */
 
   short nfields;
-
-  /* * Field number of the virtual function table pointer in
-     VPTR_BASETYPE.  If -1, we were unable to find the virtual
-     function table pointer in initial symbol reading, and
-     get_vptr_fieldno should be called to find it if possible.
-     get_vptr_fieldno will update this field if possible.  Otherwise
-     the value is left at -1.
-
-     Unused if this type does not have virtual functions.
-
-     This field appears at this location because it packs nicely here.  */
-
-  short vptr_fieldno;
 
   /* * Name of this type, or NULL if none.
 
@@ -682,21 +663,6 @@ struct main_type
 
   } flds_bnds;
 
-  /* * For types with virtual functions (TYPE_CODE_STRUCT),
-     VPTR_BASETYPE is the base class which defined the virtual
-     function table pointer.
-
-     For types that are pointer to member types (TYPE_CODE_METHODPTR,
-     TYPE_CODE_MEMBERPTR), VPTR_BASETYPE is the type that this pointer
-     is a member of.
-
-     For method types (TYPE_CODE_METHOD), VPTR_BASETYPE is the aggregate
-     type that contains the method.
-
-     Unused otherwise.  */
-
-  struct type *vptr_basetype;
-
   /* * Slot to point to additional language-specific fields of this
      type.  */
 
@@ -720,9 +686,15 @@ struct main_type
 
     const struct floatformat **floatformat;
 
-    /* * For TYPE_CODE_FUNC types,  */
+    /* * For TYPE_CODE_FUNC and TYPE_CODE_METHOD types.  */
 
     struct func_type *func_stuff;
+
+    /* * For types that are pointer to member types (TYPE_CODE_METHODPTR,
+       TYPE_CODE_MEMBERPTR), SELF_TYPE is the type that this pointer
+       is a member of.  */
+
+    struct type *self_type;
   } type_specific;
 
   /* * Contains a location description value for the current type. Evaluating
@@ -813,6 +785,22 @@ struct cplus_struct_type
 
     short n_baseclasses;
 
+    /* * Field number of the virtual function table pointer in VPTR_BASETYPE.
+       All access to this field must be through TYPE_VPTR_FIELDNO as one
+       thing it does is check whether the field has been initialized.
+       Initially TYPE_RAW_CPLUS_SPECIFIC has the value of cplus_struct_default,
+       which for portability reasons doesn't initialize this field.
+       TYPE_VPTR_FIELDNO returns -1 for this case.
+
+       If -1, we were unable to find the virtual function table pointer in
+       initial symbol reading, and get_vptr_fieldno should be called to find
+       it if possible.  get_vptr_fieldno will update this field if possible.
+       Otherwise the value is left at -1.
+
+       Unused if this type does not have virtual functions.  */
+
+    short vptr_fieldno;
+
     /* * Number of methods with unique names.  All overloaded methods
        with the same name count only once.  */
 
@@ -833,6 +821,10 @@ struct cplus_struct_type
     /* * Non-zero if this type came from a Java CU.  */
 
     unsigned int is_java : 1;
+
+    /* * The base class which defined the virtual function table pointer.  */
+
+    struct type *vptr_basetype;
 
     /* * For derived classes, the number of base classes is given by
        n_baseclasses and virtual_field_bits is a bit vector containing
@@ -912,7 +904,7 @@ struct cplus_struct_type
 	       
 	       (This comment used to say "The return value of the
 	       method", but that's wrong.  The function type is
-	       expected here, i.e. something with TYPE_CODE_FUNC, and
+	       expected here, i.e. something with TYPE_CODE_METHOD, and
 	       *not* the return-value type).  */
 
 	    struct type *type;
@@ -1022,15 +1014,22 @@ struct gnat_aux_type
     struct type* descriptive_type;
   };
 
-/* * For TYPE_CODE_FUNC types.  */
+/* * For TYPE_CODE_FUNC and TYPE_CODE_METHOD types.  */
 
 struct func_type
   {
     /* * The calling convention for targets supporting multiple ABIs.
        Right now this is only fetched from the Dwarf-2
-       DW_AT_calling_convention attribute.  */
+       DW_AT_calling_convention attribute.  The value is one of the
+       DW_CC enum dwarf_calling_convention constants.  */
 
-    unsigned calling_convention;
+    unsigned calling_convention : 8;
+
+    /* * Whether this function normally returns to its caller.  It is
+       set from the DW_AT_noreturn attribute if set on the
+       DW_TAG_subprogram.  */
+
+    unsigned int is_noreturn : 1;
 
     /* * Only those DW_TAG_GNU_call_site's in this function that have
        DW_AT_GNU_tail_call set are linked in this list.  Function
@@ -1040,6 +1039,11 @@ struct func_type
        DW_TAG_GNU_call_site's exist in such function. */
 
     struct call_site *tail_call_list;
+
+    /* * For method types (TYPE_CODE_METHOD), the aggregate type that
+       contains the method.  */
+
+    struct type *self_type;
   };
 
 /* struct call_site_parameter can be referenced in callees by several ways.  */
@@ -1233,13 +1237,21 @@ extern void allocate_gnat_aux_type (struct type *);
 
 /* C++ */
 
-#define TYPE_VPTR_BASETYPE(thistype) TYPE_MAIN_TYPE(thistype)->vptr_basetype
-#define TYPE_DOMAIN_TYPE(thistype) TYPE_MAIN_TYPE(thistype)->vptr_basetype
-#define TYPE_VPTR_FIELDNO(thistype) TYPE_MAIN_TYPE(thistype)->vptr_fieldno
+#define TYPE_SELF_TYPE(thistype) internal_type_self_type (thistype)
+/* Do not call this, use TYPE_SELF_TYPE.  */
+extern struct type *internal_type_self_type (struct type *);
+extern void set_type_self_type (struct type *, struct type *);
+
+extern int internal_type_vptr_fieldno (struct type *);
+extern void set_type_vptr_fieldno (struct type *, int);
+extern struct type *internal_type_vptr_basetype (struct type *);
+extern void set_type_vptr_basetype (struct type *, struct type *);
+#define TYPE_VPTR_FIELDNO(thistype) internal_type_vptr_fieldno (thistype)
+#define TYPE_VPTR_BASETYPE(thistype) internal_type_vptr_basetype (thistype)
+
 #define TYPE_NFN_FIELDS(thistype) TYPE_CPLUS_SPECIFIC(thistype)->nfn_fields
 #define TYPE_SPECIFIC_FIELD(thistype) \
   TYPE_MAIN_TYPE(thistype)->type_specific_field
-#define	TYPE_TYPE_SPECIFIC(thistype) TYPE_MAIN_TYPE(thistype)->type_specific
 /* We need this tap-dance with the TYPE_RAW_SPECIFIC because of the case
    where we're trying to print an Ada array using the C language.
    In that case, there is no "cplus_stuff", but the C language assumes
@@ -1254,6 +1266,7 @@ extern void allocate_gnat_aux_type (struct type *);
 #define TYPE_GNAT_SPECIFIC(thistype) TYPE_MAIN_TYPE(thistype)->type_specific.gnat_stuff
 #define TYPE_DESCRIPTIVE_TYPE(thistype) TYPE_GNAT_SPECIFIC(thistype)->descriptive_type
 #define TYPE_CALLING_CONVENTION(thistype) TYPE_MAIN_TYPE(thistype)->type_specific.func_stuff->calling_convention
+#define TYPE_NO_RETURN(thistype) TYPE_MAIN_TYPE(thistype)->type_specific.func_stuff->is_noreturn
 #define TYPE_TAIL_CALL_LIST(thistype) TYPE_MAIN_TYPE(thistype)->type_specific.func_stuff->tail_call_list
 #define TYPE_BASECLASS(thistype,index) TYPE_FIELD_TYPE(thistype, index)
 #define TYPE_N_BASECLASSES(thistype) TYPE_CPLUS_SPECIFIC(thistype)->n_baseclasses
@@ -1641,6 +1654,8 @@ extern struct type *make_cv_type (int, int, struct type *, struct type **);
 
 extern struct type *make_restrict_type (struct type *);
 
+extern struct type *make_unqualified_type (struct type *);
+
 extern void replace_type (struct type *, struct type *);
 
 extern int address_space_name_to_int (struct gdbarch *, char *);
@@ -1654,7 +1669,7 @@ extern struct type *lookup_memberptr_type (struct type *, struct type *);
 
 extern struct type *lookup_methodptr_type (struct type *);
 
-extern void smash_to_method_type (struct type *type, struct type *domain,
+extern void smash_to_method_type (struct type *type, struct type *self_type,
 				  struct type *to_type, struct field *args,
 				  int nargs, int varargs);
 
@@ -1831,6 +1846,8 @@ extern int can_dereference (struct type *);
 extern int is_integral_type (struct type *);
 
 extern int is_scalar_type_recursive (struct type *);
+
+extern int class_or_union_p (const struct type *);
 
 extern void maintenance_print_type (char *, int);
 

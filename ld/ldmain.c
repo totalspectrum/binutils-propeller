@@ -1,5 +1,5 @@
 /* Main program of GNU linker.
-   Copyright (C) 1991-2014 Free Software Foundation, Inc.
+   Copyright (C) 1991-2015 Free Software Foundation, Inc.
    Written by Steve Chamberlain steve@cygnus.com
 
    This file is part of the GNU Binutils.
@@ -41,7 +41,6 @@
 #ifdef ENABLE_PLUGINS
 #include "plugin.h"
 #include "plugin-api.h"
-#include "libbfd.h"
 #endif /* ENABLE_PLUGINS */
 
 /* Somewhere above, sys/stat.h got included.  */
@@ -297,6 +296,7 @@ main (int argc, char **argv)
   config.maxpagesize = bfd_emul_get_maxpagesize (default_target);
   config.commonpagesize = bfd_emul_get_commonpagesize (default_target);
   lang_init ();
+  ldexp_init ();
   ldemul_before_parse ();
   lang_has_input_file = FALSE;
   parse_args (argc, argv);
@@ -440,6 +440,7 @@ main (int argc, char **argv)
     fprintf (stderr, "lookup = %p val %lx\n", h, h ? h->u.def.value : 1);
   }
 #endif
+  ldexp_finish ();
   lang_finish ();
 
   /* Even if we're producing relocatable output, some non-fatal errors should
@@ -788,30 +789,14 @@ add_archive_element (struct bfd_link_info *info,
      BFD, but we still want to output the original BFD filename.  */
   orig_input = *input;
 #ifdef ENABLE_PLUGINS
-  if (plugin_active_plugins_p () && !no_more_claiming)
+  if (link_info.lto_plugin_active && !no_more_claiming)
     {
       /* We must offer this archive member to the plugins to claim.  */
-      const char *filename = (bfd_my_archive (abfd) != NULL
-			      ? bfd_my_archive (abfd)->filename : abfd->filename);
-      int fd = open (filename, O_RDONLY | O_BINARY);
-      if (fd >= 0)
+      plugin_maybe_claim (input);
+      if (input->flags.claimed)
 	{
-	  struct ld_plugin_input_file file;
-
-	  /* Offset and filesize must refer to the individual archive
-	     member, not the whole file, and must exclude the header.
-	     Fortunately for us, that is how the data is stored in the
-	     origin field of the bfd and in the arelt_data.  */
-	  file.name = filename;
-	  file.offset = abfd->origin;
-	  file.filesize = arelt_size (abfd);
-	  file.fd = fd;
-	  plugin_maybe_claim (&file, input);
-	  if (input->flags.claimed)
-	    {
-	      input->flags.claim_archive = TRUE;
-	      *subsbfd = input->the_bfd;
-	    }
+	  input->flags.claim_archive = TRUE;
+	  *subsbfd = input->the_bfd;
 	}
     }
 #endif /* ENABLE_PLUGINS */

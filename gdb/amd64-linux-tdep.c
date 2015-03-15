@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux x86-64.
 
-   Copyright (C) 2001-2014 Free Software Foundation, Inc.
+   Copyright (C) 2001-2015 Free Software Foundation, Inc.
    Contributed by Jiri Smid, SuSE Labs.
 
    This file is part of GDB.
@@ -1639,7 +1639,7 @@ amd64_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
 
   cb (".reg", 27 * 8, &i386_gregset, NULL, cb_data);
   cb (".reg2", 512, &amd64_fpregset, NULL, cb_data);
-  cb (".reg-xstate",  regcache ? X86_XSTATE_MAX_SIZE : 0,
+  cb (".reg-xstate",  X86_XSTATE_SIZE (tdep->xcr0),
       &amd64_linux_xstateregset, "XSAVE extended state", cb_data);
 }
 
@@ -1663,7 +1663,7 @@ amd64_linux_init_abi_common(struct gdbarch_info info, struct gdbarch *gdbarch)
   tdep->register_reggroup_p = amd64_linux_register_reggroup_p;
 
   /* Functions for 'catch syscall'.  */
-  set_xml_syscall_file_name (XML_SYSCALL_FILENAME_AMD64);
+  set_xml_syscall_file_name (gdbarch, XML_SYSCALL_FILENAME_AMD64);
   set_gdbarch_get_syscall_number (gdbarch,
                                   amd64_linux_get_syscall_number);
 

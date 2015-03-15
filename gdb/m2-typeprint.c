@@ -1,5 +1,5 @@
 /* Support for printing Modula 2 types for GDB, the GNU debugger.
-   Copyright (C) 1986-2014 Free Software Foundation, Inc.
+   Copyright (C) 1986-2015 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -188,8 +188,12 @@ m2_range (struct type *type, struct ui_file *stream, int show,
 	  int level, const struct type_print_options *flags)
 {
   if (TYPE_HIGH_BOUND (type) == TYPE_LOW_BOUND (type))
-    m2_print_type (TYPE_DOMAIN_TYPE (type), "", stream, show, level,
-		   flags);
+    {
+      /* FIXME: TYPE_TARGET_TYPE used to be TYPE_DOMAIN_TYPE but that was
+	 wrong.  Not sure if TYPE_TARGET_TYPE is correct though.  */
+      m2_print_type (TYPE_TARGET_TYPE (type), "", stream, show, level,
+		     flags);
+    }
   else
     {
       struct type *target = TYPE_TARGET_TYPE (type);

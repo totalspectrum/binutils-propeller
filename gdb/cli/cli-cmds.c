@@ -1,6 +1,6 @@
 /* GDB CLI commands.
 
-   Copyright (C) 2000-2014 Free Software Foundation, Inc.
+   Copyright (C) 2000-2015 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -236,7 +236,8 @@ help_command (char *command, int from_tty)
   help_cmd (command, gdb_stdout);
 }
 
-/* The "complete" command is used by Emacs to implement completion.  */
+/* Note: The "complete" command is used by Emacs to implement completion.
+   [Is that why this function writes output with *_unfiltered?]  */
 
 static void
 complete_command (char *arg, int from_tty)
@@ -246,6 +247,18 @@ complete_command (char *arg, int from_tty)
   VEC (char_ptr) *completions;
 
   dont_repeat ();
+
+  if (max_completions == 0)
+    {
+      /* Only print this for non-mi frontends.  An MI frontend may not
+	 be able to handle this.  */
+      if (!ui_out_is_mi_like_p (current_uiout))
+	{
+	  printf_unfiltered (_("max-completions is zero,"
+			       " completion is disabled.\n"));
+	}
+      return;
+    }
 
   if (arg == NULL)
     arg = "";
@@ -293,6 +306,15 @@ complete_command (char *arg, int from_tty)
 
       xfree (prev);
       VEC_free (char_ptr, completions);
+
+      if (size == max_completions)
+	{
+	  /* ARG_PREFIX and POINT are included in the output so that emacs
+	     will include the message in the output.  */
+	  printf_unfiltered (_("%s%s %s\n"),
+			     arg_prefix, point,
+			     get_max_completions_reached_message ());
+	}
     }
 }
 
@@ -818,7 +840,7 @@ edit_command (char *arg, int from_tty)
 	    error (_("No source file for address %s."),
 		   paddress (get_current_arch (), sal.pc));
 
-	  gdbarch = get_objfile_arch (sal.symtab->objfile);
+	  gdbarch = get_objfile_arch (SYMTAB_OBJFILE (sal.symtab));
           sym = find_pc_function (sal.pc);
           if (sym)
 	    printf_filtered ("%s is in %s (%s:%d).\n",
@@ -1003,7 +1025,7 @@ list_command (char *arg, int from_tty)
 	error (_("No source file for address %s."),
 	       paddress (get_current_arch (), sal.pc));
 
-      gdbarch = get_objfile_arch (sal.symtab->objfile);
+      gdbarch = get_objfile_arch (SYMTAB_OBJFILE (sal.symtab));
       sym = find_pc_function (sal.pc);
       if (sym)
 	printf_filtered ("%s is in %s (%s:%d).\n",
@@ -1486,21 +1508,23 @@ compare_symtabs (const void *a, const void *b)
 {
   const struct symtab_and_line *sala = a;
   const struct symtab_and_line *salb = b;
+  const char *dira = SYMTAB_DIRNAME (sala->symtab);
+  const char *dirb = SYMTAB_DIRNAME (salb->symtab);
   int r;
 
-  if (!sala->symtab->dirname)
+  if (dira == NULL)
     {
-      if (salb->symtab->dirname)
+      if (dirb != NULL)
 	return -1;
     }
-  else if (!salb->symtab->dirname)
+  else if (dirb == NULL)
     {
-      if (sala->symtab->dirname)
+      if (dira != NULL)
 	return 1;
     }
   else
     {
-      r = filename_cmp (sala->symtab->dirname, salb->symtab->dirname);
+      r = filename_cmp (dira, dirb);
       if (r)
 	return r;
     }

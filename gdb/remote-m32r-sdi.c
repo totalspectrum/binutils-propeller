@@ -1,6 +1,6 @@
 /* Remote debugging interface for M32R/SDI.
 
-   Copyright (C) 2003-2014 Free Software Foundation, Inc.
+   Copyright (C) 2003-2015 Free Software Foundation, Inc.
 
    Contributed by Renesas Technology Co.
    Written by Kei Sakamoto <sakamoto.kei@renesas.com>.
@@ -40,7 +40,7 @@
 #include <time.h>
 #include "gdb_bfd.h"
 #include "cli/cli-utils.h"
-
+#include "symfile.h"
 #include "serial.h"
 
 /* Descriptor for I/O to remote machine.  */

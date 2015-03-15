@@ -1,5 +1,5 @@
 /* Plugin control for the GNU linker.
-   Copyright (C) 2010-2014 Free Software Foundation, Inc.
+   Copyright (C) 2010-2015 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -21,6 +21,7 @@
 #include "sysdep.h"
 #include "libiberty.h"
 #include "bfd.h"
+#include "libbfd.h"
 #include "bfdlink.h"
 #include "bfdver.h"
 #include "ld.h"
@@ -32,6 +33,22 @@
 #include "plugin.h"
 #include "plugin-api.h"
 #include "elf-bfd.h"
+#if HAVE_MMAP
+# include <sys/mman.h>
+# ifndef MAP_FAILED
+#  define MAP_FAILED ((void *) -1)
+# endif
+# ifndef PROT_READ
+#  define PROT_READ 0
+# endif
+# ifndef MAP_PRIVATE
+#  define MAP_PRIVATE 0
+# endif
+#endif
+#include <errno.h>
+#if !(defined(errno) || defined(_MSC_VER) && defined(_INC_ERRNO))
+extern int errno;
+#endif
 #if !defined (HAVE_DLFCN_H) && defined (HAVE_WINDOWS_H)
 #include <windows.h>
 #endif
@@ -71,6 +88,25 @@ typedef struct plugin
   /* TRUE if the cleanup handlers have been called.  */
   bfd_boolean cleanup_done;
 } plugin_t;
+
+typedef struct view_buffer
+{
+  char *addr;
+  size_t filesize;
+  off_t offset;
+} view_buffer_t;
+
+/* The internal version of struct ld_plugin_input_file with a BFD
+   pointer.  */
+typedef struct plugin_input_file
+{
+  bfd *abfd;
+  view_buffer_t view_buffer;
+  char *name;
+  int fd;
+  off_t offset;
+  off_t filesize;
+} plugin_input_file_t;
 
 /* The master list of all plugins.  */
 static plugin_t *plugins_list = NULL;
@@ -114,6 +150,7 @@ static const enum ld_plugin_tag tv_header_tags[] =
   LDPT_REGISTER_CLEANUP_HOOK,
   LDPT_ADD_SYMBOLS,
   LDPT_GET_INPUT_FILE,
+  LDPT_GET_VIEW,
   LDPT_RELEASE_INPUT_FILE,
   LDPT_GET_SYMBOLS,
   LDPT_GET_SYMBOLS_V2,
@@ -240,8 +277,12 @@ plugin_opt_plugin_arg (const char *arg)
   return 0;
 }
 
-/* Create a dummy BFD.  */
-bfd *
+/* Generate a dummy BFD to represent an IR file, for any callers of
+   plugin_call_claim_file to use as the handle in the ld_plugin_input_file
+   struct that they build to pass in.  The BFD is initially writable, so
+   that symbols can be added to it; it must be made readable after the
+   add_symbols hook has been called so that it can be read when linking.  */
+static bfd *
 plugin_get_ir_dummy_bfd (const char *name, bfd *srctemplate)
 {
   bfd *abfd;
@@ -413,7 +454,8 @@ static enum ld_plugin_status
 add_symbols (void *handle, int nsyms, const struct ld_plugin_symbol *syms)
 {
   asymbol **symptrs;
-  bfd *abfd = handle;
+  plugin_input_file_t *input = handle;
+  bfd *abfd = input->abfd;
   int n;
 
   ASSERT (called_plugin);
@@ -436,19 +478,97 @@ add_symbols (void *handle, int nsyms, const struct ld_plugin_symbol *syms)
 /* Get the input file information with an open (possibly re-opened)
    file descriptor.  */
 static enum ld_plugin_status
-get_input_file (const void *handle ATTRIBUTE_UNUSED,
-                struct ld_plugin_input_file *file ATTRIBUTE_UNUSED)
+get_input_file (const void *handle, struct ld_plugin_input_file *file)
 {
+  const plugin_input_file_t *input = handle;
+
   ASSERT (called_plugin);
-  return LDPS_ERR;
+
+  file->name = input->name;
+  file->offset = input->offset;
+  file->filesize = input->filesize;
+  file->handle = (void *) handle;
+
+  return LDPS_OK;
+}
+
+/* Get view of the input file.  */
+static enum ld_plugin_status
+get_view (const void *handle, const void **viewp)
+{
+  plugin_input_file_t *input = (plugin_input_file_t *) handle;
+  char *buffer;
+  size_t size = input->filesize;
+
+  ASSERT (called_plugin);
+
+  /* FIXME: einfo should support %lld.  */
+  if ((off_t) size != input->filesize)
+    einfo (_("%P%F: unsupported input file size: %s (%ld bytes)\n"),
+	   input->name, (long) input->filesize);
+
+  /* Check the cached view buffer.  */
+  if (input->view_buffer.addr != NULL
+      && input->view_buffer.filesize == size
+      && input->view_buffer.offset == input->offset)
+    {
+      *viewp = input->view_buffer.addr;
+      return LDPS_OK;
+    }
+
+  input->view_buffer.filesize = size;
+  input->view_buffer.offset = input->offset;
+
+#if HAVE_MMAP
+  buffer = mmap (NULL, size, PROT_READ, MAP_PRIVATE, input->fd,
+		 input->offset);
+  if (buffer == MAP_FAILED)
+#endif
+    {
+      char *p;
+
+      if (lseek (input->fd, input->offset, SEEK_SET) < 0)
+	return LDPS_ERR;
+
+      buffer = bfd_alloc (input->abfd, size);
+      if (buffer == NULL)
+	return LDPS_ERR;
+
+      p = buffer;
+      do
+	{
+	  ssize_t got = read (input->fd, p, size);
+	  if (got == 0)
+	    break;
+	  else if (got > 0)
+	    {
+	      p += got;
+	      size -= got;
+	    }
+	  else if (errno != EINTR)
+	    return LDPS_ERR;
+	}
+      while (size > 0);
+    }
+
+  input->view_buffer.addr = buffer;
+  *viewp = buffer;
+
+  return LDPS_OK;
 }
 
 /* Release the input file.  */
 static enum ld_plugin_status
-release_input_file (const void *handle ATTRIBUTE_UNUSED)
+release_input_file (const void *handle)
 {
+  plugin_input_file_t *input = (plugin_input_file_t *) handle;
   ASSERT (called_plugin);
-  return LDPS_ERR;
+  if (input->fd != -1)
+    {
+      close (input->fd);
+      input->fd = -1;
+    }
+  return LDPS_OK;
 }
 
 /* Return TRUE if a defined symbol might be reachable from outside the
@@ -501,7 +621,8 @@ static enum ld_plugin_status
 get_symbols (const void *handle, int nsyms, struct ld_plugin_symbol *syms,
 	     int def_ironly_exp)
 {
-  const bfd *abfd = handle;
+  const plugin_input_file_t *input = handle;
+  const bfd *abfd = (const bfd *) input->abfd;
   int n;
 
   ASSERT (called_plugin);
@@ -731,6 +852,9 @@ set_tv_header (struct ld_plugin_tv *tv)
 	case LDPT_GET_INPUT_FILE:
 	  TVU(get_input_file) = get_input_file;
 	  break;
+	case LDPT_GET_VIEW:
+	  TVU(get_view) = get_view;
+	  break;
 	case LDPT_RELEASE_INPUT_FILE:
 	  TVU(release_input_file) = release_input_file;
 	  break;
@@ -772,14 +896,6 @@ set_tv_plugin_args (plugin_t *plugin, struct ld_plugin_tv *tv)
     }
   tv->tv_tag = LDPT_NULL;
   tv->tv_u.tv_val = 0;
-}
-
-/* Return true if any plugins are active this run.  Only valid
-   after options have been processed.  */
-bfd_boolean
-plugin_active_plugins_p (void)
-{
-  return plugins_list != NULL;
 }
 
 /* Load up and initialise all plugins after argument parsing.  */
@@ -865,38 +981,117 @@ plugin_call_claim_file (const struct ld_plugin_input_file *file, int *claimed)
   return plugin_error_p () ? -1 : 0;
 }
 
+/* Duplicates a character string with memory attached to ABFD.  */
+
+static char *
+plugin_strdup (bfd *abfd, const char *str)
+{
+  size_t strlength;
+  char *copy;
+  strlength = strlen (str) + 1;
+  copy = bfd_alloc (abfd, strlength);
+  if (copy == NULL)
+    einfo (_("%P%F: plugin_strdup failed to allocate memory: %s\n"),
+	   bfd_get_error ());
+  memcpy (copy, str, strlength);
+  return copy;
+}
+
 void
-plugin_maybe_claim (struct ld_plugin_input_file *file,
-		    lang_input_statement_type *entry)
+plugin_maybe_claim (lang_input_statement_type *entry)
 {
   int claimed = 0;
+  plugin_input_file_t *input;
+  off_t offset, filesize;
+  struct ld_plugin_input_file file;
+  bfd *abfd;
+  bfd *ibfd = entry->the_bfd;
+  bfd_boolean inarchive = bfd_my_archive (ibfd) != NULL;
+  const char *name
+    = inarchive ? bfd_my_archive (ibfd)->filename : ibfd->filename;
+  int fd = open (name, O_RDONLY | O_BINARY);
+
+  if (fd < 0)
+    return;
 
   /* We create a dummy BFD, initially empty, to house whatever symbols
      the plugin may want to add.  */
-  file->handle = plugin_get_ir_dummy_bfd (entry->the_bfd->filename,
-					  entry->the_bfd);
-  if (plugin_call_claim_file (file, &claimed))
+  abfd = plugin_get_ir_dummy_bfd (ibfd->filename, ibfd);
+
+  input = bfd_alloc (abfd, sizeof (*input));
+  if (input == NULL)
+    einfo (_("%P%F: plugin failed to allocate memory for input: %s\n"),
+	   bfd_get_error ());
+
+  if (inarchive)
+    {
+      /* Offset and filesize must refer to the individual archive
+	 member, not the whole file, and must exclude the header.
+	 Fortunately for us, that is how the data is stored in the
+	 origin field of the bfd and in the arelt_data.  */
+      offset = ibfd->origin;
+      filesize = arelt_size (ibfd);
+    }
+  else
+    {
+      offset = 0;
+      filesize = lseek (fd, 0, SEEK_END);
+
+      /* We must copy filename attached to ibfd if it is not an archive
+	 member since it may be freed by bfd_close below.  */
+      name = plugin_strdup (abfd, name);
+    }
+
+  file.name = name;
+  file.offset = offset;
+  file.filesize = filesize;
+  file.fd = fd;
+  file.handle = input;
+
+  input->abfd = abfd;
+  input->view_buffer.addr = NULL;
+  input->view_buffer.filesize = 0;
+  input->view_buffer.offset = 0;
+  input->fd = fd;
+  input->offset = offset;
+  input->filesize = filesize;
+  input->name = plugin_strdup (abfd, ibfd->filename);
+
+  if (plugin_call_claim_file (&file, &claimed))
     einfo (_("%P%F: %s: plugin reported error claiming file\n"),
 	   plugin_error_plugin ());
-  /* fd belongs to us, not the plugin; but we don't need it.  */
-  close (file->fd);
+
+  if (input->fd != -1 && ibfd->format == bfd_object)
+    {
+      /* FIXME: fd belongs to us, not the plugin.  IR for GCC plugin,
+	 which doesn't need fd after plugin_call_claim_file, is
+	 stored in bfd_object file.  Since GCC plugin before GCC 5
+	 doesn't call release_input_file, we close it here.  IR for
+	 LLVM plugin, which needs fd after plugin_call_claim_file and
+	 calls release_input_file after it is done, is stored in
+	 non-bfd_object file.  This scheme doesn't work when a plugin
+	 needs fd and its IR is stored in bfd_object file.  */
+      close (fd);
+      input->fd = -1;
+    }
+
   if (claimed)
     {
       /* Discard the real file's BFD and substitute the dummy one.  */
 
       /* BFD archive handling caches elements so we can't call
 	 bfd_close for archives.  */
-      if (entry->the_bfd->my_archive == NULL)
-	bfd_close (entry->the_bfd);
-      entry->the_bfd = file->handle;
+      if (!inarchive)
+	bfd_close (ibfd);
+      bfd_make_readable (abfd);
+      entry->the_bfd = abfd;
       entry->flags.claimed = TRUE;
-      bfd_make_readable (entry->the_bfd);
     }
   else
     {
       /* If plugin didn't claim the file, we don't need the dummy bfd.
 	 Can't avoid speculatively creating it, alas.  */
-      bfd_close_all_done (file->handle);
+      bfd_close_all_done (abfd);
       entry->flags.claimed = FALSE;
     }
 }

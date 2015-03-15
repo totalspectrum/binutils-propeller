@@ -1,6 +1,6 @@
 /* Generic symbol file reading for the GNU debugger, GDB.
 
-   Copyright (C) 1990-2014 Free Software Foundation, Inc.
+   Copyright (C) 1990-2015 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support, using pieces from other GDB modules.
 
@@ -1591,7 +1591,6 @@ find_separate_debug_file_by_debuglink (struct objfile *objfile)
 
   if (debugfile == NULL)
     {
-#ifdef HAVE_LSTAT
       /* For PR gdb/9538, try again with realpath (if different from the
 	 original).  */
 
@@ -1618,7 +1617,6 @@ find_separate_debug_file_by_debuglink (struct objfile *objfile)
 		}
 	    }
 	}
-#endif  /* HAVE_LSTAT  */
     }
 
   do_cleanups (cleanups);
@@ -2641,7 +2639,7 @@ reread_symbols (void)
 	  objfile->psymbol_cache = psymbol_bcache_init ();
 	  obstack_free (&objfile->objfile_obstack, 0);
 	  objfile->sections = NULL;
-	  objfile->symtabs = NULL;
+	  objfile->compunit_symtabs = NULL;
 	  objfile->psymtabs = NULL;
 	  objfile->psymtabs_addrmap = NULL;
 	  objfile->free_psymtabs = NULL;
@@ -2918,38 +2916,20 @@ deduce_language_from_filename (const char *filename)
   return language_unknown;
 }
 
-/* allocate_symtab:
-
-   Allocate and partly initialize a new symbol table.  Return a pointer
-   to it.  error() if no space.
-
-   Caller must set these fields:
-   LINETABLE(symtab)
-   symtab->blockvector
-   symtab->dirname
-   symtab->free_code
-   symtab->free_ptr
- */
+/* Allocate and initialize a new symbol table.
+   CUST is from the result of allocate_compunit_symtab.  */
 
 struct symtab *
-allocate_symtab (const char *filename, struct objfile *objfile)
+allocate_symtab (struct compunit_symtab *cust, const char *filename)
 {
-  struct symtab *symtab;
+  struct objfile *objfile = cust->objfile;
+  struct symtab *symtab
+    = OBSTACK_ZALLOC (&objfile->objfile_obstack, struct symtab);
 
-  symtab = (struct symtab *)
-    obstack_alloc (&objfile->objfile_obstack, sizeof (struct symtab));
-  memset (symtab, 0, sizeof (*symtab));
   symtab->filename = bcache (filename, strlen (filename) + 1,
 			     objfile->per_bfd->filename_cache);
   symtab->fullname = NULL;
   symtab->language = deduce_language_from_filename (filename);
-  symtab->debugformat = "unknown";
-
-  /* Hook it to the objfile it comes from.  */
-
-  symtab->objfile = objfile;
-  symtab->next = objfile->symtabs;
-  objfile->symtabs = symtab;
 
   /* This can be very verbose with lots of headers.
      Only print at higher debug levels.  */
@@ -2973,7 +2953,64 @@ allocate_symtab (const char *filename, struct objfile *objfile)
 			  host_address_to_string (symtab), filename);
     }
 
-  return (symtab);
+  /* Add it to CUST's list of symtabs.  */
+  if (cust->filetabs == NULL)
+    {
+      cust->filetabs = symtab;
+      cust->last_filetab = symtab;
+    }
+  else
+    {
+      cust->last_filetab->next = symtab;
+      cust->last_filetab = symtab;
+    }
+
+  /* Backlink to the containing compunit symtab.  */
+  symtab->compunit_symtab = cust;
+
+  return symtab;
+}
+
+/* Allocate and initialize a new compunit.
+   NAME is the name of the main source file, if there is one, or some
+   descriptive text if there are no source files.  */
+
+struct compunit_symtab *
+allocate_compunit_symtab (struct objfile *objfile, const char *name)
+{
+  struct compunit_symtab *cu = OBSTACK_ZALLOC (&objfile->objfile_obstack,
+					       struct compunit_symtab);
+  const char *saved_name;
+
+  cu->objfile = objfile;
+
+  /* The name we record here is only for display/debugging purposes.
+     Just save the basename to avoid path issues (too long for display,
+     relative vs absolute, etc.).  */
+  saved_name = lbasename (name);
+  cu->name = obstack_copy0 (&objfile->objfile_obstack, saved_name,
+			    strlen (saved_name));
+
+  COMPUNIT_DEBUGFORMAT (cu) = "unknown";
+
+  if (symtab_create_debug)
+    {
+      fprintf_unfiltered (gdb_stdlog,
+			  "Created compunit symtab %s for %s.\n",
+			  host_address_to_string (cu),
+			  cu->name);
+    }
+
+  return cu;
+}
+
+/* Hook CU to the objfile it comes from.  */
+
+void
+add_compunit_symtab_to_objfile (struct compunit_symtab *cu)
+{
+  cu->next = cu->objfile->compunit_symtabs;
+  cu->objfile->compunit_symtabs = cu;
 }
 
 
@@ -2991,8 +3028,6 @@ clear_symtab_users (int add_flags)
   clear_current_source_symtab_and_line ();
 
   clear_displays ();
-  if ((add_flags & SYMFILE_DEFER_BP_RESET) == 0)
-    breakpoint_re_set ();
   clear_last_displayed_sal ();
   clear_pc_function_cache ();
   observer_notify_new_objfile (NULL);
@@ -3006,6 +3041,10 @@ clear_symtab_users (int add_flags)
   /* Varobj may refer to old symbols, perform a cleanup.  */
   varobj_invalidate ();
 
+  /* Now that the various caches have been cleared, we can re_set
+     our breakpoints without risking it using stale data.  */
+  if ((add_flags & SYMFILE_DEFER_BP_RESET) == 0)
+    breakpoint_re_set ();
 }
 
 static void
@@ -3402,7 +3441,7 @@ static void
 unmap_overlay_command (char *args, int from_tty)
 {
   struct objfile *objfile;
-  struct obj_section *sec;
+  struct obj_section *sec = NULL;
 
   if (!overlay_debugging)
     error (_("Overlay debugging not enabled.  "
@@ -3902,6 +3941,7 @@ symfile_free_objfile (struct objfile *objfile)
 void
 expand_symtabs_matching (expand_symtabs_file_matcher_ftype *file_matcher,
 			 expand_symtabs_symbol_matcher_ftype *symbol_matcher,
+			 expand_symtabs_exp_notify_ftype *expansion_notify,
 			 enum search_domain kind,
 			 void *data)
 {
@@ -3911,7 +3951,8 @@ expand_symtabs_matching (expand_symtabs_file_matcher_ftype *file_matcher,
   {
     if (objfile->sf)
       objfile->sf->qf->expand_symtabs_matching (objfile, file_matcher,
-						symbol_matcher, kind,
+						symbol_matcher,
+						expansion_notify, kind,
 						data);
   }
 }

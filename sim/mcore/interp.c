@@ -1,5 +1,5 @@
 /* Simulator for Motorola's MCore processor
-   Copyright (C) 1999-2014 Free Software Foundation, Inc.
+   Copyright (C) 1999-2015 Free Software Foundation, Inc.
    Contributed by Cygnus Solutions.
 
 This file is part of GDB, the GNU debugger.
@@ -2143,6 +2143,7 @@ sim_do_command (sd, cmd)
 	  if ((simargv[1] == NULL) || (simargv[2] == NULL))
 	    {
 	      fprintf (stderr, "Error: missing argument to watch cmd.\n");
+	      freeargv (simargv);
 	      return;
 	    }
 	  
@@ -2187,6 +2188,8 @@ sim_do_command (sd, cmd)
 	  fprintf (stderr,"Error: \"%s\" is not a valid M.CORE simulator command.\n",
 		   cmd);
 	}
+
+      freeargv (simargv);
     }
   else
     {

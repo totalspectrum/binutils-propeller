@@ -1,6 +1,6 @@
 /* Python interface to values.
 
-   Copyright (C) 2008-2014 Free Software Foundation, Inc.
+   Copyright (C) 2008-2015 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -302,7 +302,7 @@ valpy_get_dynamic_type (PyObject *self, void *closure)
 
       if (((TYPE_CODE (type) == TYPE_CODE_PTR)
 	   || (TYPE_CODE (type) == TYPE_CODE_REF))
-	  && (TYPE_CODE (TYPE_TARGET_TYPE (type)) == TYPE_CODE_CLASS))
+	  && (TYPE_CODE (TYPE_TARGET_TYPE (type)) == TYPE_CODE_STRUCT))
 	{
 	  struct value *target;
 	  int was_pointer = TYPE_CODE (type) == TYPE_CODE_PTR;
@@ -321,7 +321,7 @@ valpy_get_dynamic_type (PyObject *self, void *closure)
 		type = lookup_reference_type (type);
 	    }
 	}
-      else if (TYPE_CODE (type) == TYPE_CODE_CLASS)
+      else if (TYPE_CODE (type) == TYPE_CODE_STRUCT)
 	type = value_rtti_type (val, NULL, NULL, NULL);
       else
 	{
@@ -895,10 +895,10 @@ valpy_fetch_lazy (PyObject *self, PyObject *args)
 
 /* Calculate and return the address of the PyObject as the value of
    the builtin __hash__ call.  */
-static long
+static Py_hash_t
 valpy_hash (PyObject *self)
 {
-  return (long) (intptr_t) self;
+  return (intptr_t) self;
 }
 
 enum valpy_opcode

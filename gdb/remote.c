@@ -1,6 +1,6 @@
 /* Remote target communications for serial-line targets in custom GDB protocol
 
-   Copyright (C) 1988-2014 Free Software Foundation, Inc.
+   Copyright (C) 1988-2015 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -221,6 +221,8 @@ static int remote_supports_cond_breakpoints (struct target_ops *self);
 
 static int remote_can_run_breakpoint_commands (struct target_ops *self);
 
+static void remote_btrace_reset (void);
+
 /* For "remote".  */
 
 static struct cmd_list_element *remote_cmdlist;
@@ -371,6 +373,9 @@ struct remote_state
 
   /* The state of remote notification.  */
   struct remote_notif_state *notif_state;
+
+  /* The branch trace configuration.  */
+  struct btrace_config btrace_config;
 };
 
 /* Private data that we'll store in (struct thread_info)->private.  */
@@ -1327,6 +1332,12 @@ enum {
   /* Support for qXfer:libraries-svr4:read with a non-empty annex.  */
   PACKET_augmented_libraries_svr4_read_feature,
 
+  /* Support for the qXfer:btrace-conf:read packet.  */
+  PACKET_qXfer_btrace_conf,
+
+  /* Support for the Qbtrace-conf:bts:size packet.  */
+  PACKET_Qbtrace_conf_bts_size,
+
   PACKET_MAX
 };
 
@@ -1842,11 +1853,11 @@ set_general_process (void)
 }
 
 
-/*  Return nonzero if the thread PTID is still alive on the remote
-    system.  */
+/* Return nonzero if this is the main thread that we made up ourselves
+   to model non-threaded targets as single-threaded.  */
 
 static int
-remote_thread_alive (struct target_ops *ops, ptid_t ptid)
+remote_thread_always_alive (struct target_ops *ops, ptid_t ptid)
 {
   struct remote_state *rs = get_remote_state ();
   char *p, *endp;
@@ -1859,6 +1870,23 @@ remote_thread_alive (struct target_ops *ops, ptid_t ptid)
     /* The main thread is always alive.  This can happen after a
        vAttach, if the remote side doesn't support
        multi-threading.  */
+    return 1;
+
+  return 0;
+}
+
+/* Return nonzero if the thread PTID is still alive on the remote
+   system.  */
+
+static int
+remote_thread_alive (struct target_ops *ops, ptid_t ptid)
+{
+  struct remote_state *rs = get_remote_state ();
+  char *p, *endp;
+
+  /* Check if this is a thread that we made up ourselves to model
+     non-threaded targets as single-threaded.  */
+  if (remote_thread_always_alive (ops, ptid))
     return 1;
 
   p = rs->buf;
@@ -2779,6 +2807,18 @@ remote_update_thread_list (struct target_ops *ops)
       struct thread_info *tp, *tmp;
 
       got_list = 1;
+
+      if (VEC_empty (thread_item_t, context.items)
+	  && remote_thread_always_alive (ops, inferior_ptid))
+	{
+	  /* Some targets don't really support threads, but still
+	     reply an (empty) thread list in response to the thread
+	     listing packets, instead of replying "packet not
+	     supported".  Exit early so we don't delete the main
+	     thread.  */
+	  do_cleanups (old_chain);
+	  return;
+	}
 
       /* CONTEXT now holds the current thread list on the remote
 	 target end.  Delete GDB-side threads no longer found on the
@@ -3981,7 +4021,11 @@ static const struct protocol_feature remote_protocol_features[] = {
   { "Qbtrace:off", PACKET_DISABLE, remote_supported_packet, PACKET_Qbtrace_off },
   { "Qbtrace:bts", PACKET_DISABLE, remote_supported_packet, PACKET_Qbtrace_bts },
   { "qXfer:btrace:read", PACKET_DISABLE, remote_supported_packet,
-    PACKET_qXfer_btrace }
+    PACKET_qXfer_btrace },
+  { "qXfer:btrace-conf:read", PACKET_DISABLE, remote_supported_packet,
+    PACKET_qXfer_btrace_conf },
+  { "Qbtrace-conf:bts:size", PACKET_DISABLE, remote_supported_packet,
+    PACKET_Qbtrace_conf_bts_size }
 };
 
 static char *remote_support_xml;
@@ -4328,6 +4372,8 @@ remote_open_1 (const char *name, int from_tty,
 	throw_exception (ex);
       }
   }
+
+  remote_btrace_reset ();
 
   if (target_async_permitted)
     wait_forever_enabled_p = 1;
@@ -5050,7 +5096,7 @@ interrupt_query (void)
 {
   target_terminal_ours ();
 
-  if (target_can_async_p ())
+  if (target_is_async_p ())
     {
       signal (SIGINT, handle_sigint);
       quit ();
@@ -6007,7 +6053,7 @@ remote_wait (struct target_ops *ops,
   else
     event_ptid = remote_wait_as (ptid, status, options);
 
-  if (target_can_async_p ())
+  if (target_is_async_p ())
     {
       /* If there are are events left in the queue tell the event loop
 	 to return here.  */
@@ -7197,7 +7243,7 @@ putpkt_binary (const char *buf, int cnt)
      case it's not possible to issue a command while the target is
      running.  This is not a problem in non-stop mode, because in that
      case, the stub is always ready to process serial input.  */
-  if (!non_stop && target_can_async_p () && rs->waiting_for_stop_reply)
+  if (!non_stop && target_is_async_p () && rs->waiting_for_stop_reply)
     {
       error (_("Cannot execute this command while the target is running.\n"
 	       "Use the \"interrupt\" command to stop the target\n"
@@ -8915,6 +8961,11 @@ remote_xfer_partial (struct target_ops *ops, enum target_object object,
       return remote_read_qxfer (ops, "btrace", annex, readbuf, offset, len,
 				xfered_len,
         &remote_protocol_packets[PACKET_qXfer_btrace]);
+
+    case TARGET_OBJECT_BTRACE_CONF:
+      return remote_read_qxfer (ops, "btrace-conf", annex, readbuf, offset,
+				len, xfered_len,
+	&remote_protocol_packets[PACKET_qXfer_btrace_conf]);
 
     default:
       return TARGET_XFER_E_IO;
@@ -11290,36 +11341,116 @@ struct btrace_target_info
 {
   /* The ptid of the traced thread.  */
   ptid_t ptid;
+
+  /* The obtained branch trace configuration.  */
+  struct btrace_config conf;
 };
+
+/* Reset our idea of our target's btrace configuration.  */
+
+static void
+remote_btrace_reset (void)
+{
+  struct remote_state *rs = get_remote_state ();
+
+  memset (&rs->btrace_config, 0, sizeof (rs->btrace_config));
+}
 
 /* Check whether the target supports branch tracing.  */
 
 static int
-remote_supports_btrace (struct target_ops *self)
+remote_supports_btrace (struct target_ops *self, enum btrace_format format)
 {
   if (packet_support (PACKET_Qbtrace_off) != PACKET_ENABLE)
-    return 0;
-  if (packet_support (PACKET_Qbtrace_bts) != PACKET_ENABLE)
     return 0;
   if (packet_support (PACKET_qXfer_btrace) != PACKET_ENABLE)
     return 0;
 
-  return 1;
+  switch (format)
+    {
+      case BTRACE_FORMAT_NONE:
+	return 0;
+
+      case BTRACE_FORMAT_BTS:
+	return (packet_support (PACKET_Qbtrace_bts) == PACKET_ENABLE);
+    }
+
+  internal_error (__FILE__, __LINE__, _("Unknown branch trace format"));
+}
+
+/* Synchronize the configuration with the target.  */
+
+static void
+btrace_sync_conf (const struct btrace_config *conf)
+{
+  struct packet_config *packet;
+  struct remote_state *rs;
+  char *buf, *pos, *endbuf;
+
+  rs = get_remote_state ();
+  buf = rs->buf;
+  endbuf = buf + get_remote_packet_size ();
+
+  packet = &remote_protocol_packets[PACKET_Qbtrace_conf_bts_size];
+  if (packet_config_support (packet) == PACKET_ENABLE
+      && conf->bts.size != rs->btrace_config.bts.size)
+    {
+      pos = buf;
+      pos += xsnprintf (pos, endbuf - pos, "%s=0x%x", packet->name,
+                        conf->bts.size);
+
+      putpkt (buf);
+      getpkt (&buf, &rs->buf_size, 0);
+
+      if (packet_ok (buf, packet) == PACKET_ERROR)
+	{
+	  if (buf[0] == 'E' && buf[1] == '.')
+	    error (_("Failed to configure the BTS buffer size: %s"), buf + 2);
+	  else
+	    error (_("Failed to configure the BTS buffer size."));
+	}
+
+      rs->btrace_config.bts.size = conf->bts.size;
+    }
+}
+
+/* Read the current thread's btrace configuration from the target and
+   store it into CONF.  */
+
+static void
+btrace_read_config (struct btrace_config *conf)
+{
+  char *xml;
+
+  xml = target_read_stralloc (&current_target,
+                              TARGET_OBJECT_BTRACE_CONF, "");
+  if (xml != NULL)
+    {
+      struct cleanup *cleanup;
+
+      cleanup = make_cleanup (xfree, xml);
+      parse_xml_btrace_conf (conf, xml);
+      do_cleanups (cleanup);
+    }
 }
 
 /* Enable branch tracing.  */
 
 static struct btrace_target_info *
-remote_enable_btrace (struct target_ops *self, ptid_t ptid)
+remote_enable_btrace (struct target_ops *self, ptid_t ptid,
+		      const struct btrace_config *conf)
 {
   struct btrace_target_info *tinfo = NULL;
   struct packet_config *packet = &remote_protocol_packets[PACKET_Qbtrace_bts];
   struct remote_state *rs = get_remote_state ();
   char *buf = rs->buf;
   char *endbuf = rs->buf + get_remote_packet_size ();
+  volatile struct gdb_exception err;
 
   if (packet_config_support (packet) != PACKET_ENABLE)
     error (_("Target does not support branch tracing."));
+
+  btrace_sync_conf (conf);
 
   set_general_thread (ptid);
 
@@ -11339,6 +11470,14 @@ remote_enable_btrace (struct target_ops *self, ptid_t ptid)
 
   tinfo = xzalloc (sizeof (*tinfo));
   tinfo->ptid = ptid;
+
+  /* If we fail to read the configuration, we lose some information, but the
+     tracing itself is not impacted.  */
+  TRY_CATCH (err, RETURN_MASK_ERROR)
+    btrace_read_config (&tinfo->conf);
+
+  if (err.message != NULL)
+    warning ("%s", err.message);
 
   return tinfo;
 }
@@ -11390,7 +11529,7 @@ remote_teardown_btrace (struct target_ops *self,
 
 static enum btrace_error
 remote_read_btrace (struct target_ops *self,
-		    VEC (btrace_block_s) **btrace,
+		    struct btrace_data *btrace,
 		    struct btrace_target_info *tinfo,
 		    enum btrace_read_type type)
 {
@@ -11430,10 +11569,17 @@ remote_read_btrace (struct target_ops *self,
     return BTRACE_ERR_UNKNOWN;
 
   cleanup = make_cleanup (xfree, xml);
-  *btrace = parse_xml_btrace (xml);
+  parse_xml_btrace (btrace, xml);
   do_cleanups (cleanup);
 
   return BTRACE_ERR_NONE;
+}
+
+static const struct btrace_config *
+remote_btrace_conf (struct target_ops *self,
+		    const struct btrace_target_info *tinfo)
+{
+  return &tinfo->conf;
 }
 
 static int
@@ -11572,6 +11718,7 @@ Specify the serial device it is connected to\n\
   remote_ops.to_disable_btrace = remote_disable_btrace;
   remote_ops.to_teardown_btrace = remote_teardown_btrace;
   remote_ops.to_read_btrace = remote_read_btrace;
+  remote_ops.to_btrace_conf = remote_btrace_conf;
   remote_ops.to_augmented_libraries_svr4_read =
     remote_augmented_libraries_svr4_read;
 }
@@ -11662,9 +11809,17 @@ remote_async (struct target_ops *ops,
       serial_async (rs->remote_desc, remote_async_serial_handler, rs);
       rs->async_client_callback = callback;
       rs->async_client_context = context;
+
+      /* If there are pending events in the stop reply queue tell the
+	 event loop to process them.  */
+      if (!QUEUE_is_empty (stop_reply_p, stop_reply_queue))
+	mark_async_event_handler (remote_async_inferior_event_token);
     }
   else
-    serial_async (rs->remote_desc, NULL, NULL);
+    {
+      serial_async (rs->remote_desc, NULL, NULL);
+      clear_async_event_handler (remote_async_inferior_event_token);
+    }
 }
 
 static void
@@ -12161,6 +12316,12 @@ Show the maximum size of the address (in bits) in a memory packet."), NULL,
 
   add_packet_config_cmd (&remote_protocol_packets[PACKET_qXfer_btrace],
        "qXfer:btrace", "read-btrace", 0);
+
+  add_packet_config_cmd (&remote_protocol_packets[PACKET_qXfer_btrace_conf],
+       "qXfer:btrace-conf", "read-btrace-conf", 0);
+
+  add_packet_config_cmd (&remote_protocol_packets[PACKET_Qbtrace_conf_bts_size],
+       "Qbtrace-conf:bts:size", "btrace-conf-bts-size", 0);
 
   /* Assert that we've registered commands for all packet configs.  */
   {
