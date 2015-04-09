@@ -3823,7 +3823,7 @@ case "${target}" in
     noconfigdirs="$noconfigdirs gdb"
     ;;
   propeller*)
-    noconfigdirs="$noconfigdirs target-libgloss gdb"
+    noconfigdirs="$noconfigdirs target-libgloss"
     ;;
   sh-*-* | sh64-*-*)
     case "${target}" in
