@@ -3070,9 +3070,11 @@ handle_colon(char *s, int start_of_line)
     // now rewrite s into "val$:"
     p = s;
     s += strlen(name);
+#if 0
     while (*s != '\n' && ISSPACE (*s)) {
         s++;
     }
+#endif
     sprintf (buf, "%d", sym->value);
     if ((size_t)(strlen(buf)+1+start_of_line) > (size_t)(s - p)) {
         as_bad (_("Not enough space for temporary label `%s'"), name);
@@ -3083,9 +3085,17 @@ handle_colon(char *s, int start_of_line)
         *p++ = '$';
         if (start_of_line)
             *p++ = ':';
+#if 0
         while (!ISSPACE (*p) && p != s) {
             *p++ = ' ';
         }
+#else
+        // don't insert any extraneous space
+        while(*s) {
+            *p++ = *s++;
+        }
+        *p++ = 0;
+#endif
     }
     xfree (name);
 
