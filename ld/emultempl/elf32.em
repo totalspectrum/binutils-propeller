@@ -1414,6 +1414,8 @@ gld${EMULATION_NAME}_before_allocation (void)
   struct elf_link_hash_entry *ehdr_start = NULL;
   struct bfd_link_hash_entry ehdr_start_save;
 
+  memset(&ehdr_start_save, 0, sizeof(ehdr_start_save));
+
   if (is_elf_hash_table (link_info.hash))
     {
       _bfd_elf_tls_setup (link_info.output_bfd, &link_info);
