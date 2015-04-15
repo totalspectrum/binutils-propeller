@@ -270,6 +270,9 @@ cp_type_print_method_args (struct type *mtype, const char *prefix,
 
       if (TYPE_RESTRICT (domain))
 	fprintf_filtered (stream, " restrict");
+
+      if (TYPE_ATOMIC (domain))
+	fprintf_filtered (stream, " _Atomic");
     }
 }
 
@@ -431,6 +434,14 @@ c_type_print_modifier (struct type *type, struct ui_file *stream,
       did_print_modifier = 1;
     }
 
+  if (TYPE_ATOMIC (type))
+    {
+      if (did_print_modifier || need_pre_space)
+	fprintf_filtered (stream, " ");
+      fprintf_filtered (stream, "_Atomic");
+      did_print_modifier = 1;
+    }
+
   address_space_id = address_space_int_to_name (get_type_arch (type),
 						TYPE_INSTANCE_FLAGS (type));
   if (address_space_id)
@@ -533,7 +544,7 @@ is_type_conversion_operator (struct type *type, int i, int j)
      some other way, feel free to rewrite this function.  */
   const char *name = TYPE_FN_FIELDLIST_NAME (type, i);
 
-  if (strncmp (name, "operator", 8) != 0)
+  if (!startswith (name, "operator"))
     return 0;
 
   name += 8;
@@ -549,9 +560,9 @@ is_type_conversion_operator (struct type *type, int i, int j)
     /* If this doesn't look like the start of an identifier, then it
        isn't a type conversion operator.  */
     return 0;
-  else if (strncmp (name, "new", 3) == 0)
+  else if (startswith (name, "new"))
     name += 3;
-  else if (strncmp (name, "delete", 6) == 0)
+  else if (startswith (name, "delete"))
     name += 6;
   else
     /* If it doesn't look like new or delete, it's a type conversion
@@ -922,7 +933,7 @@ c_type_print_base (struct type *type, struct ui_file *stream,
 	   enum}" tag for unnamed struct/union/enum's, which we don't
 	   want to print.  */
 	if (TYPE_TAG_NAME (type) != NULL
-	    && strncmp (TYPE_TAG_NAME (type), "{unnamed", 8))
+	    && !startswith (TYPE_TAG_NAME (type), "{unnamed"))
 	  {
 	    /* When printing the tag name, we are still effectively
 	       printing in the outer context, hence the use of FLAGS
@@ -1334,7 +1345,7 @@ c_type_print_base (struct type *type, struct ui_file *stream,
          tag for unnamed struct/union/enum's, which we don't
          want to print.  */
       if (TYPE_TAG_NAME (type) != NULL
-	  && strncmp (TYPE_TAG_NAME (type), "{unnamed", 8))
+	  && !startswith (TYPE_TAG_NAME (type), "{unnamed"))
 	{
 	  print_name_maybe_canonical (TYPE_TAG_NAME (type), flags, stream);
 	  if (show > 0)

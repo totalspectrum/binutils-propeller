@@ -88,7 +88,7 @@ static void cp_print_value (struct type *, struct type *,
 
 
 /* GCC versions after 2.4.5 use this.  */
-const char vtbl_ptr_name[] = "__vtbl_ptr_type";
+EXPORTED_CONST char vtbl_ptr_name[] = "__vtbl_ptr_type";
 
 /* Return truth value for assertion that TYPE is of the type
    "pointer to virtual function".  */
@@ -96,9 +96,9 @@ const char vtbl_ptr_name[] = "__vtbl_ptr_type";
 int
 cp_is_vtbl_ptr_type (struct type *type)
 {
-  const char *typename = type_name_no_tag (type);
+  const char *type_name = type_name_no_tag (type);
 
-  return (typename != NULL && !strcmp (typename, vtbl_ptr_name));
+  return (type_name != NULL && !strcmp (type_name, vtbl_ptr_name));
 }
 
 /* Return truth value for the assertion that TYPE is of the type
@@ -313,18 +313,21 @@ cp_print_value_fields (struct type *type, struct type *real_type,
 		}
 	      else if (field_is_static (&TYPE_FIELD (type, i)))
 		{
-		  volatile struct gdb_exception ex;
 		  struct value *v = NULL;
 
-		  TRY_CATCH (ex, RETURN_MASK_ERROR)
+		  TRY
 		    {
 		      v = value_static_field (type, i);
 		    }
 
-		  if (ex.reason < 0)
-		    fprintf_filtered (stream,
-				      _("<error reading variable: %s>"),
-				      ex.message);
+		  CATCH (ex, RETURN_MASK_ERROR)
+		    {
+		      fprintf_filtered (stream,
+					_("<error reading variable: %s>"),
+					ex.message);
+		    }
+		  END_CATCH
+
 		  cp_print_static_field (TYPE_FIELD_TYPE (type, i),
 					 v, stream, recurse + 1,
 					 options);
@@ -481,12 +484,11 @@ cp_print_value (struct type *type, struct type *real_type,
   for (i = 0; i < n_baseclasses; i++)
     {
       int boffset = 0;
-      int skip;
+      int skip = 0;
       struct type *baseclass = check_typedef (TYPE_BASECLASS (type, i));
       const char *basename = TYPE_NAME (baseclass);
       const gdb_byte *base_valaddr = NULL;
       const struct value *base_val = NULL;
-      volatile struct gdb_exception ex;
 
       if (BASETYPE_VIA_VIRTUAL (type, i))
 	{
@@ -506,18 +508,21 @@ cp_print_value (struct type *type, struct type *real_type,
       thisoffset = offset;
       thistype = real_type;
 
-      TRY_CATCH (ex, RETURN_MASK_ERROR)
+      TRY
 	{
 	  boffset = baseclass_offset (type, i, valaddr, offset, address, val);
 	}
-      if (ex.reason < 0 && ex.error == NOT_AVAILABLE_ERROR)
-	skip = -1;
-      else if (ex.reason < 0)
-	skip = 1;
-      else
- 	{
-	  skip = 0;
+      CATCH (ex, RETURN_MASK_ERROR)
+	{
+	  if (ex.error == NOT_AVAILABLE_ERROR)
+	    skip = -1;
+	  else
+	    skip = 1;
+	}
+      END_CATCH
 
+      if (skip == 0)
+	{
 	  if (BASETYPE_VIA_VIRTUAL (type, i))
 	    {
 	      /* The virtual base class pointer might have been

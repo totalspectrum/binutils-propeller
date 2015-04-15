@@ -444,6 +444,17 @@ extern void bfd_hash_traverse
    this size.  */
 extern unsigned long bfd_hash_set_default_size (unsigned long);
 
+/* Types of compressed DWARF debug sections.  We currently support
+   zlib.  */
+enum compressed_debug_section_type
+{
+  COMPRESS_DEBUG_NONE = 0,
+  COMPRESS_DEBUG = 1 << 0,
+  COMPRESS_DEBUG_ZLIB = COMPRESS_DEBUG | 1 << 1,
+  COMPRESS_DEBUG_GNU_ZLIB = COMPRESS_DEBUG | 1 << 2,
+  COMPRESS_DEBUG_GABI_ZLIB = COMPRESS_DEBUG | 1 << 3
+};
+
 /* This structure is used to keep track of stabs in sections
    information while linking.  */
 
@@ -941,10 +952,10 @@ extern void bfd_elf32_aarch64_init_maps
   (bfd *);
 
 extern void bfd_elf64_aarch64_set_options
-  (bfd *, struct bfd_link_info *, int, int, int, int);
+  (bfd *, struct bfd_link_info *, int, int, int, int, int);
 
 extern void bfd_elf32_aarch64_set_options
-  (bfd *, struct bfd_link_info *, int, int, int, int);
+  (bfd *, struct bfd_link_info *, int, int, int, int, int);
 
 /* ELF AArch64 mapping symbol support.  */
 #define BFD_AARCH64_SPECIAL_SYM_TYPE_MAP	(1 << 0)
@@ -995,6 +1006,13 @@ extern void bfd_elf32_ia64_after_parse
 
 extern void bfd_elf64_ia64_after_parse
   (int);
+
+/* V850 Note manipulation routines.  */
+extern bfd_boolean v850_elf_create_sections
+  (struct bfd_link_info *);
+
+extern bfd_boolean v850_elf_set_note
+  (bfd *, unsigned int, unsigned int);
 /* Extracted from init.c.  */
 void bfd_init (void);
 
@@ -1370,6 +1388,10 @@ typedef struct bfd_section
   /* This section contains data which may be shared with other
      executables or shared objects. This is for COFF only.  */
 #define SEC_COFF_SHARED 0x8000000
+
+  /* This section should be compressed.  This is for ELF linker
+     internal use only.  */
+#define SEC_ELF_COMPRESS 0x8000000
 
   /* When a section with this flag is being linked, then if the size of
      the input section is less than a page, it should not cross a page
@@ -5748,6 +5770,9 @@ relative value.  Used in conjunction with
 BFD_RELOC_AARCH64_TLSGD_ADD_LO12_NC.  */
   BFD_RELOC_AARCH64_TLSGD_ADR_PAGE21,
 
+/* AArch64 TLS General Dynamic  */
+  BFD_RELOC_AARCH64_TLSGD_ADR_PREL21,
+
 /* Unsigned 12 bit byte offset to global offset table entry for a symbols
 tls_index structure.  Used in conjunction with
 BFD_RELOC_AARCH64_TLSGD_ADR_PAGE21.  */
@@ -6311,6 +6336,13 @@ enum bfd_direction
     both_direction = 3
   };
 
+enum bfd_plugin_format
+  {
+    bfd_plugin_uknown = 0,
+    bfd_plugin_yes = 1,
+    bfd_plugin_no = 2
+  };
+
 struct bfd
 {
   /* The filename the application opened the BFD with.  */
@@ -6345,7 +6377,7 @@ struct bfd
   ENUM_BITFIELD (bfd_direction) direction : 2;
 
   /* Format_specific flags.  */
-  flagword flags : 17;
+  flagword flags : 18;
 
   /* Values that may appear in the flags field of a BFD.  These also
      appear in the object_flags field of the bfd_target structure, where
@@ -6422,14 +6454,19 @@ struct bfd
   /* BFD is a dummy, for plugins.  */
 #define BFD_PLUGIN 0x10000
 
+  /* Compress sections in this BFD with SHF_COMPRESSED from gABI.  */
+#define BFD_COMPRESS_GABI 0x20000
+
   /* Flags bits to be saved in bfd_preserve_save.  */
 #define BFD_FLAGS_SAVED \
-  (BFD_IN_MEMORY | BFD_COMPRESS | BFD_DECOMPRESS | BFD_PLUGIN)
+  (BFD_IN_MEMORY | BFD_COMPRESS | BFD_DECOMPRESS | BFD_PLUGIN \
+   | BFD_COMPRESS_GABI)
 
   /* Flags bits which are for BFD use only.  */
 #define BFD_FLAGS_FOR_BFD_USE_MASK \
   (BFD_IN_MEMORY | BFD_COMPRESS | BFD_DECOMPRESS | BFD_LINKER_CREATED \
-   | BFD_PLUGIN | BFD_TRADITIONAL_FORMAT | BFD_DETERMINISTIC_OUTPUT)
+   | BFD_PLUGIN | BFD_TRADITIONAL_FORMAT | BFD_DETERMINISTIC_OUTPUT \
+   | BFD_COMPRESS_GABI)
 
   /* Is the file descriptor being cached?  That is, can it be closed as
      needed, and re-opened when accessed later?  */
@@ -6466,6 +6503,16 @@ struct bfd
 
   /* Set if this is the linker output BFD.  */
   unsigned int is_linker_output : 1;
+
+  /* If this is an input for a compiler plug-in library.  */
+  ENUM_BITFIELD (bfd_plugin_format) plugin_format : 2;
+
+  /* Set if this is a plugin output file.  */
+  unsigned int lto_output : 1;
+
+  /* Set to dummy BFD created when claimed by a compiler plug-in
+     library.  */
+  bfd *plugin_dummy_bfd;
 
   /* Currently my_archive is tested before adding origin to
      anything. I believe that this can become always an add of
@@ -6788,6 +6835,15 @@ bfd_vma bfd_emul_get_commonpagesize (const char *);
 void bfd_emul_set_commonpagesize (const char *, bfd_vma);
 
 char *bfd_demangle (bfd *, const char *, int);
+
+void bfd_update_compression_header
+   (bfd *abfd, bfd_byte *contents, asection *sec);
+
+bfd_boolean bfd_check_compression_header
+   (bfd *abfd, bfd_byte *contents, asection *sec,
+    bfd_size_type uncompressed_size);
+
+int bfd_get_compression_header_size (bfd *abfd, asection *sec);
 
 /* Extracted from archive.c.  */
 symindex bfd_get_next_mapent
@@ -7295,15 +7351,15 @@ bfd_byte *bfd_simple_get_relocated_section_contents
    (bfd *abfd, asection *sec, bfd_byte *outbuf, asymbol **symbol_table);
 
 /* Extracted from compress.c.  */
-bfd_boolean bfd_compress_section_contents
-   (bfd *abfd, asection *section, bfd_byte *uncompressed_buffer,
-    bfd_size_type uncompressed_size);
-
 bfd_boolean bfd_get_full_section_contents
    (bfd *abfd, asection *section, bfd_byte **ptr);
 
 void bfd_cache_section_contents
    (asection *sec, void *contents);
+
+bfd_boolean bfd_is_section_compressed_with_header
+   (bfd *abfd, asection *section,
+    int *compression_header_size_p);
 
 bfd_boolean bfd_is_section_compressed
    (bfd *abfd, asection *section);
@@ -7313,6 +7369,9 @@ bfd_boolean bfd_init_section_decompress_status
 
 bfd_boolean bfd_init_section_compress_status
    (bfd *abfd, asection *section);
+
+bfd_boolean bfd_compress_section
+   (bfd *abfd, asection *section, bfd_byte *uncompressed_buffer);
 
 #ifdef __cplusplus
 }

@@ -91,15 +91,17 @@ adjust_value_for_child_access (struct value **value,
 	{
 	  if (value && *value)
 	    {
-	      volatile struct gdb_exception except;
 
-	      TRY_CATCH (except, RETURN_MASK_ERROR)
+	      TRY
 		{
 		  *value = value_ind (*value);
 		}
 
-	      if (except.reason < 0)
-		*value = NULL;
+	      CATCH (except, RETURN_MASK_ERROR)
+		{
+		  *value = NULL;
+		}
+	      END_CATCH
 	    }
 	  *type = target_type;
 	  if (was_ptr)
@@ -146,7 +148,7 @@ c_is_path_expr_parent (const struct varobj *var)
       && TYPE_NAME (type) == NULL
       && TYPE_TAG_NAME (type) == NULL)
     {
-      struct varobj *parent = var->parent;
+      const struct varobj *parent = var->parent;
 
       while (parent != NULL && CPLUS_FAKE_CHILD (parent))
 	parent = parent->parent;
@@ -245,7 +247,6 @@ static struct value *
 value_struct_element_index (struct value *value, int type_index)
 {
   struct value *result = NULL;
-  volatile struct gdb_exception e;
   struct type *type = value_type (value);
 
   type = check_typedef (type);
@@ -253,21 +254,20 @@ value_struct_element_index (struct value *value, int type_index)
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
 
-  TRY_CATCH (e, RETURN_MASK_ERROR)
+  TRY
     {
       if (field_is_static (&TYPE_FIELD (type, type_index)))
 	result = value_static_field (type, type_index);
       else
 	result = value_primitive_field (value, 0, type_index, type);
     }
-  if (e.reason < 0)
+  CATCH (e, RETURN_MASK_ERROR)
     {
       return NULL;
     }
-  else
-    {
-      return result;
-    }
+  END_CATCH
+
+  return result;
 }
 
 /* Obtain the information about child INDEX of the variable
@@ -282,7 +282,7 @@ value_struct_element_index (struct value *value, int type_index)
    to NULL.  */
 
 static void 
-c_describe_child (struct varobj *parent, int index,
+c_describe_child (const struct varobj *parent, int index,
 		  char **cname, struct value **cvalue, struct type **ctype,
 		  char **cfull_expression)
 {
@@ -290,7 +290,6 @@ c_describe_child (struct varobj *parent, int index,
   struct type *type = varobj_get_value_type (parent);
   char *parent_expression = NULL;
   int was_ptr;
-  volatile struct gdb_exception except;
 
   if (cname)
     *cname = NULL;
@@ -319,10 +318,14 @@ c_describe_child (struct varobj *parent, int index,
 	{
 	  int real_index = index + TYPE_LOW_BOUND (TYPE_INDEX_TYPE (type));
 
-	  TRY_CATCH (except, RETURN_MASK_ERROR)
+	  TRY
 	    {
 	      *cvalue = value_subscript (value, real_index);
 	    }
+	  CATCH (except, RETURN_MASK_ERROR)
+	    {
+	    }
+	  END_CATCH
 	}
 
       if (ctype)
@@ -391,13 +394,16 @@ c_describe_child (struct varobj *parent, int index,
 
       if (cvalue && value)
 	{
-	  TRY_CATCH (except, RETURN_MASK_ERROR)
+	  TRY
 	    {
 	      *cvalue = value_ind (value);
 	    }
 
-	  if (except.reason < 0)
-	    *cvalue = NULL;
+	  CATCH (except, RETURN_MASK_ERROR)
+	    {
+	      *cvalue = NULL;
+	    }
+	  END_CATCH
 	}
 
       /* Don't use get_target_type because it calls
@@ -422,7 +428,7 @@ c_describe_child (struct varobj *parent, int index,
 }
 
 static char *
-c_name_of_child (struct varobj *parent, int index)
+c_name_of_child (const struct varobj *parent, int index)
 {
   char *name;
 
@@ -441,7 +447,7 @@ c_path_expr_of_child (const struct varobj *child)
 }
 
 static struct value *
-c_value_of_child (struct varobj *parent, int index)
+c_value_of_child (const struct varobj *parent, int index)
 {
   struct value *value = NULL;
 
@@ -450,7 +456,7 @@ c_value_of_child (struct varobj *parent, int index)
 }
 
 static struct type *
-c_type_of_child (struct varobj *parent, int index)
+c_type_of_child (const struct varobj *parent, int index)
 {
   struct type *type = NULL;
 
@@ -614,7 +620,7 @@ cplus_number_of_children (const struct varobj *var)
       /* It is necessary to access a real type (via RTTI).  */
       if (opts.objectprint)
         {
-	  struct varobj *parent = var->parent;
+	  const struct varobj *parent = var->parent;
 
 	  value = parent->value;
 	  lookup_actual_type = (TYPE_CODE (parent->type) == TYPE_CODE_REF
@@ -697,7 +703,7 @@ match_accessibility (struct type *type, int index, enum accessibility acc)
 }
 
 static void
-cplus_describe_child (struct varobj *parent, int index,
+cplus_describe_child (const struct varobj *parent, int index,
 		      char **cname, struct value **cvalue, struct type **ctype,
 		      char **cfull_expression)
 {
@@ -706,7 +712,7 @@ cplus_describe_child (struct varobj *parent, int index,
   int was_ptr;
   int lookup_actual_type = 0;
   char *parent_expression = NULL;
-  struct varobj *var;
+  const struct varobj *var;
   struct value_print_options opts;
 
   if (cname)
@@ -898,7 +904,7 @@ cplus_describe_child (struct varobj *parent, int index,
 }
 
 static char *
-cplus_name_of_child (struct varobj *parent, int index)
+cplus_name_of_child (const struct varobj *parent, int index)
 {
   char *name = NULL;
 
@@ -917,7 +923,7 @@ cplus_path_expr_of_child (const struct varobj *child)
 }
 
 static struct value *
-cplus_value_of_child (struct varobj *parent, int index)
+cplus_value_of_child (const struct varobj *parent, int index)
 {
   struct value *value = NULL;
 
@@ -926,7 +932,7 @@ cplus_value_of_child (struct varobj *parent, int index)
 }
 
 static struct type *
-cplus_type_of_child (struct varobj *parent, int index)
+cplus_type_of_child (const struct varobj *parent, int index)
 {
   struct type *type = NULL;
 

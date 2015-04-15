@@ -65,6 +65,9 @@
 #ifdef HAVE_WCHAR_H
 #include <wchar.h>
 #endif
+#ifdef HAVE_WCTYPE_H
+#include <wctype.h>
+#endif
 
 /* NOTE: it's strange to be including an architecture specific header
    in what's supposed to be general (to PE/PEI) code.  However, that's
@@ -1151,7 +1154,7 @@ _bfd_XXi_slurp_codeview_record (bfd * abfd, file_ptr where, unsigned long length
   /* Ensure null termination of filename.  */
   buffer[256] = '\0';
 
-  cvinfo->CVSignature = H_GET_32(abfd, buffer);
+  cvinfo->CVSignature = H_GET_32 (abfd, buffer);
   cvinfo->Age = 0;
 
   if ((cvinfo->CVSignature == CVINFO_PDB70_CVSIGNATURE)
@@ -2216,7 +2219,7 @@ pe_print_reloc (bfd * abfd, void * vfile)
     {
       int j;
       bfd_vma virtual_address;
-      long number, size;
+      unsigned long number, size;
       bfd_byte *chunk_end;
 
       /* The .reloc section is a sequence of blocks, with a header consisting
@@ -2231,7 +2234,7 @@ pe_print_reloc (bfd * abfd, void * vfile)
 
       fprintf (file,
 	       _("\nVirtual Address: %08lx Chunk size %ld (0x%lx) Number of fixups %ld\n"),
-	       (unsigned long) virtual_address, size, (unsigned long) size, number);
+	       (unsigned long) virtual_address, size, size, number);
 
       chunk_end = p + size;
       if (chunk_end > end)
@@ -2674,7 +2677,11 @@ pe_print_debugdata (bfd * abfd, void * vfile)
       if (idd.Type == PE_IMAGE_DEBUG_TYPE_CODEVIEW)
         {
           char signature[CV_INFO_SIGNATURE_LENGTH * 2 + 1];
-          char buffer[256 + 1];
+	  /* PR 17512: file: 065-29434-0.001:0.1
+	     We need to use a 32-bit aligned buffer
+	     to safely read in a codeview record.  */
+          char buffer[256 + 1] ATTRIBUTE_ALIGNED_ALIGNOF (CODEVIEW_INFO);
+
           CODEVIEW_INFO *cvinfo = (CODEVIEW_INFO *) buffer;
 
           /* The debug entry doesn't have to have to be in a section,
@@ -2948,7 +2955,7 @@ _bfd_XX_bfd_copy_private_bfd_data_common (bfd * ibfd, bfd * obfd)
 	  if (ope->pe_opthdr.DataDirectory[PE_DEBUG_DATA].Size + (addr - section->vma)
 	      > bfd_get_section_size (section))
 	    {
-	      _bfd_error_handler (_("%A: Data Directory size (%lx) exceeds space left in section (%lx)"),
+	      _bfd_error_handler (_("%B: Data Directory size (%lx) exceeds space left in section (%lx)"),
 				  obfd, ope->pe_opthdr.DataDirectory[PE_DEBUG_DATA].Size,
 				  bfd_get_section_size (section) - (addr - section->vma));
 	      return FALSE;
@@ -2984,7 +2991,7 @@ _bfd_XX_bfd_copy_private_bfd_data_common (bfd * ibfd, bfd * obfd)
         }
       else if (section)
 	{
-	  _bfd_error_handler (_("%A: Failed to read debug data section"), obfd);
+	  _bfd_error_handler (_("%B: Failed to read debug data section"), obfd);
 	  return FALSE;
 	}
     }
@@ -3533,7 +3540,11 @@ rsrc_write_directory (rsrc_write_data * data,
    putting its 'ucs4_t' representation in *PUC.  */
 
 static unsigned int
+#if defined HAVE_WCTYPE_H
+u16_mbtouc (wint_t * puc, const unsigned short * s, unsigned int n)
+#else
 u16_mbtouc (wchar_t * puc, const unsigned short * s, unsigned int n)
+#endif
 {
   unsigned short c = * s;
 
@@ -3605,20 +3616,34 @@ rsrc_cmp (bfd_boolean is_name, rsrc_entry * a, rsrc_entry * b)
 #elif defined HAVE_WCHAR_H
   {
     unsigned int  i;
+
     res = 0;
     for (i = min (alen, blen); i--; astring += 2, bstring += 2)
       {
+#if defined HAVE_WCTYPE_H
+	wint_t awc;
+	wint_t bwc;
+#else
 	wchar_t awc;
 	wchar_t bwc;
+#endif
 
-	/* Convert UTF-16 unicode characters into wchar_t characters so
-	   that we can then perform a case insensitive comparison.  */
-	int Alen = u16_mbtouc (& awc, (const unsigned short *) astring, 2);
-	int Blen = u16_mbtouc (& bwc, (const unsigned short *) bstring, 2);
+	/* Convert UTF-16 unicode characters into wchar_t characters
+	   so that we can then perform a case insensitive comparison.  */
+	unsigned int Alen = u16_mbtouc (& awc, (const unsigned short *) astring, 2);
+	unsigned int Blen = u16_mbtouc (& bwc, (const unsigned short *) bstring, 2);
 
 	if (Alen != Blen)
 	  return Alen - Blen;
+
+#ifdef HAVE_WCTYPE_H
+	awc = towlower (awc);
+	bwc = towlower (bwc);
+
+	res = awc - bwc;
+#else
 	res = wcsncasecmp (& awc, & bwc, 1);
+#endif
 	if (res)
 	  break;
       }

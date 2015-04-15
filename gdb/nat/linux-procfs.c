@@ -20,6 +20,7 @@
 #include "linux-procfs.h"
 #include "filestuff.h"
 #include <dirent.h>
+#include <sys/stat.h>
 
 /* Return the TGID of LWPID from /proc/pid/status.  Returns -1 if not
    found.  */
@@ -92,7 +93,7 @@ linux_proc_pid_get_state (pid_t pid, char *buffer, size_t buffer_size,
 
   have_state = 0;
   while (fgets (buffer, buffer_size, procfile) != NULL)
-    if (strncmp (buffer, "State:", 6) == 0)
+    if (startswith (buffer, "State:"))
       {
 	have_state = 1;
 	break;
@@ -148,6 +149,15 @@ int
 linux_proc_pid_is_stopped (pid_t pid)
 {
   return linux_proc_pid_has_state (pid, "T (stopped)", 1);
+}
+
+/* Detect `T (tracing stop)' in `/proc/PID/status'.
+   Other states including `T (stopped)' are reported as false.  */
+
+int
+linux_proc_pid_is_trace_stopped_nowarn (pid_t pid)
+{
+  return linux_proc_pid_has_state (pid, "T (tracing stop)", 1);
 }
 
 /* Return non-zero if PID is a zombie.  If WARN, warn on failure to
@@ -250,4 +260,16 @@ linux_proc_attach_tgid_threads (pid_t pid,
     }
 
   closedir (dir);
+}
+
+/* See linux-procfs.h.  */
+
+int
+linux_proc_task_list_dir_exists (pid_t pid)
+{
+  char pathname[128];
+  struct stat buf;
+
+  xsnprintf (pathname, sizeof (pathname), "/proc/%ld/task", (long) pid);
+  return (stat (pathname, &buf) == 0);
 }

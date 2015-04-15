@@ -2663,23 +2663,10 @@ subset_compare (char *string_to_compare, char *template_string)
   if (template_string != (char *) NULL && string_to_compare != (char *) NULL
       && strlen (string_to_compare) <= strlen (template_string))
     match =
-      (strncmp
-       (template_string, string_to_compare, strlen (string_to_compare)) == 0);
+      (startswith (template_string, string_to_compare));
   else
     match = 0;
   return match;
-}
-
-static void
-pagination_on_command (char *arg, int from_tty)
-{
-  pagination_enabled = 1;
-}
-
-static void
-pagination_off_command (char *arg, int from_tty)
-{
-  pagination_enabled = 0;
 }
 
 static void
@@ -2725,14 +2712,6 @@ Turning pagination off is an alternative to \"set height unlimited\"."),
 			   NULL,
 			   show_pagination_enabled,
 			   &setlist, &showlist);
-
-  if (xdb_commands)
-    {
-      add_com ("am", class_support, pagination_on_command,
-	       _("Enable pagination"));
-      add_com ("sm", class_support, pagination_off_command,
-	       _("Disable pagination"));
-    }
 
   add_setshow_boolean_cmd ("sevenbit-strings", class_support,
 			   &sevenbit_strings, _("\
@@ -3259,7 +3238,9 @@ int
 producer_is_gcc_ge_4 (const char *producer)
 {
   int major, minor;
-  major = producer_is_gcc (producer, &minor);
+
+  if (! producer_is_gcc (producer, &major, &minor))
+    return -1;
   if (major < 4)
     return -1;
   if (major > 4)
@@ -3267,17 +3248,24 @@ producer_is_gcc_ge_4 (const char *producer)
   return minor;
 }
 
-/* Returns the major version number if the given PRODUCER string is GCC and
-   sets the MINOR version.  Returns -1 if the given PRODUCER is NULL or it
-   isn't GCC.  */
+/* Returns nonzero if the given PRODUCER string is GCC and sets the MAJOR
+   and MINOR versions when not NULL.  Returns zero if the given PRODUCER
+   is NULL or it isn't GCC.  */
+
 int
-producer_is_gcc (const char *producer, int *minor)
+producer_is_gcc (const char *producer, int *major, int *minor)
 {
   const char *cs;
-  int major;
 
-  if (producer != NULL && strncmp (producer, "GNU ", strlen ("GNU ")) == 0)
+  if (producer != NULL && startswith (producer, "GNU "))
     {
+      int maj, min;
+
+      if (major == NULL)
+	major = &maj;
+      if (minor == NULL)
+	minor = &min;
+
       /* Skip any identifier after "GNU " - such as "C11" "C++" or "Java".
 	 A full producer string might look like:
 	 "GNU C 4.7.2"
@@ -3289,12 +3277,12 @@ producer_is_gcc (const char *producer, int *minor)
         cs++;
       if (*cs && isspace (*cs))
         cs++;
-      if (sscanf (cs, "%d.%d", &major, minor) == 2)
-	return major;
+      if (sscanf (cs, "%d.%d", major, minor) == 2)
+	return 1;
     }
 
   /* Not recognized as GCC.  */
-  return -1;
+  return 0;
 }
 
 /* Helper for make_cleanup_free_char_ptr_vec.  */

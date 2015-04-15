@@ -8234,18 +8234,6 @@ elf32_arm_final_link_relocate (reloc_howto_type *           howto,
   if (r_type != howto->type)
     howto = elf32_arm_howto_from_type (r_type);
 
-  /* If the start address has been set, then set the EF_ARM_HASENTRY
-     flag.  Setting this more than once is redundant, but the cost is
-     not too high, and it keeps the code simple.
-
-     The test is done  here, rather than somewhere else, because the
-     start address is only set just before the final link commences.
-
-     Note - if the user deliberately sets a start address of 0, the
-     flag will not be set.  */
-  if (bfd_get_start_address (output_bfd) != 0)
-    elf_elfheader (output_bfd)->e_flags |= EF_ARM_HASENTRY;
-
   eh = (struct elf32_arm_link_hash_entry *) h;
   sgot = globals->root.sgot;
   local_got_offsets = elf_local_got_offsets (input_bfd);
@@ -11972,7 +11960,7 @@ elf32_arm_merge_eabi_attributes (bfd *ibfd, bfd *obfd)
 	      /* Tag_ABI_HardFP_use is handled along with Tag_FP_arch since
 		 the meaning of Tag_ABI_HardFP_use depends on Tag_FP_arch
 		 when it's 0.  It might mean absence of FP hardware if
-		 Tag_FP_arch is zero, otherwise it is effectively SP + DP.  */
+		 Tag_FP_arch is zero.  */
 
 #define VFP_VERSION_COUNT 9
 	      static const struct
@@ -12014,7 +12002,7 @@ elf32_arm_merge_eabi_attributes (bfd *ibfd, bfd *obfd)
 		}
 
 	      /* Both the input and the output have nonzero Tag_FP_arch.
-		 So Tag_ABI_HardFP_use is (SP & DP) when it's zero.  */
+		 So Tag_ABI_HardFP_use is implied by Tag_FP_arch when it's zero.  */
 
 	      /* If both the input and the output have zero Tag_ABI_HardFP_use,
 		 do nothing.  */
@@ -12022,10 +12010,10 @@ elf32_arm_merge_eabi_attributes (bfd *ibfd, bfd *obfd)
 		  && out_attr[Tag_ABI_HardFP_use].i == 0)
 		;
 	      /* If the input and the output have different Tag_ABI_HardFP_use,
-		 the combination of them is 3 (SP & DP).  */
+		 the combination of them is 0 (implied by Tag_FP_arch).  */
 	      else if (in_attr[Tag_ABI_HardFP_use].i
 		       != out_attr[Tag_ABI_HardFP_use].i)
-		out_attr[Tag_ABI_HardFP_use].i = 3;
+		out_attr[Tag_ABI_HardFP_use].i = 0;
 
 	      /* Now we can handle Tag_FP_arch.  */
 
@@ -12394,10 +12382,7 @@ elf32_arm_print_private_bfd_data (bfd *abfd, void * ptr)
   if (flags & EF_ARM_RELEXEC)
     fprintf (file, _(" [relocatable executable]"));
 
-  if (flags & EF_ARM_HASENTRY)
-    fprintf (file, _(" [has entry point]"));
-
-  flags &= ~ (EF_ARM_RELEXEC | EF_ARM_HASENTRY);
+  flags &= ~EF_ARM_RELEXEC;
 
   if (flags)
     fprintf (file, _("<Unrecognised flag bits set>"));

@@ -27,6 +27,10 @@
 #include "elf/internal.h"
 #include "bfdlink.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* The number of entries in a section is its size divided by the size
    of a single entry.  This is normally only applicable to reloc and
    symbol table sections.
@@ -196,7 +200,8 @@ struct elf_link_hash_entry
   unsigned int pointer_equality_needed : 1;
   /* Symbol is a unique global symbol.  */
   unsigned int unique_global : 1;
-  /* Symbol is defined with non-default visibility.  */
+  /* Symbol is defined by a shared library with non-default visibility
+     in a read/write section.  */
   unsigned int protected_def : 1;
 
   /* String table index in .dynstr if this is a dynamic symbol.  */
@@ -1234,6 +1239,9 @@ struct elf_backend_data
   bfd_size_type (*maybe_function_sym) (const asymbol *sym, asection *sec,
 				       bfd_vma *code_off);
 
+  /* Return the section which RELOC_SEC applies to.  */
+  asection *(*get_reloc_section) (asection *reloc_sec);
+
   /* Used to handle bad SHF_LINK_ORDER input.  */
   bfd_error_handler_type link_order_error_handler;
 
@@ -1355,6 +1363,10 @@ struct elf_backend_data
      in length rather than sec->size in length, if sec->rawsize is
      non-zero and smaller than sec->size.  */
   unsigned caches_rawsize : 1;
+
+  /* Address of protected data defined in the shared library may be
+     external, i.e., due to copy relocation.   */
+  unsigned extern_protected_data : 1;
 };
 
 /* Information about reloc sections associated with a bfd_elf_section_data
@@ -2238,6 +2250,8 @@ extern bfd_boolean _bfd_elf_is_function_type (unsigned int);
 extern bfd_size_type _bfd_elf_maybe_function_sym (const asymbol *, asection *,
 						  bfd_vma *);
 
+extern asection *_bfd_elf_get_reloc_section (asection *);
+
 extern int bfd_elf_get_default_section_type (flagword);
 
 extern bfd_boolean bfd_elf_lookup_section_flags
@@ -2280,6 +2294,10 @@ extern char *elfcore_write_s390_last_break
 extern char *elfcore_write_s390_system_call
   (bfd *, char *, int *, const void *, int);
 extern char *elfcore_write_s390_tdb
+  (bfd *, char *, int *, const void *, int);
+extern char *elfcore_write_s390_vxrs_low
+  (bfd *, char *, int *, const void *, int);
+extern char *elfcore_write_s390_vxrs_high
   (bfd *, char *, int *, const void *, int);
 extern char *elfcore_write_arm_vfp
   (bfd *, char *, int *, const void *, int);
@@ -2540,4 +2558,7 @@ extern asection _bfd_elf_large_com_section;
     (!(H)->unique_global \
      && ((INFO)->symbolic || ((INFO)->dynamic && !(H)->dynamic)))
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* _LIBELF_H_ */

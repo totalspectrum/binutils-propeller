@@ -1169,7 +1169,7 @@ styp_to_sec_flags (bfd *abfd,
 		   flagword *flags_ptr)
 {
   struct internal_scnhdr *internal_s = (struct internal_scnhdr *) hdr;
-  long styp_flags = internal_s->s_flags;
+  unsigned long styp_flags = internal_s->s_flags;
   flagword sec_flags;
   bfd_boolean result = TRUE;
   bfd_boolean is_dbg = FALSE;
@@ -1192,7 +1192,7 @@ styp_to_sec_flags (bfd *abfd,
   /* Process each flag bit in styp_flags in turn.  */
   while (styp_flags)
     {
-      long flag = styp_flags & - styp_flags;
+      unsigned long flag = styp_flags & - styp_flags;
       char * unhandled = NULL;
 
       styp_flags &= ~ flag;
@@ -3170,6 +3170,15 @@ coff_compute_section_file_positions (bfd * abfd)
 	 This repairs 'ld -r' for arm-wince-pe target.  */
       if (page_size == 0)
 	page_size = 1;
+
+      /* PR 17512: file: 0ac816d3.  */
+      if (page_size < 0)
+	{
+	  bfd_set_error (bfd_error_file_too_big);
+	  (*_bfd_error_handler)
+	    (_("%B: page size is too large (0x%x)"), abfd, page_size);
+	  return FALSE;
+	}
     }
   else
     page_size = PE_DEF_FILE_ALIGNMENT;

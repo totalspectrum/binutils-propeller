@@ -1,3 +1,34 @@
+2015-04-14  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* bfdlink.h (bfd_link_info): Add compress_debug.
+
+2015-04-14  H.J. Lu  <hongjiu.lu@intel.com>
+
+	PR ld/pr17709
+	* bfdlink.h (bfd_link_info): Add extern_protected_data.
+
+2015-03-10  Matthew Wahab  <matthew.wahab@arm.com>
+
+	PR ld/16572
+	* elf/arm.h (EF_ARM_HASENTRY): Remove.
+
+2015-02-19  Pedro Alves  <palves@redhat.com>
+
+	* floatformat.h [__cplusplus]: Wrap in extern "C".
+
+2015-02-14  Alan Modra  <amodra@gmail.com>
+
+	PR ld/17973
+	* bfdlink.h (struct bfd_link_info): Delete loading_lto_outputs.
+
+2015-02-09  Mark Wielaard  <mjw@redhat.com>
+
+	* dwarf2.h: Add DW_LANG_Fortran03 and DW_LANG_Fortran08.
+
+2015-02-09  Mark Wielaard  <mjw@redhat.com>
+
+	* dwarf2.def: Add DW_TAG_atomic_type.
+
 2015-01-28  James Bowman  <james.bowman@ftdichip.com>
 
 	* dis-asm.h (print_insn_ft32): Declare.

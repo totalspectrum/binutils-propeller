@@ -293,6 +293,114 @@ debug_remove_breakpoint (struct target_ops *self, struct gdbarch *arg1, struct b
 }
 
 static int
+delegate_stopped_by_sw_breakpoint (struct target_ops *self)
+{
+  self = self->beneath;
+  return self->to_stopped_by_sw_breakpoint (self);
+}
+
+static int
+tdefault_stopped_by_sw_breakpoint (struct target_ops *self)
+{
+  return 0;
+}
+
+static int
+debug_stopped_by_sw_breakpoint (struct target_ops *self)
+{
+  int result;
+  fprintf_unfiltered (gdb_stdlog, "-> %s->to_stopped_by_sw_breakpoint (...)\n", debug_target.to_shortname);
+  result = debug_target.to_stopped_by_sw_breakpoint (&debug_target);
+  fprintf_unfiltered (gdb_stdlog, "<- %s->to_stopped_by_sw_breakpoint (", debug_target.to_shortname);
+  target_debug_print_struct_target_ops_p (&debug_target);
+  fputs_unfiltered (") = ", gdb_stdlog);
+  target_debug_print_int (result);
+  fputs_unfiltered ("\n", gdb_stdlog);
+  return result;
+}
+
+static int
+delegate_supports_stopped_by_sw_breakpoint (struct target_ops *self)
+{
+  self = self->beneath;
+  return self->to_supports_stopped_by_sw_breakpoint (self);
+}
+
+static int
+tdefault_supports_stopped_by_sw_breakpoint (struct target_ops *self)
+{
+  return 0;
+}
+
+static int
+debug_supports_stopped_by_sw_breakpoint (struct target_ops *self)
+{
+  int result;
+  fprintf_unfiltered (gdb_stdlog, "-> %s->to_supports_stopped_by_sw_breakpoint (...)\n", debug_target.to_shortname);
+  result = debug_target.to_supports_stopped_by_sw_breakpoint (&debug_target);
+  fprintf_unfiltered (gdb_stdlog, "<- %s->to_supports_stopped_by_sw_breakpoint (", debug_target.to_shortname);
+  target_debug_print_struct_target_ops_p (&debug_target);
+  fputs_unfiltered (") = ", gdb_stdlog);
+  target_debug_print_int (result);
+  fputs_unfiltered ("\n", gdb_stdlog);
+  return result;
+}
+
+static int
+delegate_stopped_by_hw_breakpoint (struct target_ops *self)
+{
+  self = self->beneath;
+  return self->to_stopped_by_hw_breakpoint (self);
+}
+
+static int
+tdefault_stopped_by_hw_breakpoint (struct target_ops *self)
+{
+  return 0;
+}
+
+static int
+debug_stopped_by_hw_breakpoint (struct target_ops *self)
+{
+  int result;
+  fprintf_unfiltered (gdb_stdlog, "-> %s->to_stopped_by_hw_breakpoint (...)\n", debug_target.to_shortname);
+  result = debug_target.to_stopped_by_hw_breakpoint (&debug_target);
+  fprintf_unfiltered (gdb_stdlog, "<- %s->to_stopped_by_hw_breakpoint (", debug_target.to_shortname);
+  target_debug_print_struct_target_ops_p (&debug_target);
+  fputs_unfiltered (") = ", gdb_stdlog);
+  target_debug_print_int (result);
+  fputs_unfiltered ("\n", gdb_stdlog);
+  return result;
+}
+
+static int
+delegate_supports_stopped_by_hw_breakpoint (struct target_ops *self)
+{
+  self = self->beneath;
+  return self->to_supports_stopped_by_hw_breakpoint (self);
+}
+
+static int
+tdefault_supports_stopped_by_hw_breakpoint (struct target_ops *self)
+{
+  return 0;
+}
+
+static int
+debug_supports_stopped_by_hw_breakpoint (struct target_ops *self)
+{
+  int result;
+  fprintf_unfiltered (gdb_stdlog, "-> %s->to_supports_stopped_by_hw_breakpoint (...)\n", debug_target.to_shortname);
+  result = debug_target.to_supports_stopped_by_hw_breakpoint (&debug_target);
+  fprintf_unfiltered (gdb_stdlog, "<- %s->to_supports_stopped_by_hw_breakpoint (", debug_target.to_shortname);
+  target_debug_print_struct_target_ops_p (&debug_target);
+  fputs_unfiltered (") = ", gdb_stdlog);
+  target_debug_print_int (result);
+  fputs_unfiltered ("\n", gdb_stdlog);
+  return result;
+}
+
+static int
 delegate_can_use_hw_breakpoint (struct target_ops *self, int arg1, int arg2, int arg3)
 {
   self = self->beneath;
@@ -1584,29 +1692,27 @@ debug_is_async_p (struct target_ops *self)
 }
 
 static void
-delegate_async (struct target_ops *self, async_callback_ftype *arg1, void *arg2)
+delegate_async (struct target_ops *self, int arg1)
 {
   self = self->beneath;
-  self->to_async (self, arg1, arg2);
+  self->to_async (self, arg1);
 }
 
 static void
-tdefault_async (struct target_ops *self, async_callback_ftype *arg1, void *arg2)
+tdefault_async (struct target_ops *self, int arg1)
 {
   tcomplain ();
 }
 
 static void
-debug_async (struct target_ops *self, async_callback_ftype *arg1, void *arg2)
+debug_async (struct target_ops *self, int arg1)
 {
   fprintf_unfiltered (gdb_stdlog, "-> %s->to_async (...)\n", debug_target.to_shortname);
-  debug_target.to_async (&debug_target, arg1, arg2);
+  debug_target.to_async (&debug_target, arg1);
   fprintf_unfiltered (gdb_stdlog, "<- %s->to_async (", debug_target.to_shortname);
   target_debug_print_struct_target_ops_p (&debug_target);
   fputs_unfiltered (", ", gdb_stdlog);
-  target_debug_print_async_callback_ftype_p (arg1);
-  fputs_unfiltered (", ", gdb_stdlog);
-  target_debug_print_void_p (arg2);
+  target_debug_print_int (arg1);
   fputs_unfiltered (")\n", gdb_stdlog);
 }
 
@@ -2233,6 +2339,33 @@ debug_thread_address_space (struct target_ops *self, ptid_t arg1)
   target_debug_print_ptid_t (arg1);
   fputs_unfiltered (") = ", gdb_stdlog);
   target_debug_print_struct_address_space_p (result);
+  fputs_unfiltered ("\n", gdb_stdlog);
+  return result;
+}
+
+static int
+delegate_filesystem_is_local (struct target_ops *self)
+{
+  self = self->beneath;
+  return self->to_filesystem_is_local (self);
+}
+
+static int
+tdefault_filesystem_is_local (struct target_ops *self)
+{
+  return 1;
+}
+
+static int
+debug_filesystem_is_local (struct target_ops *self)
+{
+  int result;
+  fprintf_unfiltered (gdb_stdlog, "-> %s->to_filesystem_is_local (...)\n", debug_target.to_shortname);
+  result = debug_target.to_filesystem_is_local (&debug_target);
+  fprintf_unfiltered (gdb_stdlog, "<- %s->to_filesystem_is_local (", debug_target.to_shortname);
+  target_debug_print_struct_target_ops_p (&debug_target);
+  fputs_unfiltered (") = ", gdb_stdlog);
+  target_debug_print_int (result);
   fputs_unfiltered ("\n", gdb_stdlog);
   return result;
 }
@@ -3697,29 +3830,6 @@ debug_get_tailcall_unwinder (struct target_ops *self)
   return result;
 }
 
-static CORE_ADDR
-delegate_decr_pc_after_break (struct target_ops *self, struct gdbarch *arg1)
-{
-  self = self->beneath;
-  return self->to_decr_pc_after_break (self, arg1);
-}
-
-static CORE_ADDR
-debug_decr_pc_after_break (struct target_ops *self, struct gdbarch *arg1)
-{
-  CORE_ADDR result;
-  fprintf_unfiltered (gdb_stdlog, "-> %s->to_decr_pc_after_break (...)\n", debug_target.to_shortname);
-  result = debug_target.to_decr_pc_after_break (&debug_target, arg1);
-  fprintf_unfiltered (gdb_stdlog, "<- %s->to_decr_pc_after_break (", debug_target.to_shortname);
-  target_debug_print_struct_target_ops_p (&debug_target);
-  fputs_unfiltered (", ", gdb_stdlog);
-  target_debug_print_struct_gdbarch_p (arg1);
-  fputs_unfiltered (") = ", gdb_stdlog);
-  target_debug_print_CORE_ADDR (result);
-  fputs_unfiltered ("\n", gdb_stdlog);
-  return result;
-}
-
 static void
 delegate_prepare_to_generate_core (struct target_ops *self)
 {
@@ -3789,6 +3899,14 @@ install_delegators (struct target_ops *ops)
     ops->to_insert_breakpoint = delegate_insert_breakpoint;
   if (ops->to_remove_breakpoint == NULL)
     ops->to_remove_breakpoint = delegate_remove_breakpoint;
+  if (ops->to_stopped_by_sw_breakpoint == NULL)
+    ops->to_stopped_by_sw_breakpoint = delegate_stopped_by_sw_breakpoint;
+  if (ops->to_supports_stopped_by_sw_breakpoint == NULL)
+    ops->to_supports_stopped_by_sw_breakpoint = delegate_supports_stopped_by_sw_breakpoint;
+  if (ops->to_stopped_by_hw_breakpoint == NULL)
+    ops->to_stopped_by_hw_breakpoint = delegate_stopped_by_hw_breakpoint;
+  if (ops->to_supports_stopped_by_hw_breakpoint == NULL)
+    ops->to_supports_stopped_by_hw_breakpoint = delegate_supports_stopped_by_hw_breakpoint;
   if (ops->to_can_use_hw_breakpoint == NULL)
     ops->to_can_use_hw_breakpoint = delegate_can_use_hw_breakpoint;
   if (ops->to_ranged_break_num_registers == NULL)
@@ -3931,6 +4049,8 @@ install_delegators (struct target_ops *ops)
     ops->to_thread_architecture = delegate_thread_architecture;
   if (ops->to_thread_address_space == NULL)
     ops->to_thread_address_space = delegate_thread_address_space;
+  if (ops->to_filesystem_is_local == NULL)
+    ops->to_filesystem_is_local = delegate_filesystem_is_local;
   if (ops->to_trace_init == NULL)
     ops->to_trace_init = delegate_trace_init;
   if (ops->to_download_tracepoint == NULL)
@@ -4039,8 +4159,6 @@ install_delegators (struct target_ops *ops)
     ops->to_get_unwinder = delegate_get_unwinder;
   if (ops->to_get_tailcall_unwinder == NULL)
     ops->to_get_tailcall_unwinder = delegate_get_tailcall_unwinder;
-  if (ops->to_decr_pc_after_break == NULL)
-    ops->to_decr_pc_after_break = delegate_decr_pc_after_break;
   if (ops->to_prepare_to_generate_core == NULL)
     ops->to_prepare_to_generate_core = delegate_prepare_to_generate_core;
   if (ops->to_done_generating_core == NULL)
@@ -4061,6 +4179,10 @@ install_dummy_methods (struct target_ops *ops)
   ops->to_files_info = tdefault_files_info;
   ops->to_insert_breakpoint = memory_insert_breakpoint;
   ops->to_remove_breakpoint = memory_remove_breakpoint;
+  ops->to_stopped_by_sw_breakpoint = tdefault_stopped_by_sw_breakpoint;
+  ops->to_supports_stopped_by_sw_breakpoint = tdefault_supports_stopped_by_sw_breakpoint;
+  ops->to_stopped_by_hw_breakpoint = tdefault_stopped_by_hw_breakpoint;
+  ops->to_supports_stopped_by_hw_breakpoint = tdefault_supports_stopped_by_hw_breakpoint;
   ops->to_can_use_hw_breakpoint = tdefault_can_use_hw_breakpoint;
   ops->to_ranged_break_num_registers = tdefault_ranged_break_num_registers;
   ops->to_insert_hw_breakpoint = tdefault_insert_hw_breakpoint;
@@ -4132,6 +4254,7 @@ install_dummy_methods (struct target_ops *ops)
   ops->to_can_run_breakpoint_commands = tdefault_can_run_breakpoint_commands;
   ops->to_thread_architecture = default_thread_architecture;
   ops->to_thread_address_space = default_thread_address_space;
+  ops->to_filesystem_is_local = tdefault_filesystem_is_local;
   ops->to_trace_init = tdefault_trace_init;
   ops->to_download_tracepoint = tdefault_download_tracepoint;
   ops->to_can_download_tracepoint = tdefault_can_download_tracepoint;
@@ -4186,7 +4309,6 @@ install_dummy_methods (struct target_ops *ops)
   ops->to_augmented_libraries_svr4_read = tdefault_augmented_libraries_svr4_read;
   ops->to_get_unwinder = tdefault_get_unwinder;
   ops->to_get_tailcall_unwinder = tdefault_get_tailcall_unwinder;
-  ops->to_decr_pc_after_break = default_target_decr_pc_after_break;
   ops->to_prepare_to_generate_core = tdefault_prepare_to_generate_core;
   ops->to_done_generating_core = tdefault_done_generating_core;
 }
@@ -4205,6 +4327,10 @@ init_debug_target (struct target_ops *ops)
   ops->to_files_info = debug_files_info;
   ops->to_insert_breakpoint = debug_insert_breakpoint;
   ops->to_remove_breakpoint = debug_remove_breakpoint;
+  ops->to_stopped_by_sw_breakpoint = debug_stopped_by_sw_breakpoint;
+  ops->to_supports_stopped_by_sw_breakpoint = debug_supports_stopped_by_sw_breakpoint;
+  ops->to_stopped_by_hw_breakpoint = debug_stopped_by_hw_breakpoint;
+  ops->to_supports_stopped_by_hw_breakpoint = debug_supports_stopped_by_hw_breakpoint;
   ops->to_can_use_hw_breakpoint = debug_can_use_hw_breakpoint;
   ops->to_ranged_break_num_registers = debug_ranged_break_num_registers;
   ops->to_insert_hw_breakpoint = debug_insert_hw_breakpoint;
@@ -4276,6 +4402,7 @@ init_debug_target (struct target_ops *ops)
   ops->to_can_run_breakpoint_commands = debug_can_run_breakpoint_commands;
   ops->to_thread_architecture = debug_thread_architecture;
   ops->to_thread_address_space = debug_thread_address_space;
+  ops->to_filesystem_is_local = debug_filesystem_is_local;
   ops->to_trace_init = debug_trace_init;
   ops->to_download_tracepoint = debug_download_tracepoint;
   ops->to_can_download_tracepoint = debug_can_download_tracepoint;
@@ -4330,7 +4457,6 @@ init_debug_target (struct target_ops *ops)
   ops->to_augmented_libraries_svr4_read = debug_augmented_libraries_svr4_read;
   ops->to_get_unwinder = debug_get_unwinder;
   ops->to_get_tailcall_unwinder = debug_get_tailcall_unwinder;
-  ops->to_decr_pc_after_break = debug_decr_pc_after_break;
   ops->to_prepare_to_generate_core = debug_prepare_to_generate_core;
   ops->to_done_generating_core = debug_done_generating_core;
 }

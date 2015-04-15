@@ -1650,7 +1650,7 @@ public:
   addr16_ds(unsigned char* view, Address value, Overflow_check overflow)
   {
     Status stat = This::template rela<16,16>(view, 0, 0xfffc, value, overflow);
-    if (overflow != CHECK_NONE && (value & 3) != 0)
+    if ((value & 3) != 0)
       stat = STATUS_OVERFLOW;
     return stat;
   }
@@ -6551,6 +6551,7 @@ class Global_symbol_visitor_opd
 	&& symobj->get_opd_discard(sym->value()))
       {
 	sym->set_undefined();
+	sym->set_visibility(elfcpp::STV_DEFAULT);
 	sym->set_is_defined_in_discarded_section();
 	sym->set_symtab_index(-1U);
       }
@@ -7596,8 +7597,11 @@ Target_powerpc<size, big_endian>::Relocate::relocate(
 
     case elfcpp::R_POWERPC_GOT_DTPREL16:
     case elfcpp::R_POWERPC_GOT_DTPREL16_LO:
+    case elfcpp::R_POWERPC_GOT_TPREL16:
+    case elfcpp::R_POWERPC_GOT_TPREL16_LO:
       if (size == 64)
 	{
+	  // On ppc64 these are all ds form
 	  status = Reloc::addr16_ds(view, value, overflow);
 	  break;
 	}
@@ -7610,7 +7614,6 @@ Target_powerpc<size, big_endian>::Relocate::relocate(
     case elfcpp::R_POWERPC_DTPREL16:
     case elfcpp::R_POWERPC_GOT_TLSGD16:
     case elfcpp::R_POWERPC_GOT_TLSLD16:
-    case elfcpp::R_POWERPC_GOT_TPREL16:
     case elfcpp::R_POWERPC_ADDR16_LO:
     case elfcpp::R_POWERPC_REL16_LO:
     case elfcpp::R_PPC64_TOC16_LO:
@@ -7620,7 +7623,6 @@ Target_powerpc<size, big_endian>::Relocate::relocate(
     case elfcpp::R_POWERPC_DTPREL16_LO:
     case elfcpp::R_POWERPC_GOT_TLSGD16_LO:
     case elfcpp::R_POWERPC_GOT_TLSLD16_LO:
-    case elfcpp::R_POWERPC_GOT_TPREL16_LO:
       status = Reloc::addr16(view, value, overflow);
       break;
 
@@ -7790,7 +7792,7 @@ Target_powerpc<size, big_endian>::Relocate::relocate(
   if (status != Powerpc_relocate_functions<size, big_endian>::STATUS_OK
       && (has_stub_value
 	  || !(gsym != NULL
-	       && gsym->is_weak_undefined()
+	       && gsym->is_undefined()
 	       && is_branch_reloc(r_type))))
     {
       gold_error_at_location(relinfo, relnum, rela.get_r_offset(),

@@ -395,18 +395,21 @@ expression_completer (struct cmd_list_element *ignore,
   struct type *type = NULL;
   char *fieldname;
   const char *p;
-  volatile struct gdb_exception except;
   enum type_code code = TYPE_CODE_UNDEF;
 
   /* Perform a tentative parse of the expression, to see whether a
      field completion is required.  */
   fieldname = NULL;
-  TRY_CATCH (except, RETURN_MASK_ERROR)
+  TRY
     {
       type = parse_expression_for_completion (text, &fieldname, &code);
     }
-  if (except.reason < 0)
-    return NULL;
+  CATCH (except, RETURN_MASK_ERROR)
+    {
+      return NULL;
+    }
+  END_CATCH
+
   if (fieldname && type)
     {
       for (;;)
@@ -860,14 +863,7 @@ throw_max_completions_reached_error (void)
 /* Generate completions all at once.  Returns a vector of unique strings
    allocated with xmalloc.  Returns NULL if there are no completions
    or if max_completions is 0.  If max_completions is non-negative, this will
-   return at most max_completions + 1 strings.
-
-   If max_completions strings are collected, an extra string is added which
-   is a text message to inform the user that the list may be truncated.
-   This extra string serves two purposes:
-   1) Inform the user.
-   2) Prevent readline from being able to find a common prefix to advance
-      point to, since it's working with an incomplete list.
+   return at most max_completions strings.
 
    TEXT is the caller's idea of the "word" we are looking at.
 
@@ -951,7 +947,7 @@ signal_completer (struct cmd_list_element *ignore,
 {
   VEC (char_ptr) *return_val = NULL;
   size_t len = strlen (word);
-  enum gdb_signal signum;
+  int signum;
   const char *signame;
 
   for (signum = GDB_SIGNAL_FIRST; signum != GDB_SIGNAL_LAST; ++signum)
@@ -960,7 +956,7 @@ signal_completer (struct cmd_list_element *ignore,
       if (signum == GDB_SIGNAL_0)
 	continue;
 
-      signame = gdb_signal_to_name (signum);
+      signame = gdb_signal_to_name ((enum gdb_signal) signum);
 
       /* Ignore the unknown signal case.  */
       if (!signame || strcmp (signame, "?") == 0)
@@ -1555,6 +1551,12 @@ gdb_complete_get_screenwidth (const struct match_list_displayer *displayer)
   return displayer->width;
 }
 
+extern int _rl_completion_prefix_display_length;
+extern int _rl_print_completions_horizontally;
+
+EXTERN_C int _rl_qsort_string_compare (const void *, const void *);
+typedef int QSFUNC (const void *, const void *);
+
 /* GDB version of readline/complete.c:rl_display_match_list.
    See gdb_display_match_list for a description of MATCHES, LEN, MAX.
    Returns non-zero if all matches are displayed.  */
@@ -1567,10 +1569,6 @@ gdb_display_match_list_1 (char **matches, int len, int max,
   int i, j, k, l, common_length, sind;
   char *temp, *t;
   int page_completions = displayer->height != INT_MAX && pagination_enabled;
-  extern int _rl_completion_prefix_display_length;
-  extern int _rl_qsort_string_compare (const void *, const void *);
-  extern int _rl_print_completions_horizontally;
-  typedef int QSFUNC (const void *, const void *);
 
   /* Find the length of the prefix common to all items: length as displayed
      characters (common_length) and as a byte index into the matches (sind) */

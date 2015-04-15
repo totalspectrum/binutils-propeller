@@ -714,6 +714,17 @@ make_unqualified_type (struct type *type)
 			      NULL);
 }
 
+/* Make a '_Atomic'-qualified version of TYPE.  */
+
+struct type *
+make_atomic_type (struct type *type)
+{
+  return make_qualified_type (type,
+			      (TYPE_INSTANCE_FLAGS (type)
+			       | TYPE_INSTANCE_FLAG_ATOMIC),
+			      NULL);
+}
+
 /* Replace the contents of ntype with the type *type.  This changes the
    contents, rather than the pointer for TYPE_MAIN_TYPE (ntype); thus
    the changes are propogated to all types in the TYPE_CHAIN.
@@ -1198,9 +1209,13 @@ internal_type_self_type (struct type *type)
     {
     case TYPE_CODE_METHODPTR:
     case TYPE_CODE_MEMBERPTR:
+      if (TYPE_SPECIFIC_FIELD (type) == TYPE_SPECIFIC_NONE)
+	return NULL;
       gdb_assert (TYPE_SPECIFIC_FIELD (type) == TYPE_SPECIFIC_SELF_TYPE);
       return TYPE_MAIN_TYPE (type)->type_specific.self_type;
     case TYPE_CODE_METHOD:
+      if (TYPE_SPECIFIC_FIELD (type) == TYPE_SPECIFIC_NONE)
+	return NULL;
       gdb_assert (TYPE_SPECIFIC_FIELD (type) == TYPE_SPECIFIC_FUNC);
       return TYPE_MAIN_TYPE (type)->type_specific.func_stuff->self_type;
     default:
@@ -1504,7 +1519,7 @@ struct type *
 lookup_struct_elt_type (struct type *type, const char *name, int noerr)
 {
   int i;
-  char *typename;
+  char *type_name;
 
   for (;;)
     {
@@ -1518,9 +1533,9 @@ lookup_struct_elt_type (struct type *type, const char *name, int noerr)
   if (TYPE_CODE (type) != TYPE_CODE_STRUCT 
       && TYPE_CODE (type) != TYPE_CODE_UNION)
     {
-      typename = type_to_string (type);
-      make_cleanup (xfree, typename);
-      error (_("Type %s is not a structure or union type."), typename);
+      type_name = type_to_string (type);
+      make_cleanup (xfree, type_name);
+      error (_("Type %s is not a structure or union type."), type_name);
     }
 
 #if 0
@@ -1529,10 +1544,10 @@ lookup_struct_elt_type (struct type *type, const char *name, int noerr)
      I.e. when doing "ptype bell->bar" for "struct foo { int bar; int
      foo; } bell;" Disabled by fnf.  */
   {
-    char *typename;
+    char *type_name;
 
-    typename = type_name_no_tag (type);
-    if (typename != NULL && strcmp (typename, name) == 0)
+    type_name = type_name_no_tag (type);
+    if (type_name != NULL && strcmp (type_name, name) == 0)
       return type;
   }
 #endif
@@ -1572,9 +1587,9 @@ lookup_struct_elt_type (struct type *type, const char *name, int noerr)
       return NULL;
     }
 
-  typename = type_to_string (type);
-  make_cleanup (xfree, typename);
-  error (_("Type %s has no component named %s."), typename, name);
+  type_name = type_to_string (type);
+  make_cleanup (xfree, type_name);
+  error (_("Type %s has no component named %s."), type_name, name);
 }
 
 /* Store in *MAX the largest number representable by unsigned integer type
@@ -1621,6 +1636,7 @@ get_signed_type_minmax (struct type *type, LONGEST *min, LONGEST *max)
 int
 internal_type_vptr_fieldno (struct type *type)
 {
+  CHECK_TYPEDEF (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
   if (!HAVE_CPLUS_STRUCT (type))
@@ -1633,6 +1649,7 @@ internal_type_vptr_fieldno (struct type *type)
 void
 set_type_vptr_fieldno (struct type *type, int fieldno)
 {
+  CHECK_TYPEDEF (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
   if (!HAVE_CPLUS_STRUCT (type))
@@ -1646,6 +1663,7 @@ set_type_vptr_fieldno (struct type *type, int fieldno)
 struct type *
 internal_type_vptr_basetype (struct type *type)
 {
+  CHECK_TYPEDEF (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
   gdb_assert (TYPE_SPECIFIC_FIELD (type) == TYPE_SPECIFIC_CPLUS_STUFF);
@@ -1657,6 +1675,7 @@ internal_type_vptr_basetype (struct type *type)
 void
 set_type_vptr_basetype (struct type *type, struct type *basetype)
 {
+  CHECK_TYPEDEF (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
   if (!HAVE_CPLUS_STRUCT (type))
@@ -1729,13 +1748,9 @@ stub_noname_complaint (void)
 /* Worker for is_dynamic_type.  */
 
 static int
-is_dynamic_type_internal (struct type *type, int top_level)
+is_dynamic_type_internal (struct type *type)
 {
   type = check_typedef (type);
-
-  /* We only want to recognize references at the outermost level.  */
-  if (top_level && TYPE_CODE (type) == TYPE_CODE_REF)
-    type = check_typedef (TYPE_TARGET_TYPE (type));
 
   /* Types that have a dynamic TYPE_DATA_LOCATION are considered
      dynamic, even if the type itself is statically defined.
@@ -1758,7 +1773,7 @@ is_dynamic_type_internal (struct type *type, int top_level)
 	   of the range type are static.  It allows us to assume that
 	   the subtype of a static range type is also static.  */
 	return (!has_static_range (TYPE_RANGE_DATA (type))
-		|| is_dynamic_type_internal (TYPE_TARGET_TYPE (type), 0));
+		|| is_dynamic_type_internal (TYPE_TARGET_TYPE (type)));
       }
 
     case TYPE_CODE_ARRAY:
@@ -1767,9 +1782,9 @@ is_dynamic_type_internal (struct type *type, int top_level)
 
 	/* The array is dynamic if either the bounds are dynamic,
 	   or the elements it contains have a dynamic contents.  */
-	if (is_dynamic_type_internal (TYPE_INDEX_TYPE (type), 0))
+	if (is_dynamic_type_internal (TYPE_INDEX_TYPE (type)))
 	  return 1;
-	return is_dynamic_type_internal (TYPE_TARGET_TYPE (type), 0);
+	return is_dynamic_type_internal (TYPE_TARGET_TYPE (type));
       }
 
     case TYPE_CODE_STRUCT:
@@ -1779,7 +1794,7 @@ is_dynamic_type_internal (struct type *type, int top_level)
 
 	for (i = 0; i < TYPE_NFIELDS (type); ++i)
 	  if (!field_is_static (&TYPE_FIELD (type, i))
-	      && is_dynamic_type_internal (TYPE_FIELD_TYPE (type, i), 0))
+	      && is_dynamic_type_internal (TYPE_FIELD_TYPE (type, i)))
 	    return 1;
       }
       break;
@@ -1793,11 +1808,11 @@ is_dynamic_type_internal (struct type *type, int top_level)
 int
 is_dynamic_type (struct type *type)
 {
-  return is_dynamic_type_internal (type, 1);
+  return is_dynamic_type_internal (type);
 }
 
 static struct type *resolve_dynamic_type_internal
-  (struct type *type, struct property_addr_info *addr_stack, int top_level);
+  (struct type *type, struct property_addr_info *addr_stack);
 
 /* Given a dynamic range type (dyn_range_type) and a stack of
    struct property_addr_info elements, return a static version
@@ -1845,7 +1860,7 @@ resolve_dynamic_range (struct type *dyn_range_type,
 
   static_target_type
     = resolve_dynamic_type_internal (TYPE_TARGET_TYPE (dyn_range_type),
-				     addr_stack, 0);
+				     addr_stack);
   static_range_type = create_range_type (copy_type (dyn_range_type),
 					 static_target_type,
 					 &low_bound, &high_bound);
@@ -1913,7 +1928,7 @@ resolve_dynamic_union (struct type *type,
 	continue;
 
       t = resolve_dynamic_type_internal (TYPE_FIELD_TYPE (resolved_type, i),
-					 addr_stack, 0);
+					 addr_stack);
       TYPE_FIELD_TYPE (resolved_type, i) = t;
       if (TYPE_LENGTH (t) > max_len)
 	max_len = TYPE_LENGTH (t);
@@ -1970,7 +1985,7 @@ resolve_dynamic_struct (struct type *type,
 
       TYPE_FIELD_TYPE (resolved_type, i)
 	= resolve_dynamic_type_internal (TYPE_FIELD_TYPE (resolved_type, i),
-					 &pinfo, 0);
+					 &pinfo);
       gdb_assert (TYPE_FIELD_LOC_KIND (resolved_type, i)
 		  == FIELD_LOC_KIND_BITPOS);
 
@@ -2001,23 +2016,21 @@ resolve_dynamic_struct (struct type *type,
 
 static struct type *
 resolve_dynamic_type_internal (struct type *type,
-			       struct property_addr_info *addr_stack,
-			       int top_level)
+			       struct property_addr_info *addr_stack)
 {
   struct type *real_type = check_typedef (type);
   struct type *resolved_type = type;
-  const struct dynamic_prop *prop;
+  struct dynamic_prop *prop;
   CORE_ADDR value;
 
-  if (!is_dynamic_type_internal (real_type, top_level))
+  if (!is_dynamic_type_internal (real_type))
     return type;
 
   if (TYPE_CODE (type) == TYPE_CODE_TYPEDEF)
     {
       resolved_type = copy_type (type);
       TYPE_TARGET_TYPE (resolved_type)
-	= resolve_dynamic_type_internal (TYPE_TARGET_TYPE (type), addr_stack,
-					 top_level);
+	= resolve_dynamic_type_internal (TYPE_TARGET_TYPE (type), addr_stack);
     }
   else 
     {
@@ -2026,21 +2039,6 @@ resolve_dynamic_type_internal (struct type *type,
 
       switch (TYPE_CODE (type))
 	{
-	case TYPE_CODE_REF:
-	  {
-	    struct property_addr_info pinfo;
-
-	    pinfo.type = check_typedef (TYPE_TARGET_TYPE (type));
-	    pinfo.addr = read_memory_typed_address (addr_stack->addr, type);
-	    pinfo.next = addr_stack;
-
-	    resolved_type = copy_type (type);
-	    TYPE_TARGET_TYPE (resolved_type)
-	      = resolve_dynamic_type_internal (TYPE_TARGET_TYPE (type),
-					       &pinfo, top_level);
-	    break;
-	  }
-
 	case TYPE_CODE_ARRAY:
 	  resolved_type = resolve_dynamic_array (type, addr_stack);
 	  break;
@@ -2061,13 +2059,11 @@ resolve_dynamic_type_internal (struct type *type,
 
   /* Resolve data_location attribute.  */
   prop = TYPE_DATA_LOCATION (resolved_type);
-  if (dwarf2_evaluate_property (prop, addr_stack, &value))
+  if (prop != NULL && dwarf2_evaluate_property (prop, addr_stack, &value))
     {
-      TYPE_DATA_LOCATION_ADDR (resolved_type) = value;
-      TYPE_DATA_LOCATION_KIND (resolved_type) = PROP_CONST;
+      TYPE_DYN_PROP_ADDR (prop) = value;
+      TYPE_DYN_PROP_KIND (prop) = PROP_CONST;
     }
-  else
-    TYPE_DATA_LOCATION (resolved_type) = NULL;
 
   return resolved_type;
 }
@@ -2079,8 +2075,44 @@ resolve_dynamic_type (struct type *type, CORE_ADDR addr)
 {
   struct property_addr_info pinfo = {check_typedef (type), addr, NULL};
 
-  return resolve_dynamic_type_internal (type, &pinfo, 1);
+  return resolve_dynamic_type_internal (type, &pinfo);
 }
+
+/* See gdbtypes.h  */
+
+struct dynamic_prop *
+get_dyn_prop (enum dynamic_prop_node_kind prop_kind, const struct type *type)
+{
+  struct dynamic_prop_list *node = TYPE_DYN_PROP_LIST (type);
+
+  while (node != NULL)
+    {
+      if (node->prop_kind == prop_kind)
+        return &node->prop;
+      node = node->next;
+    }
+  return NULL;
+}
+
+/* See gdbtypes.h  */
+
+void
+add_dyn_prop (enum dynamic_prop_node_kind prop_kind, struct dynamic_prop prop,
+              struct type *type, struct objfile *objfile)
+{
+  struct dynamic_prop_list *temp;
+
+  gdb_assert (TYPE_OBJFILE_OWNED (type));
+
+  temp = obstack_alloc (&objfile->objfile_obstack,
+			sizeof (struct dynamic_prop_list));
+  temp->prop_kind = prop_kind;
+  temp->prop = prop;
+  temp->next = TYPE_DYN_PROP_LIST (type);
+
+  TYPE_DYN_PROP_LIST (type) = temp;
+}
+
 
 /* Find the real type of TYPE.  This function returns the real type,
    after removing all layers of typedefs, and completing opaque or stub
@@ -2280,20 +2312,21 @@ safe_parse_type (struct gdbarch *gdbarch, char *p, int length)
 {
   struct ui_file *saved_gdb_stderr;
   struct type *type = NULL; /* Initialize to keep gcc happy.  */
-  volatile struct gdb_exception except;
 
   /* Suppress error messages.  */
   saved_gdb_stderr = gdb_stderr;
   gdb_stderr = ui_file_new ();
 
   /* Call parse_and_eval_type() without fear of longjmp()s.  */
-  TRY_CATCH (except, RETURN_MASK_ERROR)
+  TRY
     {
       type = parse_and_eval_type (p, length);
     }
-
-  if (except.reason < 0)
-    type = builtin_type (gdbarch)->builtin_void;
+  CATCH (except, RETURN_MASK_ERROR)
+    {
+      type = builtin_type (gdbarch)->builtin_void;
+    }
+  END_CATCH
 
   /* Stop suppressing error messages.  */
   ui_file_delete (gdb_stderr);
@@ -2357,7 +2390,7 @@ check_stub_method (struct type *type, int method_id, int signature_id)
     }
 
   /* If we read one argument and it was ``void'', don't count it.  */
-  if (strncmp (argtypetext, "(void)", 6) == 0)
+  if (startswith (argtypetext, "(void)"))
     argcount -= 1;
 
   /* We need one extra slot, for the THIS pointer.  */
@@ -2452,7 +2485,7 @@ check_stub_method_group (struct type *type, int method_id)
 
      Therefore the only thing we need to handle here are v2 operator
      names.  */
-  if (found_stub && strncmp (TYPE_FN_FIELD_PHYSNAME (f, 0), "_Z", 2) != 0)
+  if (found_stub && !startswith (TYPE_FN_FIELD_PHYSNAME (f, 0), "_Z"))
     {
       int ret;
       char dem_opname[256];
@@ -2700,7 +2733,7 @@ class_types_same_p (const struct type *a, const struct type *b)
    distance_to_ancestor (A, D, 1) = -1.  */
 
 static int
-distance_to_ancestor (struct type *base, struct type *dclass, int public)
+distance_to_ancestor (struct type *base, struct type *dclass, int is_public)
 {
   int i;
   int d;
@@ -2713,10 +2746,10 @@ distance_to_ancestor (struct type *base, struct type *dclass, int public)
 
   for (i = 0; i < TYPE_N_BASECLASSES (dclass); i++)
     {
-      if (public && ! BASETYPE_VIA_PUBLIC (dclass, i))
+      if (is_public && ! BASETYPE_VIA_PUBLIC (dclass, i))
 	continue;
 
-      d = distance_to_ancestor (base, TYPE_BASECLASS (dclass, i), public);
+      d = distance_to_ancestor (base, TYPE_BASECLASS (dclass, i), is_public);
       if (d >= 0)
 	return 1 + d;
     }
@@ -3216,7 +3249,7 @@ check_types_worklist (VEC (type_equality_entry_d) **worklist,
 int
 types_deeply_equal (struct type *type1, struct type *type2)
 {
-  volatile struct gdb_exception except;
+  struct gdb_exception except = exception_none;
   int result = 0;
   struct bcache *cache;
   VEC (type_equality_entry_d) *worklist = NULL;
@@ -3234,16 +3267,23 @@ types_deeply_equal (struct type *type1, struct type *type2)
   entry.type2 = type2;
   VEC_safe_push (type_equality_entry_d, worklist, &entry);
 
-  TRY_CATCH (except, RETURN_MASK_ALL)
+  /* check_types_worklist calls several nested helper functions, some
+     of which can raise a GDB exception, so we just check and rethrow
+     here.  If there is a GDB exception, a comparison is not capable
+     (or trusted), so exit.  */
+  TRY
     {
       result = check_types_worklist (&worklist, cache);
     }
-  /* check_types_worklist calls several nested helper functions,
-     some of which can raise a GDB Exception, so we just check
-     and rethrow here.  If there is a GDB exception, a comparison
-     is not capable (or trusted), so exit.  */
+  CATCH (ex, RETURN_MASK_ALL)
+    {
+      except = ex;
+    }
+  END_CATCH
+
   bcache_xfree (cache);
   VEC_free (type_equality_entry_d, worklist);
+
   /* Rethrow if there was a problem.  */
   if (except.reason < 0)
     throw_exception (except);
@@ -4012,6 +4052,10 @@ recursive_dump_type (struct type *type, int spaces)
     {
       puts_filtered (" TYPE_FLAG_RESTRICT");
     }
+  if (TYPE_ATOMIC (type))
+    {
+      puts_filtered (" TYPE_FLAG_ATOMIC");
+    }
   puts_filtered ("\n");
 
   printfi_filtered (spaces, "flags");
@@ -4167,7 +4211,7 @@ recursive_dump_type (struct type *type, int spaces)
 
 struct type_pair
 {
-  struct type *old, *new;
+  struct type *old, *newobj;
 };
 
 static hashval_t
@@ -4199,6 +4243,30 @@ create_copied_types_hash (struct objfile *objfile)
 			       dummy_obstack_deallocate);
 }
 
+/* Recursively copy (deep copy) a dynamic attribute list of a type.  */
+
+static struct dynamic_prop_list *
+copy_dynamic_prop_list (struct obstack *objfile_obstack,
+			struct dynamic_prop_list *list)
+{
+  struct dynamic_prop_list *copy = list;
+  struct dynamic_prop_list **node_ptr = &copy;
+
+  while (*node_ptr != NULL)
+    {
+      struct dynamic_prop_list *node_copy;
+
+      node_copy = obstack_copy (objfile_obstack, *node_ptr,
+				sizeof (struct dynamic_prop_list));
+      node_copy->prop = (*node_ptr)->prop;
+      *node_ptr = node_copy;
+
+      node_ptr = &node_copy->next;
+    }
+
+  return copy;
+}
+
 /* Recursively copy (deep copy) TYPE, if it is associated with
    OBJFILE.  Return a new type allocated using malloc, a saved type if
    we have already visited TYPE (using COPIED_TYPES), or TYPE if it is
@@ -4223,7 +4291,7 @@ copy_type_recursive (struct objfile *objfile,
   pair.old = type;
   slot = htab_find_slot (copied_types, &pair, INSERT);
   if (*slot != NULL)
-    return ((struct type_pair *) *slot)->new;
+    return ((struct type_pair *) *slot)->newobj;
 
   new_type = alloc_type_arch (get_type_arch (type));
 
@@ -4232,7 +4300,7 @@ copy_type_recursive (struct objfile *objfile,
   stored
     = obstack_alloc (&objfile->objfile_obstack, sizeof (struct type_pair));
   stored->old = type;
-  stored->new = new_type;
+  stored->newobj = new_type;
   *slot = stored;
 
   /* Copy the common fields of types.  For the main type, we simply
@@ -4302,14 +4370,11 @@ copy_type_recursive (struct objfile *objfile,
       *TYPE_RANGE_DATA (new_type) = *TYPE_RANGE_DATA (type);
     }
 
-  /* Copy the data location information.  */
-  if (TYPE_DATA_LOCATION (type) != NULL)
-    {
-      TYPE_DATA_LOCATION (new_type)
-	= TYPE_ALLOC (new_type, sizeof (struct dynamic_prop));
-      memcpy (TYPE_DATA_LOCATION (new_type), TYPE_DATA_LOCATION (type),
-	      sizeof (struct dynamic_prop));
-    }
+  if (TYPE_DYN_PROP_LIST (type) != NULL)
+    TYPE_DYN_PROP_LIST (new_type)
+      = copy_dynamic_prop_list (&objfile->objfile_obstack,
+				TYPE_DYN_PROP_LIST (type));
+
 
   /* Copy pointers to other types.  */
   if (TYPE_TARGET_TYPE (type))
@@ -4373,13 +4438,10 @@ copy_type (const struct type *type)
   TYPE_LENGTH (new_type) = TYPE_LENGTH (type);
   memcpy (TYPE_MAIN_TYPE (new_type), TYPE_MAIN_TYPE (type),
 	  sizeof (struct main_type));
-  if (TYPE_DATA_LOCATION (type) != NULL)
-    {
-      TYPE_DATA_LOCATION (new_type)
-	= TYPE_ALLOC (new_type, sizeof (struct dynamic_prop));
-      memcpy (TYPE_DATA_LOCATION (new_type), TYPE_DATA_LOCATION (type),
-	      sizeof (struct dynamic_prop));
-    }
+  if (TYPE_DYN_PROP_LIST (type) != NULL)
+    TYPE_DYN_PROP_LIST (new_type)
+      = copy_dynamic_prop_list (&TYPE_OBJFILE (type) -> objfile_obstack,
+				TYPE_DYN_PROP_LIST (type));
 
   return new_type;
 }

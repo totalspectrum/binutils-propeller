@@ -721,7 +721,7 @@ aarch64_get_debug_reg_state ()
   struct process_info *proc;
 
   proc = current_process ();
-  return &proc->private->arch_private->debug_reg_state;
+  return &proc->priv->arch_private->debug_reg_state;
 }
 
 /* Record the insertion of one breakpoint/watchpoint, as represented
@@ -990,7 +990,7 @@ aarch64_insert_point (enum raw_bkpt_type type, CORE_ADDR addr,
     ret =
       aarch64_handle_breakpoint (targ_type, addr, len, 1 /* is_insert */);
 
-  if (show_debug_regs > 1)
+  if (show_debug_regs)
     aarch64_show_debug_reg_state (aarch64_get_debug_reg_state (),
 				  "insert_point", addr, len, targ_type);
 
@@ -1027,7 +1027,7 @@ aarch64_remove_point (enum raw_bkpt_type type, CORE_ADDR addr,
     ret =
       aarch64_handle_breakpoint (targ_type, addr, len, 0 /* is_insert */);
 
-  if (show_debug_regs > 1)
+  if (show_debug_regs)
     aarch64_show_debug_reg_state (aarch64_get_debug_reg_state (),
 				  "remove_point", addr, len, targ_type);
 
@@ -1121,8 +1121,8 @@ aarch64_linux_new_process (void)
 
 /* Called when a new thread is detected.  */
 
-static struct arch_lwp_info *
-aarch64_linux_new_thread (void)
+static void
+aarch64_linux_new_thread (struct lwp_info *lwp)
 {
   struct arch_lwp_info *info = xcalloc (1, sizeof (*info));
 
@@ -1132,7 +1132,7 @@ aarch64_linux_new_thread (void)
   DR_MARK_ALL_CHANGED (info->dr_changed_bp, aarch64_num_bp_regs);
   DR_MARK_ALL_CHANGED (info->dr_changed_wp, aarch64_num_wp_regs);
 
-  return info;
+  lwp->arch_private = info;
 }
 
 /* Called when resuming a thread.
@@ -1151,7 +1151,7 @@ aarch64_linux_prepare_to_resume (struct lwp_info *lwp)
       int tid = ptid_get_lwp (ptid);
       struct process_info *proc = find_process_pid (ptid_get_pid (ptid));
       struct aarch64_debug_reg_state *state
-	= &proc->private->arch_private->debug_reg_state;
+	= &proc->priv->arch_private->debug_reg_state;
 
       if (show_debug_regs)
 	fprintf (stderr, "prepare_to_resume thread %ld\n", lwpid_of (thread));

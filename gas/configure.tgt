@@ -207,6 +207,7 @@ case ${generic_target} in
   hppa-*-hiux*)				fmt=som em=hppa ;;
 
   h8300-*-elf | h8300-*-rtems*)		fmt=elf ;;
+  h8300-*-linux*)			fmt=elf em=linux ;;
 
   i370-*-elf* | i370-*-linux*)		fmt=elf ;;
 
@@ -472,6 +473,7 @@ case ${generic_target} in
   z8k-*-coff | z8k-*-sim)		fmt=coff ;;
 
   *-*-aout | *-*-scout)			fmt=aout ;;
+  *-*-cloudabi*)			fmt=elf ;;
   *-*-dragonfly*)			fmt=elf em=dragonfly ;;
   *-*-freebsd* | *-*-kfreebsd*-gnu)	fmt=elf em=freebsd ;;
   *-*-bsd*)				fmt=aout em=sun3 ;;

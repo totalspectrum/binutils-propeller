@@ -16,6 +16,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+#include "nat/linux-nat.h"
 #include "nat/gdb_thread_db.h"
 #include <signal.h>
 
@@ -24,6 +25,7 @@
 
 /* Included for ptrace type definitions.  */
 #include "nat/linux-ptrace.h"
+#include "target/waitstatus.h" /* For enum target_stop_reason.  */
 
 #define PTRACE_XFER_TYPE long
 
@@ -183,7 +185,7 @@ struct linux_target_ops
   /* Hook to call when a new thread is detected.
      If extra per-thread architecture-specific data is needed,
      allocate it here.  */
-  struct arch_lwp_info * (*new_thread) (void);
+  void (*new_thread) (struct lwp_info *);
 
   /* Hook to call prior to resuming a thread.  */
   void (*prepare_to_resume) (struct lwp_info *);
@@ -229,24 +231,6 @@ extern struct linux_target_ops the_low_target;
 
 #define get_thread_lwp(thr) ((struct lwp_info *) (inferior_target_data (thr)))
 #define get_lwp_thread(lwp) ((lwp)->thread)
-
-/* Reasons an LWP last stopped.  */
-
-enum lwp_stop_reason
-{
-  /* Either not stopped, or stopped for a reason that doesn't require
-     special tracking.  */
-  LWP_STOPPED_BY_NO_REASON,
-
-  /* Stopped by a software breakpoint.  */
-  LWP_STOPPED_BY_SW_BREAKPOINT,
-
-  /* Stopped by a hardware breakpoint.  */
-  LWP_STOPPED_BY_HW_BREAKPOINT,
-
-  /* Stopped by a watchpoint.  */
-  LWP_STOPPED_BY_WATCHPOINT
-};
 
 /* This struct is recorded in the target_data field of struct thread_info.
 
@@ -299,7 +283,7 @@ struct lwp_info
 
   /* The reason the LWP last stopped, if we need to track it
      (breakpoint, watchpoint, etc.)  */
-  enum lwp_stop_reason stop_reason;
+  enum target_stop_reason stop_reason;
 
   /* On architectures where it is possible to know the data address of
      a triggered watchpoint, STOPPED_DATA_ADDRESS is non-zero, and
@@ -371,7 +355,7 @@ int linux_pid_exe_is_elf_64_file (int pid, unsigned int *machine);
 int linux_attach_lwp (ptid_t ptid);
 
 struct lwp_info *find_lwp_pid (ptid_t ptid);
-void linux_stop_lwp (struct lwp_info *lwp);
+/* For linux_stop_lwp see nat/linux-nat.h.  */
 
 #ifdef HAVE_LINUX_REGSETS
 void initialize_regsets_info (struct regsets_info *regsets_info);

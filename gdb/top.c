@@ -462,7 +462,7 @@ execute_command (char *p, int from_tty)
 	deprecated_cmd_warning (line);
 
       /* c->user_commands would be NULL in the case of a python command.  */
-      if (c->class == class_user && c->user_commands)
+      if (c->theclass == class_user && c->user_commands)
 	execute_user_command (c, arg);
       else if (c->type == set_cmd)
 	do_set_command (arg, from_tty, c);
@@ -806,7 +806,7 @@ gdb_readline_wrapper_cleanup (void *arg)
   saved_after_char_processing_hook = NULL;
 
   if (cleanup->target_is_async_orig)
-    target_async (inferior_event_handler, 0);
+    target_async (1);
 
   xfree (cleanup);
 }
@@ -829,7 +829,7 @@ gdb_readline_wrapper (const char *prompt)
   back_to = make_cleanup (gdb_readline_wrapper_cleanup, cleanup);
 
   if (cleanup->target_is_async_orig)
-    target_async (NULL, NULL);
+    target_async (0);
 
   /* Display our prompt and prevent double prompt display.  */
   display_gdb_prompt (prompt);
@@ -1316,15 +1316,6 @@ This GDB was configured as follows:\n\
     fprintf_filtered (stream, _("\
              --with-system-gdbinit=%s%s\n\
 "), SYSTEM_GDBINIT, SYSTEM_GDBINIT_RELOCATABLE ? " (relocatable)" : "");
-#if HAVE_ZLIB_H
-  fprintf_filtered (stream, _("\
-             --with-zlib\n\
-"));
-#else
-  fprintf_filtered (stream, _("\
-             --without-zlib\n\
-"));
-#endif
 #if HAVE_LIBBABELTRACE
     fprintf_filtered (stream, _("\
              --with-babeltrace\n\
@@ -1465,7 +1456,6 @@ quit_force (char *args, int from_tty)
 {
   int exit_code = 0;
   struct qt_args qt;
-  volatile struct gdb_exception ex;
 
   /* An optional expression may be used to cause gdb to terminate with the 
      value of that expression.  */
@@ -1481,47 +1471,55 @@ quit_force (char *args, int from_tty)
   qt.args = args;
   qt.from_tty = from_tty;
 
-  /* Wrappers to make the code below a bit more readable.  */
-#define DO_TRY \
-  TRY_CATCH (ex, RETURN_MASK_ALL)
-
-#define DO_PRINT_EX \
-  if (ex.reason < 0) \
-    exception_print (gdb_stderr, ex)
-
   /* We want to handle any quit errors and exit regardless.  */
 
   /* Get out of tfind mode, and kill or detach all inferiors.  */
-  DO_TRY
+  TRY
     {
       disconnect_tracing ();
       iterate_over_inferiors (kill_or_detach, &qt);
     }
-  DO_PRINT_EX;
+  CATCH (ex, RETURN_MASK_ALL)
+    {
+      exception_print (gdb_stderr, ex);
+    }
+  END_CATCH
 
   /* Give all pushed targets a chance to do minimal cleanup, and pop
      them all out.  */
-  DO_TRY
+  TRY
     {
       pop_all_targets ();
     }
-  DO_PRINT_EX;
+  CATCH (ex, RETURN_MASK_ALL)
+    {
+      exception_print (gdb_stderr, ex);
+    }
+  END_CATCH
 
   /* Save the history information if it is appropriate to do so.  */
-  DO_TRY
+  TRY
     {
       if (write_history_p && history_filename
 	  && input_from_terminal_p ())
 	gdb_safe_append_history ();
     }
-  DO_PRINT_EX;
+  CATCH (ex, RETURN_MASK_ALL)
+    {
+      exception_print (gdb_stderr, ex);
+    }
+  END_CATCH
 
   /* Do any final cleanups before exiting.  */
-  DO_TRY
+  TRY
     {
       do_final_cleanups (all_cleanups ());
     }
-  DO_PRINT_EX;
+  CATCH (ex, RETURN_MASK_ALL)
+    {
+      exception_print (gdb_stderr, ex);
+    }
+  END_CATCH
 
   exit (exit_code);
 }

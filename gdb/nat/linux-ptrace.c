@@ -84,7 +84,7 @@ linux_ptrace_attach_fail_reason_string (ptid_t ptid, int err)
 #if defined __i386__ || defined __x86_64__
 
 /* Address of the 'ret' instruction in asm code block below.  */
-extern void (linux_ptrace_test_ret_to_nx_instr) (void);
+EXTERN_C void linux_ptrace_test_ret_to_nx_instr (void);
 
 #include <sys/reg.h>
 #include <sys/mman.h>
@@ -620,4 +620,17 @@ int
 linux_is_extended_waitstatus (int wstat)
 {
   return (linux_ptrace_get_extended_event (wstat) != 0);
+}
+
+/* Return true if the event in LP may be caused by breakpoint.  */
+
+int
+linux_wstatus_maybe_breakpoint (int wstat)
+{
+  return (WIFSTOPPED (wstat)
+	  && (WSTOPSIG (wstat) == SIGTRAP
+	      /* SIGILL and SIGSEGV are also treated as traps in case a
+		 breakpoint is inserted at the current PC.  */
+	      || WSTOPSIG (wstat) == SIGILL
+	      || WSTOPSIG (wstat) == SIGSEGV));
 }

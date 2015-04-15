@@ -10,7 +10,7 @@ Section Headers:
   \[ 5\] \.rela\.got         RELA            0000814c 00114c 000024 0c  AI  2  11  4
   \[ 6\] \.rela\.neardata    RELA            00008170 001170 000018 0c  AI  2  12  4
   \[ 7\] \.dynamic          DYNAMIC         00008188 001188 0000b0 08  WA  3   0  4
-  \[ 8\] \.rela\.plt         RELA            10000000 002000 000018 0c  AI  2   9  4
+  \[ 8\] \.rela\.plt         RELA            10000000 002000 000018 0c  AI  2  11  4
   \[ 9\] \.plt              PROGBITS        10000020 002020 000060 18  AX  0   0 32
   \[10\] \.text             PROGBITS        10000080 002080 000080 00  AX  0   0 32
   \[11\] \.got              PROGBITS        10000100 002100 000028 00  WA  0   0  4
@@ -118,9 +118,9 @@ Symbol table '\.symtab' contains [0-9]+ entries:
 .* 00000000     0 SECTION LOCAL  DEFAULT   14 
 .* 00000000     0 FILE    LOCAL  DEFAULT  ABS .*
 .* 10000080     0 FUNC    LOCAL  HIDDEN    10 sub1
-.* 10000130     4 OBJECT  LOCAL  DEFAULT   13 c
-.* 00000000     0 FILE    LOCAL  DEFAULT  ABS .*
+.* 00000000     0 FILE    LOCAL  DEFAULT  ABS 
 .* 00008188     0 OBJECT  LOCAL  DEFAULT  ABS _DYNAMIC
+.* 10000130     4 OBJECT  LOCAL  DEFAULT   13 c
 .* 1000010c     0 OBJECT  LOCAL  DEFAULT  ABS _GLOBAL_OFFSET_TABLE_
 .* 10000100     0 NOTYPE  LOCAL  DEFAULT   11 __c6xabi_DSBT_BASE
 .* 00000000     0 NOTYPE  WEAK   DEFAULT  UND b

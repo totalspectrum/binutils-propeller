@@ -1,3 +1,333 @@
+2015-04-14  Nick Clifton  <nickc@redhat.com>
+
+	* readelf.c (target_specific_reloc_handling): Add code to handle
+	RL78 complex relocs.
+
+2015-04-13  Doug Evans  <dje@google.com>
+
+	PR binutils/18218
+	* readelf.c (printable_section_name): Constify sec argument.
+	(apply_relocations): Ditto.  New arg "size".  All callers updated.
+	(load_specific_debug_section): Constify sec argument.
+	Remove side-effect of modifying sec->sh_size.
+
+2015-04-09  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* objcopy.c (do_debug_sections): Use bit patterns.
+	(copy_object): Return FALSE for compress_zlib, compress_gnu_zlib
+	and compress_gabi_zlib on non-ELF input.
+	(copy_file): Don't check non-ELF input here.
+
+2015-04-09  Nick Clifton  <nickc@redhat.com>
+
+	* readelf.c (get_machine_flags): Report the setting of the string
+	insn using bits.
+
+2015-04-08  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* objcopy.c (do_debug_sections): Add compress_zlib,
+	compress_gnu_zlib and compress_gabi_zlib.
+	(copy_options): Use optional_argument on compress-debug-sections.
+	(copy_usage): Update --compress-debug-sections.
+	(copy_file): Handle compress_zlib, compress_gnu_zlib and
+	compress_gabi_zlib.
+	(copy_main): Handle
+	--compress-debug-sections={none|zlib|zlib-gnu|zlib-gabi}.
+	* doc/binutils.texi: Document
+	--compress-debug-sections={none|zlib|zlib-gnu|zlib-gabi}.
+
+2015-04-08  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* objcopy.c (copy_usage): Replace "--interleave [<number>]" with
+	--interleave[=<number>].
+
+2015-04-05  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* readelf.c (get_elf_section_flags): Support SHF_COMPRESSED.
+	(get_compression_header): New.
+	(process_section_headers): Dump compression header if needed.
+	(uncompress_section_contents): Don't free compressed_buffer here.
+	(load_specific_debug_section): Free the compressed buffer, update
+	the section buffer and the section size if uncompress is
+	successful.
+
+2015-04-02  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* configure: Regenerated.
+
+2015-04-02  Mike Frysinger  <vapier@gentoo.org>
+
+	* MAINTAINERS: Update my e-mail address.
+
+2015-04-01  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* configure: Regenerated.
+
+2015-03-31  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* configure.ac: Revert the AM_ZLIB change.
+	* Makefile.in: Regenerated.
+	* aclocal.m4: Likewise.
+	* configure: Likewise.
+
+2015-03-31  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* Makefile.am (ZLIB): New.
+	(ZLIBINC): Likewise.
+	(AM_CFLAGS): Add $(ZLIBINC).
+	(readelf_LDADD): Add $(ZLIB).
+	* configure.ac (AM_ZLIB): Removed.
+	(zlibdir): New.  AC_SUBST.
+	(zlibinc): Likewise.
+	Add --with-system-zlib.
+	* Makefile.in: Regenerated.
+	* config.in: Likewise.
+	* configure: Likewise.
+
+2015-03-19  Nick Clifton  <nickc@redhat.com>
+
+	* readelf.c (get_machine_flags): Decode RL78's G13 and G14 flags.
+
+2015-03-18  Jon Turney  <jon.turney@dronecode.org.uk>
+	    Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/18087
+	* doc/binutils.texi: Note that when objcopy compresses debug
+	sections the compression is only performed if it makes the section
+	smaller.
+
+2015-03-10  H.J. Lu  <hongjiu.lu@intel.com>
+
+	PR binutils/18101
+	* readelf.c (parse_args): Move nothing to do warning to ...
+	(main): Here.
+
+2015-03-10  Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/18101
+	* readelf.c (parse_args): Enhance check for nothing to do by
+	accounting for the --wide option.
+
+	PR binutils/17636
+	* objcopy.c (copy_object): Avoid calling fatal as that does not
+	allow the parent to clean up temporary files.
+
+2015-03-10  Yuri Gribov  <y.gribov@samsung.arm>
+
+	PR ld/16572
+	* readelf.c: Remove support for ELF_ARM_HASENTRY.
+
+2015-03-05  Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/18064
+	* doc/binutils.texi (objcopy): Extend description of
+	--add-gnu-debuglink option to explain that the separate debug info
+	file must exist.  Add a description of what to do if the debug
+	info file is built in one place but then installed into a separate
+	location.
+
+2015-03-05  Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/17994
+	* dlltool.c (temp_file_to_remove): New local array.
+	(unlink_temp_files): New functions - unlinks any file in the
+	temp_file_to_remove array, unless dotdeltemps is set.
+	(gen_exp_file): Add temp files to array.
+	(make_head): Likewise.
+	(make_delay_head): Likewise.
+	(make_tail): Likewise.
+	(gen_lib_file): Call unlink_temp_files.
+
+2015-02-28  Andrew Burgess  <andrew.burgess@embecosm.com>
+
+	* objcopy.c (update_sections): New list.
+	(command_line_switch): Add OPTION_UPDATE_SECTION.
+	(copy_options): Add update-section.
+	(copy_usage): Document new option.
+	(is_update_section): New function.
+	(is_strip_section_1): Add check for attempt to update and remove
+	the same section.
+	(copy_object): Update size and content of requested sections.
+	(skip_section): Don't copy for updated sections.
+	(copy_main): Handle --update-section.
+	* doc/binutils.texi (objcopy): Add description of --update-section
+	option.
+	* NEWS: Mention --update-section option.
+
+2015-02-26  Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/17512
+	* coffgrok.c (do_type): Check for an out of range tag index.
+	Check for integer overflow computing array dimension.
+	(do_define): Likewise.
+
+2015-02-26  Andrew Burgess  <andrew.burgess@embecosm.com>
+
+	* objcopy.c (init_section_add): Rename optarg to arg in order to
+	avoid shadowing a global variable.
+
+2015-02-26  Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/17512
+	* resrc.c (write_rc_messagetable): Tighten check for invalid
+	message lengths.
+
+	* dwarf.c (display_debug_loc): Pacify the undefined behaviour
+	sanitizer by simplifying address difference calculation.
+	(struct Frame_Chunk): Change type of cfa_offset to dwarf_vma in
+	order to avoid arithmetic overflows.
+	(frame_display_row): Cast cfa_offset before printing it.
+	(display_debug_frames): Likewise.
+	Check for an unexpected segment size.
+	Chnage type of 'l' local to dwarf_vma and cast it back to an int
+	when printing.
+	(process_cu_tu_index): Tighten check for an invalid ncols value.
+	* readelf.c (process_corefile_note_segment): Check for
+	inote.descdata extending beyond the end of the section.
+	(process_v850_notes): Likewise.
+
+2015-02-26  Terry Guo  <terry.guo@arm.com>
+
+	* readelf.c (arm_attr_tag_ABI_HardFP_use): Update how we
+	display it.
+
+2015-02-25  Andrew Burgess  <andrew.burgess@embecosm.com>
+
+	* objcopy.c (init_section_add): New function.
+	(section_add_load_file): New function.
+	(copy_main): Make use of new functions.
+
+2015-02-25  Andrew Burgess  <andrew.burgess@embecosm.com>
+
+	* od-elf32_avr.c: Add elf32-avr.h include.
+	(OPT_AVRPROP): Define.
+	(options[]): Add 'avr-prop' entry.
+	(elf32_avr_help): Add avr-prop help text.
+	(elf32_avr_dump_avr_prop): New function.
+	(elf32_avr_dump): Add check for avr-prop.
+
+2015-02-24  Nick Clifton  <nickc@redhat.com>
+
+	* readelf.c (get_machine_flags): Remove deprecated V850 machine
+	flags.
+	(get_v850_section_type_name): New function.  Handles V850 special
+	sections.
+	(get_section_type_name): Add support for V850.
+	(get_v850_elf_note_type): New function.  Returns the name of a
+	V850 note.
+	(print_v850_note): New function.  Prints a V850 note.
+	(process_v850_notes): New function.  Prints V850 notes.
+	(process_note_sections): Add support for V850.
+
+2015-02-24  Mike Frysinger  <vapier@gentoo.org>
+
+	PR binutils/17531
+	* readelf.c (process_symbol_table): Declare chained.  Increment it
+	in every loop.  Abort when chained is larger than nchains.  Move
+	error check outside of chain loop.
+
+2015-02-24  Dmitry Antipov  <dantipov@nvidia.com>
+
+	* readelf.c (find_symbol_for_address): Use a binary search to
+	speed up symbol location.  Skip check for function symbol type.
+	(*_unw_aux_info): Add funtab and nfuns fields contains a sorted
+	list of function symbols.
+	(dump_ia64_unwind): Initialise the funtab and nfuns fields and
+	pass them to find_symbol_for_address.
+	(dump_hppa_unwind): Likewise.
+	(arm_print_vma_and_name): Pass funtab to find_symbol_for_address.
+	(dump_arm_unwind): Initialise the funtab and nfuns fields.
+
+2015-02-24  Nick Clifton  <nickc@redhat.com>
+
+	* objdump.c (dump_section): Extend the warning message displayed
+	when a section cannot be loaded.
+
+2015-02-21  Mike Frysinger  <vapier@gentoo.org>
+
+	* readelf.c (process_program_headers): Add newline to warning
+	message.
+
+2015-02-20  Andreas Arnez  <arnez@linux.vnet.ibm.com>
+
+	* readelf.c (get_note_type): Add NT_S390_VXRS_LOW and
+	NT_S390_VXRS_HIGH.
+
+2015-02-13  Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/17512
+	* dwarf.c (read_leb128): Fix test for shift becoming too large.
+
+	* coffgrok.c (do_define): Add check for type size overflow.
+	* srconv.c (walk_tree_sfile): Check that enough sections are
+	available before parsing.
+	(prescan): Likewise.
+
+	PR binutils/17531
+	* dwarf.c (display_debug_aranges): Add check for an excessive
+	ar_length value.
+	(process_cu_tu_index): Check for a row * columns sum being too
+	large.
+
+2015-02-13  Alan Modra  <amodra@gmail.com>
+
+	* dwarf.c: Formatting, whitespace.
+	(process_debug_info): Style fix.
+
+2015-02-11  Nick Clifton  <nickc@redhat.com>
+
+	* rl78-decode.opc: Add 'a' attribute to instructions that support
+	[HL+0] addressing.
+	* rl78-decode.c: Regenerate.
+	* rl78-dis.c (print_insn_rl78): Display the offset in [HL+0]
+	addresses.
+
+2015-02-11  Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/17531
+	* dwarf.c (display_debug_pubnames_worker): Work around compiler
+	bug checking address ranges.
+	(display_debug_frames): Likewise.
+	(display_gdb_index): Likewise.
+	(process_cu_tu_index): Add range check on the ncols value.
+
+2015-02-10  Nick Clifton  <nickc@redhat.com>
+
+	PR binutils/17512
+	* dwarf.c (eh_addr_size): Use an unsigned type.
+	(size_of_encoded_value): Return an unsigned type.
+	(read_leb128): Break if the shift becomes too big.
+	(process_extended_line_op): Do not read the address if the length
+	is too long.
+	(read_cie): Warn and fail if the pointer size or segment size are
+	too big.
+	* dwarf.h (DWARF2_External_LineInfo): Delete unused and incorrect
+	structure definition.
+	(DWARF2_External_PubNames): Likewise.
+	(DWARF2_External_CompUnit): Likewise.
+	(DWARF2_External_ARange): Likewise.
+	(DWARF2_Internal_LineInfo): Use dwarf_vma type for
+	li_prologue_length.
+	(eh_addr_size): Update prototype.
+
+	PR binutils/17531
+	* dwarf.c (process_debug_info): Zero the debug information array
+	since correct initialisation cannot be relied upon.
+	(process_cu_tu_index): Improve range checks.
+
+	PR binutils/17531
+	* dwarf.c (display_debug_pubnames_worker): Use dwarf_vma type for
+	offset.
+	* readelf.c (dump_relocations): Handle printing offsets which are
+	MIN_INT.
+	(process_corefile_note_segment): Add range check of the namesz
+	field.
+
+2015-02-09  Mark Wielaard  <mjw@redhat.com>
+
+	* dwarf.c (read_and_display_attr_value): Handle DW_LANG_Fortran03
+	and DW_LANG_Fortran08.
+
 2015-02-06  Nick Clifton  <nickc@redhat.com>
 
 	PR binutils/17512

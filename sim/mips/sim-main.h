@@ -24,9 +24,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 /* #define SIM_ENGINE_HALT_HOOK(SD, LAST_CPU, CIA) */
 /* #define SIM_ENGINE_RESUME_HOOK(SD, LAST_CPU, CIA) */
 
-#define SIM_HAVE_BIENDIAN
-
-
 /* hobble some common features for moment */
 #define WITH_WATCHPOINTS 1
 #define WITH_MODULO_MEMORY 1
@@ -38,6 +35,8 @@ mips_core_signal ((SD), (CPU), (CIA), (MAP), (NR_BYTES), (ADDR), (TRANSFER), (ER
 #include "sim-basics.h"
 
 typedef address_word sim_cia;
+
+typedef struct _sim_cpu SIM_CPU;
 
 #include "sim-base.h"
 #include "bfd.h"
@@ -489,13 +488,7 @@ struct sim_state {
 
   struct swatch watch;
 
-  sim_cpu cpu[MAX_NR_PROCESSORS];
-#if (WITH_SMP)
-#define STATE_CPU(sd,n) (&(sd)->cpu[n])
-#else
-#define STATE_CPU(sd,n) (&(sd)->cpu[0])
-#endif
-
+  sim_cpu *cpu[MAX_NR_PROCESSORS];
 
   sim_state_base base;
 };

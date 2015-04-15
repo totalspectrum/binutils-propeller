@@ -120,6 +120,7 @@ processor names are recognized:
 @code{bdver2},
 @code{bdver3},
 @code{bdver4},
+@code{znver1},
 @code{btver1},
 @code{btver2},
 @code{generic32} and
@@ -187,6 +188,7 @@ accept various extension mnemonics.  For example,
 @code{rtm},
 @code{invpcid},
 @code{clflush},
+@code{clzero},
 @code{lwp},
 @code{fma4},
 @code{xop},
@@ -1051,27 +1053,6 @@ opcode bytes @samp{6a 04} (i.e., without the operand size prefix), which
 is correct since the processor default operand size is assumed to be 16
 bits in a 16-bit code section.
 
-@node i386-Bugs
-@section AT&T Syntax bugs
-
-The UnixWare assembler, and probably other AT&T derived ix86 Unix
-assemblers, generate floating point instructions with reversed source
-and destination registers in certain cases.  Unfortunately, gcc and
-possibly many other programs use this reversed syntax, so we're stuck
-with it.
-
-For example
-
-@smallexample
-        fsub %st,%st(3)
-@end smallexample
-@noindent
-results in @samp{%st(3)} being updated to @samp{%st - %st(3)} rather
-than the expected @samp{%st(3) - %st}.  This happens with all the
-non-commutative arithmetic floating point operations with two register
-operands where the source register is @samp{%st} and the destination
-register is @samp{%st(i)}.
-
 @node i386-Arch
 @section Specifying CPU Architecture
 
@@ -1093,7 +1074,7 @@ supported on the CPU specified.  The choices for @var{cpu_type} are:
 @item @samp{corei7} @tab @samp{l1om} @tab @samp{k1om}
 @item @samp{k6} @tab @samp{k6_2} @tab @samp{athlon} @tab @samp{k8}
 @item @samp{amdfam10} @tab @samp{bdver1} @tab @samp{bdver2} @tab @samp{bdver3}
-@item @samp{bdver4} @tab @samp{btver1} @tab @samp{btver2}
+@item @samp{bdver4} @tab @samp{znver1} @tab @samp{btver1} @tab @samp{btver2}
 @item @samp{generic32} @tab @samp{generic64}
 @item @samp{.mmx} @tab @samp{.sse} @tab @samp{.sse2} @tab @samp{.sse3}
 @item @samp{.ssse3} @tab @samp{.sse4.1} @tab @samp{.sse4.2} @tab @samp{.sse4}
@@ -1111,7 +1092,7 @@ supported on the CPU specified.  The choices for @var{cpu_type} are:
 @item @samp{.3dnow} @tab @samp{.3dnowa} @tab @samp{.sse4a} @tab @samp{.sse5}
 @item @samp{.syscall} @tab @samp{.rdtscp} @tab @samp{.svme} @tab @samp{.abm}
 @item @samp{.lwp} @tab @samp{.fma4} @tab @samp{.xop} @tab @samp{.cx16}
-@item @samp{.padlock}
+@item @samp{.padlock} @tab @samp{.clzero}
 @end multitable
 
 Apart from the warning, there are only two other effects on
@@ -1142,6 +1123,27 @@ For example
 @smallexample
  .arch i8086,nojumps
 @end smallexample
+
+@node i386-Bugs
+@section AT&T Syntax bugs
+
+The UnixWare assembler, and probably other AT&T derived ix86 Unix
+assemblers, generate floating point instructions with reversed source
+and destination registers in certain cases.  Unfortunately, gcc and
+possibly many other programs use this reversed syntax, so we're stuck
+with it.
+
+For example
+
+@smallexample
+        fsub %st,%st(3)
+@end smallexample
+@noindent
+results in @samp{%st(3)} being updated to @samp{%st - %st(3)} rather
+than the expected @samp{%st(3) - %st}.  This happens with all the
+non-commutative arithmetic floating point operations with two register
+operands where the source register is @samp{%st} and the destination
+register is @samp{%st(i)}.
 
 @node i386-Notes
 @section Notes

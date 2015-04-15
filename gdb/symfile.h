@@ -72,6 +72,15 @@ struct psymbol_allocation_list
   int size;
 };
 
+struct other_sections
+{
+  CORE_ADDR addr;
+  char *name;
+
+  /* SECTINDEX must be valid for associated BFD or set to -1.  */
+  int sectindex;
+};
+
 /* Define an array of addresses to accommodate non-contiguous dynamic
    loading of modules.  This is for use when entering commands, so we
    can keep track of the section names until we read the file and can
@@ -85,14 +94,7 @@ struct section_addr_info
      available.  */
   size_t num_sections;
   /* Sections whose names are file format dependent.  */
-  struct other_sections
-  {
-    CORE_ADDR addr;
-    char *name;
-
-    /* SECTINDEX must be valid for associated BFD or set to -1.  */
-    int sectindex;
-  } other[1];
+  struct other_sections other[1];
 };
 
 
@@ -238,7 +240,7 @@ struct quick_symbol_functions
   void (*expand_symtabs_with_fullname) (struct objfile *objfile,
 					const char *fullname);
 
-  /* Find global or static symbols in all tables that are in NAMESPACE 
+  /* Find global or static symbols in all tables that are in DOMAIN
      and for which MATCH (symbol name, NAME) == 0, passing each to 
      CALLBACK, reading in partial symbol tables as needed.  Look
      through global symbols if GLOBAL and otherwise static symbols.
@@ -256,7 +258,7 @@ struct quick_symbol_functions
      non-zero to indicate that the scan should be terminated.  */
 
   void (*map_matching_symbols) (struct objfile *,
-				const char *name, domain_enum namespace,
+				const char *name, domain_enum domain,
 				int global,
 				int (*callback) (struct block *,
 						 struct symbol *, void *),
@@ -458,8 +460,6 @@ enum symfile_add_flags
     SYMFILE_NO_READ = 1 << 4
   };
 
-extern void new_symfile_objfile (struct objfile *, int);
-
 extern struct objfile *symbol_file_add (const char *, int,
 					struct section_addr_info *, int);
 
@@ -513,8 +513,6 @@ extern void set_initial_language (void);
 extern void find_lowest_section (bfd *, asection *, void *);
 
 extern bfd *symfile_bfd_open (const char *);
-
-extern bfd *gdb_bfd_open_maybe_remote (const char *);
 
 extern int get_section_index (struct objfile *, char *);
 

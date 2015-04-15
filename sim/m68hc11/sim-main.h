@@ -28,6 +28,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 typedef address_word sim_cia;
 
+typedef struct _sim_cpu SIM_CPU;
+
 #include "sim-signal.h"
 #include "sim-base.h"
 
@@ -551,7 +553,7 @@ extern int cpu_initialize (SIM_DESC sd, sim_cpu *cpu);
 
 /* Returns the address of a 68HC12 indexed operand.
    Pre and post modifications are handled on the source register.  */
-extern uint16 cpu_get_indexed_operand_addr (sim_cpu* cpu, int restrict);
+extern uint16 cpu_get_indexed_operand_addr (sim_cpu *cpu, int restricted);
 
 extern void cpu_return (sim_cpu *cpu);
 extern void cpu_set_sp (sim_cpu *cpu, uint16 val);
@@ -575,20 +577,12 @@ extern void m68hc11cpu_set_port (struct hw *me, sim_cpu *cpu,
 #define CIA_GET(CPU)      (cpu_get_pc (CPU))
 #define CIA_SET(CPU,VAL)  (cpu_set_pc ((CPU), (VAL)))
 
-#if (WITH_SMP)
-#define STATE_CPU(sd,n) (&(sd)->cpu[n])
-#else
-#define STATE_CPU(sd,n) (&(sd)->cpu[0])
-#endif
-
 struct sim_state {
-  sim_cpu        cpu[MAX_NR_PROCESSORS];
+  sim_cpu        *cpu[MAX_NR_PROCESSORS];
   device         *devices;
   sim_state_base base;
 };
 
-extern void sim_set_profile (int n);
-extern void sim_set_profile_size (int n);
 extern void sim_board_reset (SIM_DESC sd);
 
 #define PRINT_TIME  0x01

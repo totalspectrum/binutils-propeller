@@ -1429,6 +1429,10 @@ elf_i386_tls_transition (struct bfd_link_info *info, bfd *abfd,
   return TRUE;
 }
 
+/* Rename some of the generic section flags to better document how they
+   are used here.  */
+#define need_convert_mov_to_lea sec_flg0
+
 /* Look through the relocs for a section during the first phase, and
    calculate needed space in the global offset table, procedure linkage
    table, and dynamic reloc sections.  */
@@ -1884,6 +1888,10 @@ do_size:
 					     plt_got_align))
 	    return FALSE;
 	}
+
+      if (r_type == R_386_GOT32
+	  && (h == NULL || h->type != STT_GNU_IFUNC))
+	sec->need_convert_mov_to_lea = 1;
     }
 
   return TRUE;
@@ -2636,9 +2644,9 @@ elf_i386_convert_mov_to_lea (bfd *abfd, asection *sec,
   if (!is_elf_hash_table (link_info->hash))
     return FALSE;
 
-  /* Nothing to do if there are no codes, no relocations or no output.  */
+  /* Nothing to do if there is no need or no output.  */
   if ((sec->flags & (SEC_CODE | SEC_RELOC)) != (SEC_CODE | SEC_RELOC)
-      || sec->reloc_count == 0
+      || sec->need_convert_mov_to_lea == 0
       || bfd_is_abs_section (sec->output_section))
     return TRUE;
 
@@ -3143,6 +3151,7 @@ elf_i386_always_size_sections (bfd *output_bfd,
 	  tlsbase = (struct elf_link_hash_entry *)bh;
 	  tlsbase->def_regular = 1;
 	  tlsbase->other = STV_HIDDEN;
+	  tlsbase->root.linker_def = 1;
 	  (*bed->elf_backend_hide_symbol) (info, tlsbase, TRUE);
 	}
     }
@@ -3705,10 +3714,10 @@ elf_i386_relocate_section (bfd *output_bfd,
 	  /* Relocation is relative to the start of the global offset
 	     table.  */
 
-	  /* Check to make sure it isn't a protected function symbol
-	     for shared library since it may not be local when used
-	     as function address.  We also need to make sure that a
-	     symbol is defined locally.  */
+	  /* Check to make sure it isn't a protected function or data
+	     symbol for shared library since it may not be local when
+	     used as function address or with copy relocation.  We also
+	     need to make sure that a symbol is referenced locally.  */
 	  if (info->shared && h)
 	    {
 	      if (!h->def_regular)
@@ -3738,13 +3747,16 @@ elf_i386_relocate_section (bfd *output_bfd,
 		  return FALSE;
 		}
 	      else if (!info->executable
-		       && !SYMBOLIC_BIND (info, h)
-		       && h->type == STT_FUNC
+		       && !SYMBOL_REFERENCES_LOCAL (info, h)
+		       && (h->type == STT_FUNC
+			   || h->type == STT_OBJECT)
 		       && ELF_ST_VISIBILITY (h->other) == STV_PROTECTED)
 		{
 		  (*_bfd_error_handler)
-		    (_("%B: relocation R_386_GOTOFF against protected function `%s' can not be used when making a shared object"),
-		     input_bfd, h->root.root.string);
+		    (_("%B: relocation R_386_GOTOFF against protected %s `%s' can not be used when making a shared object"),
+		     input_bfd,
+		     h->type == STT_FUNC ? "function" : "data",
+		     h->root.root.string);
 		  bfd_set_error (bfd_error_bad_value);
 		  return FALSE;
 		}
@@ -5187,7 +5199,7 @@ bad_return:
   if (plt_sym_val == NULL)
     goto bad_return;
 
-  for (i = 0; i < count; i++, p++)
+  for (i = 0; i < count; i++)
     plt_sym_val[i] = -1;
 
   plt_offset = bed->plt->plt_entry_size;
@@ -5283,6 +5295,7 @@ elf_i386_add_symbol_hook (bfd * abfd,
 #define elf_backend_want_plt_sym	0
 #define elf_backend_got_header_size	12
 #define elf_backend_plt_alignment	4
+#define elf_backend_extern_protected_data 1
 
 /* Support RELA for objdump of prelink objects.  */
 #define elf_info_to_howto		      elf_i386_info_to_howto_rel

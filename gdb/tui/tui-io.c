@@ -63,17 +63,6 @@ key_is_backspace (int ch)
   return (ch == 8);
 }
 
-int
-key_is_command_char (int ch)
-{
-  return ((ch == KEY_NPAGE) || (ch == KEY_PPAGE)
-	  || (ch == KEY_LEFT) || (ch == KEY_RIGHT)
-	  || (ch == KEY_UP) || (ch == KEY_DOWN)
-	  || (ch == KEY_SF) || (ch == KEY_SR)
-	  || (ch == (int)'\f') 
-	  || key_is_start_sequence (ch));
-}
-
 /* Use definition from readline 4.3.  */
 #undef CTRL_CHAR
 #define CTRL_CHAR(c) \
@@ -146,8 +135,6 @@ static int tui_readline_pipe[2];
 /* The last gdb prompt that was registered in readline.
    This may be the main gdb prompt or a secondary prompt.  */
 static char *tui_rl_saved_prompt;
-
-static int tui_handle_resize_during_io (int, int);
 
 static void
 tui_putc (char c)
@@ -408,8 +395,6 @@ tui_mld_getc (FILE *fp)
   WINDOW *w = TUI_CMD_WIN->generic.handle;
   int c = wgetch (w);
 
-  c = tui_handle_resize_during_io (c, 1);
-
   return c;
 }
 
@@ -604,7 +589,6 @@ tui_getc (FILE *fp)
 #endif
 
   ch = wgetch (w);
-  ch = tui_handle_resize_during_io (ch, 0);
 
   /* The \n must be echoed because it will not be printed by
      readline.  */
@@ -627,16 +611,21 @@ tui_getc (FILE *fp)
         }
       else
         {
-          wmove (w, TUI_CMD_WIN->detail.command_info.cur_line,
-                 TUI_CMD_WIN->detail.command_info.curch);
-          waddch (w, ch);
+	  /* Move cursor to the end of the command line before emitting the
+	     newline.  We need to do so because when ncurses outputs a newline
+	     it truncates any text that appears past the end of the cursor.  */
+	  int px = TUI_CMD_WIN->detail.command_info.curch;
+	  int py = TUI_CMD_WIN->detail.command_info.cur_line;
+	  px += rl_end - rl_point;
+	  py += px / TUI_CMD_WIN->generic.width;
+	  px %= TUI_CMD_WIN->generic.width;
+	  wmove (w, py, px);
+	  waddch (w, ch);
         }
     }
   
-  if (key_is_command_char (ch))
-    {				/* Handle prev/next/up/down here.  */
-      ch = tui_dispatch_ctrl_char (ch);
-    }
+  /* Handle prev/next/up/down here.  */
+  ch = tui_dispatch_ctrl_char (ch);
   
   if (ch == '\n' || ch == '\r' || ch == '\f')
     TUI_CMD_WIN->detail.command_info.curch = 0;
@@ -679,20 +668,20 @@ tui_getc (FILE *fp)
 char *
 tui_expand_tabs (const char *string, int col)
 {
-  int n_adjust;
+  int n_adjust, ncol;
   const char *s;
   char *ret, *q;
 
   /* 1. How many additional characters do we need?  */
-  for (n_adjust = 0, s = string; s; )
+  for (ncol = col, n_adjust = 0, s = string; s; )
     {
       s = strpbrk (s, "\t");
       if (s)
 	{
-	  col += (s - string) + n_adjust;
+	  ncol += (s - string) + n_adjust;
 	  /* Adjustment for the next tab stop, minus one for the TAB
 	     we replace with spaces.  */
-	  n_adjust += 8 - (col % 8) - 1;
+	  n_adjust += 8 - (ncol % 8) - 1;
 	  s++;
 	}
     }
@@ -701,21 +690,21 @@ tui_expand_tabs (const char *string, int col)
   ret = q = xmalloc (strlen (string) + n_adjust + 1);
 
   /* 2. Copy the original string while replacing TABs with spaces.  */
-  for (s = string; s; )
+  for (ncol = col, s = string; s; )
     {
-      char *s1 = strpbrk (s, "\t");
+      const char *s1 = strpbrk (s, "\t");
       if (s1)
 	{
 	  if (s1 > s)
 	    {
 	      strncpy (q, s, s1 - s);
 	      q += s1 - s;
-	      col += s1 - s;
+	      ncol += s1 - s;
 	    }
 	  do {
 	    *q++ = ' ';
-	    col++;
-	  } while ((col % 8) != 0);
+	    ncol++;
+	  } while ((ncol % 8) != 0);
 	  s1++;
 	}
       else
@@ -724,25 +713,4 @@ tui_expand_tabs (const char *string, int col)
     }
 
   return ret;
-}
-
-/* Cleanup when a resize has occured.
-   Returns the character that must be processed.  */
-
-static int
-tui_handle_resize_during_io (int original_ch, int for_completion)
-{
-  if (tui_win_resized ())
-    {
-      tui_resize_all ();
-      tui_refresh_all_win ();
-      tui_set_win_resized_to (FALSE);
-      if (!for_completion)
-	{
-	  dont_repeat ();
-	  return '\n';
-	}
-    }
-
-  return original_ch;
 }

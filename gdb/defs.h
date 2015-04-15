@@ -100,9 +100,6 @@ enum compile_i_scope_types
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
-/* * Enable xdb commands if set.  */
-extern int xdb_commands;
-
 /* * Enable dbx commands if set.  */
 extern int dbx_commands;
 
@@ -249,7 +246,7 @@ extern int annotation_level;	/* in stack.c */
    "const char *" in unistd.h, so we can't declare the argument
    as "char *".  */
 
-extern char *re_comp (const char *);
+EXTERN_C char *re_comp (const char *);
 
 /* From symfile.c */
 

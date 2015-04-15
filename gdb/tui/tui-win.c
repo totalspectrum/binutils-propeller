@@ -32,8 +32,10 @@
 #include "cli/cli-cmds.h"
 #include "top.h"
 #include "source.h"
+#include "event-loop.h"
 
 #include "tui/tui.h"
+#include "tui/tui-io.h"
 #include "tui/tui-data.h"
 #include "tui/tui-wingeneral.h"
 #include "tui/tui-stack.h"
@@ -62,7 +64,6 @@ static int new_height_ok (struct tui_win_info *, int);
 static void tui_set_tab_width_command (char *, int);
 static void tui_refresh_all_command (char *, int);
 static void tui_set_win_height_command (char *, int);
-static void tui_xdb_set_win_height_command (char *, int);
 static void tui_all_windows_info (char *, int);
 static void tui_set_focus_command (char *, int);
 static void tui_scroll_forward_command (char *, int);
@@ -378,8 +379,6 @@ _initialize_tui_win (void)
 
   add_com ("refresh", class_tui, tui_refresh_all_command,
            _("Refresh the terminal display.\n"));
-  if (xdb_commands)
-    add_com_alias ("U", "refresh", class_tui, 0);
   add_com ("tabset", class_tui, tui_set_tab_width_command, _("\
 Set the width (in characters) of tab stops.\n\
 Usage: tabset <n>\n"));
@@ -415,10 +414,6 @@ Usage: < [win] [n]\n"));
   add_com (">", class_tui, tui_scroll_right_command, _("\
 Scroll window text to the right.\n\
 Usage: > [win] [n]\n"));
-  if (xdb_commands)
-    add_com ("w", class_xdb, tui_xdb_set_win_height_command, _("\
-XDB compatibility command for setting the height of a command window.\n\
-Usage: w <#lines>\n"));
 
   /* Define the tui control variables.  */
   add_setshow_enum_cmd ("border-kind", no_class, tui_border_kind_enums,
@@ -626,7 +621,7 @@ tui_scroll (enum tui_scroll_direction direction,
 void
 tui_refresh_all_win (void)
 {
-  enum tui_win_type type;
+  int type;
 
   clearok (curscr, TRUE);
   tui_refresh_all (tui_win_list);
@@ -658,7 +653,7 @@ tui_refresh_all_win (void)
 void
 tui_rehighlight_all (void)
 {
-  enum tui_win_type type;
+  int type;
 
   for (type = SRC_WIN; type < MAX_MAJOR_WINDOWS; type++)
     tui_check_and_display_highlight_if_needed (tui_win_list[type]);
@@ -682,7 +677,7 @@ tui_resize_all (void)
       struct tui_win_info *first_win;
       struct tui_win_info *second_win;
       struct tui_gen_win_info *locator = tui_locator_win_info_ptr ();
-      enum tui_win_type win_type;
+      int win_type;
       int new_height, split_diff, cmd_split_diff, num_wins_displayed = 2;
 
 #ifdef HAVE_RESIZE_TERM
@@ -829,35 +824,62 @@ tui_resize_all (void)
 }
 
 #ifdef SIGWINCH
-/* SIGWINCH signal handler for the tui.  This signal handler is always
-   called, even when the readline package clears signals because it is
-   set as the old_sigwinch() (TUI only).  */
+/* Token for use by TUI's asynchronous SIGWINCH handler.  */
+static struct async_signal_handler *tui_sigwinch_token;
+
+/* TUI's SIGWINCH signal handler.  */
 static void
 tui_sigwinch_handler (int signal)
 {
-  /* Say that a resize was done so that the readline can do it later
-     when appropriate.  */
+  /* Set win_resized to TRUE and asynchronously invoke our resize callback.  If
+     the callback is invoked while TUI is active then it ought to successfully
+     resize the screen, resetting win_resized to FALSE.  Of course, if the
+     callback is invoked while TUI is inactive then it will do nothing; in that
+     case, win_resized will remain TRUE until we get a chance to synchronously
+     resize the screen from tui_enable().  */
+  mark_async_signal_handler (tui_sigwinch_token);
   tui_set_win_resized_to (TRUE);
+}
+
+/* Callback for asynchronously resizing TUI following a SIGWINCH signal.  */
+static void
+tui_async_resize_screen (gdb_client_data arg)
+{
+  if (!tui_active)
+    return;
+
+  tui_resize_all ();
+  tui_refresh_all_win ();
+  tui_update_gdb_sizes ();
+  tui_set_win_resized_to (FALSE);
+  tui_redisplay_readline ();
 }
 #endif
 
-/* Initializes SIGWINCH signal handler for the tui.  */
+/* Initialize TUI's SIGWINCH signal handler.  Note that the handler is not
+   uninstalled when we exit TUI, so the handler should not assume that TUI is
+   always active.  */
 void
 tui_initialize_win (void)
 {
 #ifdef SIGWINCH
-#ifdef HAVE_SIGACTION
-  struct sigaction old_winch;
+  tui_sigwinch_token
+    = create_async_signal_handler (tui_async_resize_screen, NULL);
 
-  memset (&old_winch, 0, sizeof (old_winch));
-  old_winch.sa_handler = &tui_sigwinch_handler;
+  {
+#ifdef HAVE_SIGACTION
+    struct sigaction old_winch;
+
+    memset (&old_winch, 0, sizeof (old_winch));
+    old_winch.sa_handler = &tui_sigwinch_handler;
 #ifdef SA_RESTART
-  old_winch.sa_flags = SA_RESTART;
+    old_winch.sa_flags = SA_RESTART;
 #endif
-  sigaction (SIGWINCH, &old_winch, NULL);
+    sigaction (SIGWINCH, &old_winch, NULL);
 #else
-  signal (SIGWINCH, &tui_sigwinch_handler);
+    signal (SIGWINCH, &tui_sigwinch_handler);
 #endif
+  }
 #endif
 }
 
@@ -978,7 +1000,7 @@ tui_set_focus_command (char *arg, int from_tty)
 static void
 tui_all_windows_info (char *arg, int from_tty)
 {
-  enum tui_win_type type;
+  int type;
   struct tui_win_info *win_with_focus = tui_win_with_focus ();
 
   for (type = SRC_WIN; (type < MAX_MAJOR_WINDOWS); type++)
@@ -1137,45 +1159,6 @@ tui_set_win_height_command (char *arg, int from_tty)
   tui_enable ();
   tui_set_win_height (arg, from_tty);
 }
-
-
-/* XDB Compatibility command for setting the window height.  This will
-   increase or decrease the command window by the specified
-   amount.  */
-static void
-tui_xdb_set_win_height (char *arg, int from_tty)
-{
-  /* Make sure the curses mode is enabled.  */
-  tui_enable ();
-  if (arg != (char *) NULL)
-    {
-      int input_no = atoi (arg);
-
-      if (input_no > 0)
-	{			/* Add 1 for the locator.  */
-	  int new_height = tui_term_height () - (input_no + 1);
-
-	  if (!new_height_ok (tui_win_list[CMD_WIN], new_height)
-	      || tui_adjust_win_heights (tui_win_list[CMD_WIN],
-					 new_height) == TUI_FAILURE)
-	    warning (_("Invalid window height specified.\n%s"),
-		     XDBWIN_HEIGHT_USAGE);
-	}
-      else
-	warning (_("Invalid window height specified.\n%s"),
-		 XDBWIN_HEIGHT_USAGE);
-    }
-  else
-    warning (_("Invalid window height specified.\n%s"), XDBWIN_HEIGHT_USAGE);
-}
-
-/* Set the height of the specified window, with va_list.  */
-static void
-tui_xdb_set_win_height_command (char *arg, int from_tty)
-{
-  tui_xdb_set_win_height (arg, from_tty);
-}
-
 
 /* Function to adjust all window heights around the primary.   */
 static enum tui_status

@@ -1,3 +1,450 @@
+2015-04-09  Cary Coutant  <ccoutant@google.com>
+
+	* symtab.cc (Symbol::final_value_is_known): Check for TLS symbol
+	in a PIE link.
+	* testsuite/Makefile.am (tls_pie_test.sh): New test.
+	* testsuite/Makefile.in: Regenerate.
+	* testsuite/tls_pie_test.sh: New.
+
+2015-04-09  Cary Coutant  <ccoutant@google.com>
+
+	* debug.h (DEBUG_LOCATION): New.
+	(DEBUG_ALL): Include DEBUG_LOCATION.
+	(debug_string_to_enum): Add DEBUG_LOCATION.
+	* dwarf_reader.cc (Sized_dwarf_line_info::read_lines): Fix debug
+	output to print correct context.
+	(Sized_dwarf_line_info::do_addr2line): Add debug output. Return
+	up to 4 more locations at the beginning of the function.
+	* symtab.cc (Symbol_table::detect_odr_violations): Get canonical
+	result before sorting list of line numbers.
+	* testsuite/debug_msg.sh: Allow range of line numbers for
+	canonical results on optimized code.
+
+2015-04-07  HC Yen <hc.yen@mediatek.com>
+
+	Add AArch32 support for gold linker.
+	gold/
+	* arm.cc: Add V8 arch combine table.
+
+2015-04-06  Rafael Ávila de Espíndola <rafael.espindola@gmail.com>
+
+	* aarch64.cc (do_reloc_addend): Fix signature to match the parent one.
+
+2015-04-06  Rafael Ávila de Espíndola <rafael.espindola@gmail.com>
+
+	* gc.cc (Garbage_collection::do_transitive_closure): Avoid a call
+	to find by using the return value of insert.
+
+2015-04-06  Rafael Ávila de Espíndola <rafael.espindola@gmail.com>
+
+	* gc.cc (Garbage_collection::do_transitive_closure): Avoid a copy
+	constructor call.
+
+2015-04-06  Ilya Tocar  <ilya.tocar@intel.com>
+
+	PR gold/17641
+	* x86_64.cc (Target_x86_64::can_convert_mov_to_lea): New.
+	(Target_x86_64::Scan::local): Don't create GOT entry, when we
+	can convert mov to lea.
+	(Target_x86_64::Scan::global): Ditto.
+	(Target_x86_64::Relocate::relocate): Convert mov foo@GOTPCREL(%rip),
+	%reg to lea foo(%rip), %reg if possible.
+	* testsuite/Makefile.am (x86_64_mov_to_lea): New test.
+	* testsuite/x86_64_mov_to_lea1.s: New.
+	* testsuite/x86_64_mov_to_lea2.s: Ditto.
+	* testsuite/x86_64_mov_to_lea3.s: Ditto.
+	* testsuite/x86_64_mov_to_lea4.s: Ditto.
+	* testsuite/x86_64_mov_to_lea.sh: Ditto.
+
+2015-04-02  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* configure: Regenerated.
+
+2015-04-01  Ilya Tocar  <ilya.tocar@intel.com>
+
+	PR gold/17640
+	* i386.cc (Target_i386::can_convert_mov_to_lea): New.
+	(Target_i386::Scan::local): Don't create GOT entry, when we
+	can convert GOT to GOTOFF.
+	(Target_i386::Scan::global): Ditto.
+	(Target_i386::Relocate::relocate): Convert  mov foo@GOT(%reg), %reg to
+	lea foo@GOTOFF(%reg), %reg if possible.
+	* testsuite/Makefile.am (i386_mov_to_lea): New test.
+	* testsuite/i386_mov_to_lea1.s: New.
+	* testsuite/i386_mov_to_lea2.s: Ditto.
+	* testsuite/i386_mov_to_lea3.s: Ditto.
+	* testsuite/i386_mov_to_lea4.s: Ditto.
+	* testsuite/i386_mov_to_lea5.s: Ditto.
+	* testsuite/i386_mov_to_lea.sh: Ditto.
+
+2015-04-01  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* Makefile.am (ZLIB): New.
+	(ZLIBINC): Likewise.
+	(AM_CFLAGS): Add $(ZLIBINC).
+	(AM_CXXFLAGS): Likewise.
+	(ldadd_varldadd_var): Add $(ZLIB).
+	(incremental_dump_LDADD): Likewise.
+	(dwp_LDADD): Likewise.
+	* compressed_output.cc: Don't check HAVE_ZLIB_H to include
+	<zlib.h>.
+	(zlib_compress): Don't check HAVE_ZLIB_H.
+	(zlib_decompress): Likewise.
+	* options.h (compress_debug_sections): Likewise.
+	* configure.ac (AM_CONDITIONAL): Removed.
+	* testsuite/Makefile.am (ZLIB): New.
+	(LDADD): Add $(ZLIB).
+	Don't check HAVE_ZLIB.
+	* Makefile.in: Regenerated.
+	* config.in: Likewise.
+	* configure: Likewise.
+	* testsuite/Makefile.in: Likewise.
+
+2015-03-30  Jing Yu  <jingyu@google.com>
+
+	* aarch64-reloc.def: New TLSLD_ADD_DTPREL_HI12,
+	TLSLD_ADD_DTPREL_LO12_NC.
+	* aarch64.cc (Target_aarch64::define_tls_base_symbol): Always let
+	_TLS_MODULE_BASE_ point to the start of tls segment.
+	(Target_aarch64::optimize_tls_reloc): Add cases for
+	R_AARCH64_TLSLD_ADD_DTPREL_HI12 and
+	R_AARCH64_TLSLD_ADD_DTPREL_LO12_NC.
+	(Target_aarch64::Scan::local): Likewise.
+	(Target_aarch64::Scan::global): Likewise.
+	(Target_aarch64::Relocate::relocate): Likewise.
+	(Target_aarch64::Relocate::relocate_tls): Likewise. And remove
+	subtracting tls segment size from symbol value for TLSLD_*_DTPREL
+	relocations.
+
+2015-03-27  Rafael Ávila de Espíndola <rafael.espindola@gmail.com>
+
+	* merge.cc (Object_merge_map::add_mapping): call
+	Object_merge_map::Input_merge_map::add_mapping.
+	(Object_merge_map::Input_merge_map::add_mapping): New.
+	(Output_merge_data::do_add_input_section): Call
+	get_or_make_input_merge_map before a loop.
+	(Output_merge_string<Char_type>::finalize_merged_data): Call
+	get_or_make_input_merge_map before a loop.
+	* merge.h (Object_merge_map): Make Input_merge_map public.
+	* object.cc (Relobj::add_merge_mapping): Use get_or_create_merge_map.
+	(Relobj::get_or_create_merge_map): New.
+	* object.h (Relobj::get_or_create_merge_map): New.
+
+2015-03-24  Alan Modra  <amodra@gmail.com>
+
+	PR 18147
+	* powerpc.cc (Target_powerpc::Relocate::relocate): Don't report
+	relocation errors for branches to strong undefined symbols.
+
+2015-03-23  Rafael Ávila de Espíndola <rafael.espindola@gmail.com>
+
+	* merge.cc (Object_merge_map::get_input_merge_map): Make it const.
+	(Object_merge_map::is_merge_section_for): Remove.
+	(Object_merge_map::find_merge_section): New.
+	* merge.h (Object_merge_map::is_merge_section_for): Remove.
+	(Object_merge_map::find_merge_section): New.
+	(Object_merge_map::get_input_merge_map): Add a const version.
+	* object.cc (Relobj::is_merge_section_for): Remove.
+	(Relobj::find_merge_section): New.
+	* object.h (Relobj::is_merge_section_for): Remove.
+	(Relobj::find_merge_section): New.
+	* output.cc
+	(Output_section::Input_section::is_merge_section_for): Remove.
+	(Output_section::add_merge_input_section): Don't call
+	add_merge_input_section.
+	(Output_section::find_merge_section): Return const. Use
+	object->find_merge_section.
+	(Output_section::build_lookup_maps): Don't build a map for
+	merge sections.
+	(Output_section::is_input_address_mapped): Return false if
+	section is not found.
+	(Output_section::find_starting_output_address): Use
+	find_merge_section instead of is_merge_section_for.
+	(Output_section::add_script_input_section):  Don't build a map for
+	merge sections.
+	* output.h (Output_section_lookup_maps::merge_sections_by_id_): Remove.
+	(Output_section_lookup_maps::find_merge_section): Remove.
+	(Output_section_lookup_maps::add_merge_input_section) Remove.
+	(Output_section::find_merge_section): Return const.
+
+2015-03-22  Cary Coutant  <cary@google.com>
+
+	PR gold/18106
+	* i386.cc (Target_i386::Relocate::tls_gd_to_ie): Fix support for
+	non-SIB form of lea, with nop after the call.
+
+2015-03-21  Cary Coutant  <cary@google.com>
+
+	PR gold/14217
+	* output.cc (Output_segment::is_first_section_relro): Don't ignore
+	.tdata section.
+	(Output_segment::set_section_addresses): Don't align size of relro
+	segment for .tbss.
+
+2015-03-21  Cary Coutant  <cary@google.com>
+
+	PR gold/18010
+	* stringpool.cc (Stringpool_template): Don't optimize if section
+	alignment is greater than sizeof(char).
+
+2015-03-21  Cary Coutant  <cary@google.com>
+
+	PR gold/18048
+	* script-c.h (script_include_directive): Add first_token parameter.
+	* script.cc (script_include_directive): Add first_token parameter, and
+	pass it to read_script_file.
+	* yyscript.y (PARSING_SECTIONS_BLOCK, PARSING_SECTION_CMDS)
+	(PARSING_MEMORY_DEF): New tokens.
+	(top): Add new productions for INCLUDE files.
+	(file_cmd): Replace file_or_sections_cmd with copy of its productions.
+	Pass PARSING_LINKER_SCRIPT to script_include_directive.
+	(section_block_cmd): Likewise; pass PARSING_SECTIONS_BLOCK.
+	(section_cmd): Pass PARSING_SECTION_CMDS.
+	(file_or_sections_cmd): Remove.
+	(memory_def): Pass PARSING_MEMORY_DEF.
+	* testsuite/Makefile.am (memory_test_2): New test.
+	* testsuite/Makefile.in: Regenerate.
+	* testsuite/memory_test_inc.t: New script file.
+	* testsuite/memory_test_inc_1.t.src: New script file.
+	* testsuite/memory_test_inc_2.t.src: New script file.
+	* testsuite/memory_test_inc_3.t.src: New script file.
+
+2015-03-21  Cary Coutant  <cary@google.com>
+
+	* dwp.cc (Sized_relobj_dwo::do_section_contents): Delete.
+	(Sized_relobj_dwo::setup): Build compressed section map.
+	(Sized_relobj_dwo::do_decompressed_section_contents): Delete.
+	* dynobj.cc (Sized_dynobj::base_read_symbols): Build compressed
+	section map.
+	* object.cc (Sized_relobj_file::Sized_relobj_file): Remove
+	compressed_sections_ field.
+	(build_compressed_section_map): Take Object instead of
+	Sized_relobj_file parameter; add decompress_if_needed parameter.
+	(Sized_relobj_file::do_find_special_sections): Store compressed
+	section map in parent Object.
+	(Sized_relobj_file::do_decompressed_section_contents): Move
+	implementation to Object::decompressed_section_contents.
+	(Sized_relobj_file::do_discard_decompressed_sections): Move
+	implementation to Object::discard_decompressed_sections.
+	* object.h (build_compressed_section_map): Declare.
+	(Object::Object): Add compressed_sections_ field.
+	(Object::section_is_compressed): Move implementation here.
+	(Object::decompressed_section_contents): De-virtualize.
+	(Object::discard_decompressed_sections): De-virtualize.
+	(Object::do_section_is_compressed): Delete.
+	(Object::do_decompressed_section_contents): Delete.
+	(Object::set_compressed_sections): New method.
+	(Object::compressed_sections): New method.
+	(Object::compressed_sections_): New data member.
+	(Compressed_section_info, Compressed_section_map): Move to top of file.
+	(Sized_relobj_file::do_section_is_compressed): Delete.
+	(Sized_relobj_file::do_decompressed_section_contents): Delete.
+	(Sized_relobj_file::do_discard_decompressed_sections): Delete.
+	(Sized_relobj_file::compressed_sections_): Move to Object class.
+
+2015-03-21  Cary Coutant  <ccoutant@google.com>
+
+	PR gold/18152
+	* gold.cc (queue_middle_tasks): Finalize .eh_frame after laying out
+	deferred objects.
+
+2015-03-11  Cary Coutant  <ccoutant@google.com>
+
+	* options.cc (General_options::finalize): Don't allow -z relro
+	with incremental linking.
+	* testsuite/Makefile.am (incremental_test): Add -z norelro.
+	(incremental_test_2): Likewise.
+	(incremental_test_3): Likewise.
+	(incremental_test_4): Likewise.
+	(incremental_test_5): Likewise.
+	(incremental_test_6): Likewise.
+	(incremental_copy_test): Likewise.
+	(incremental_common_test_1): Likewise.
+	(incremental_comdat_test_1): Likewise.
+	* testsuite/Makefile.in: Regenerate.
+
+2015-03-09  Cary Coutant  <ccoutant@google.com>
+
+	PR gold/14675
+	* ehframe.cc (Eh_frame::add_ehframe_input_section): Change return type;
+	return enum indicating whether .eh_frame section is empty, optimizable,
+	unrecognized, or an end marker. Adjust explicit instantiations.
+	* ehframe.h (Eh_frame::Eh_frame_section_disposition): New enum type.
+	(Eh_frame::add_ehframe_input_section): Change return type.
+	* gold.cc (queue_middle_tasks): Call Layout::finalize_eh_frame_section.
+	* layout.cc (Layout::layout_eh_frame): Don't add optimized sections
+	to the .eh_frame output section until we see the end marker.
+	(Layout::finalize_eh_frame_section): New.
+	* layout.h: (Layout::finalize_eh_frame_section): New.
+
+2015-03-05  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* output.cc (Relobj::initialize_input_to_output_map<size>):
+	Remove typename on elfcpp::Elf_types<size>::Elf_Addr.
+
+2015-03-04  Cary Coutant  <ccoutant@google.com>
+
+	* parameters.cc (Parameters::set_target_once): Call
+	Target::select_as_default_target just once from here...
+	(set_parameters_target): ...instead of from here.
+
+2015-03-04  Rafael Ávila de Espíndola <rafael.espindola@gmail.com>
+
+	* ehframe.cc (Cie::set_output_offset): Pass in and use a
+	Output_section_data instead of a Merge_map.
+	(Eh_frame::Eh_frame): Don't initialize merge_map_.
+	(Eh_frame::read_cie): Use add_merge_mapping instead of
+	Merge_map::add_mapping.
+	(Eh_frame::read_fde): Ditto.
+	(Eh_frame::set_final_data_size): Use this instead of this->merge_map_.
+	(Eh_frame::do_output_offset): Use merge_output_offset istead of
+	merge_map_->get_output_offset.
+	(Eh_frame::do_is_merge_section_for): Delete.
+	* ehframe.h (Fde::add_mapping): Pass in and use a Output_section_data
+	instead of a Merge_map.
+	(Cie::set_output_offset): Pass in a Output_section_data instead of a
+	Merge_map.
+	(Eh_frame::do_is_merge_section_for): Delete.
+	(Eh_frame::merge_map_): Delete.
+	* merge.cc (Object_merge_map::get_or_make_input_merge_map): Pass in
+	and use a Output_section_data instead of a Merge_map.
+	(Object_merge_map::add_mapping): Ditto.
+	(Object_merge_map::get_output_offset): Remove the merge_map argument.
+	(Object_merge_map::is_merge_section_for): Pass in and use a
+	Output_section_data instead of a Merge_map.
+	(Merge_map): Delete.
+	(Output_merge_base::do_output_offset): Use merge_output_offset instead
+	of merge_map_.get_output_offset.
+	(Output_merge_base::do_is_merge_section_for): Delete.
+	(Output_merge_data::do_add_input_section): Use
+	object->add_merge_mapping instead of add_mapping.
+	(Output_merge_string<Char_type>::finalize_merged_data): Ditto.
+	* merge.h (Merge_map): Delete forward declaration.
+	(Object_merge_map::add_mapping): Pass in and use a Output_section_data
+	instead of a Merge_map.
+	(Object_merge_map::get_output_offset): Remove the merge_map argument.
+	(Object_merge_map::is_merge_section_for): Pass in and use a
+	Output_section_data instead of a Merge_map.
+	(Input_merge_map::Object_merge_map::merge_map): Replace with
+	output_data.
+	(Object_merge_map::get_or_make_input_merge_map): Pass in and use a
+	Output_section_data instead of a Merge_map.
+	(Merge_map): Delete.
+	(Output_merge_base::Output_merge_base): Don't initialize merge_map_.
+	(Output_merge_base::do_is_merge_section_for): Delete.
+	(Output_merge_base::add_mapping): Delete.
+	(Output_merge_base::merge_map_): Delete.
+	* object.cc (Relobj::initialize_input_to_output_map): New.
+	(Relobj::initialize_input_to_output_map): New.
+	(Relobj::merge_output_offset): New.
+	(Relobj::is_merge_section_for): New.
+	(Relobj::initialize_input_to_output_map): Instantiate for 32 and 64
+	bits.
+	* object.h (Relobj::merge_map): Delete.
+	(initialize_input_to_output_map): New.
+	(set_merge_map): Delete.
+	(add_merge_mapping): New.
+	(merge_output_offset): New.
+	(is_merge_section_for): New.
+	* output.cc (Output_section::Input_section::is_merge_section_for):
+	Use object->is_merge_section_for.
+	* output.h (Output_section_data::is_merge_section_for): Delete.
+	(Output_section_data::do_is_merge_section_for): Delete.
+	* reloc.cc (Merged_symbol_value<size>::initialize_input_to_output_map):
+	Use object->initialize_input_to_output_map.
+	(Merged_symbol_value<size>::value_from_output_section): Use
+	object->merge_output_offset.
+
+2015-03-02  Peter Collingbourne  <pcc@google.com>
+            Cary Coutant  <ccoutant@google.com>
+
+	* output.cc (Output_section::add_merge_input_section): Do not
+	attempt to merge sections with an entsize of 0.
+
+2015-03-02  Khem Raj  <raj.khem@gmail.com>
+
+	* attributes.h (class Output_attributes_section_data ): Add
+	do_print_to_mapfile function.
+
+2015-02-24  Alan Modra  <amodra@gmail.com>
+
+	PR 18010
+	* powerpc.cc (Powerpc_relocate_functions::addr16_ds): Always
+	complain if value is not a multiple of four.
+	(Target_powerpc::Relocate::relocate): Correct handling of
+	R_POWERPC_GOT_TPREL16 and R_POWERPC_GOT_TPREL16_LO for ppc64.
+
+2015-02-21  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* configure.ac (default_size): Set to 32 for x32.
+	* configure: Regenerated.
+
+2015-02-18  Alan Modra  <amodra@gmail.com>
+
+	PR 17954
+	* powerpc.cc (Global_symbol_visitor_opd::operator()): Set default
+	visibility.
+
+2015-02-17  Rafael Ávila de Espíndola <rafael.espindola@gmail.com>
+
+	* gc.h (Garbage_collection::add_reference): Don't use find.
+
+2015-02-17  Rafael Ávila de Espíndola <rafael.espindola@gmail.com>
+
+	* object.cc (write_local_symbols): avoid std::vector copy.
+
+2015-02-17  Rafael Ávila de Espíndola <rafael.espindola@gmail.com>
+
+	* merge.cc (get_output_offset): Use upper_bound instead of lower_bound.
+
+2015-02-09  Mark Wielaard  <mjw@redhat.com>
+
+	* gdb-index.cc (Gdb_index_info_reader::visit_top_die): Recognize
+	DW_LANG_Fortran03 and DW_LANG_Fortran08.
+
+2015-02-16  Cary Coutant  <ccoutant@google.com>
+
+	PR gold/13577
+	PR gold/16992
+	* layout.cc (Layout::finish_dynamic_section): Don't set DT_SYMBOLIC or
+	DF_SYMBOLIC if --dynamic-list option is used.
+	* options.cc (General_options::finalize): --dynamic-list is not
+	mutually exclusive with -Bsymbolic.
+	* symtab.h (Symbol::is_preemptible): Don't exclude dynamic symbols not
+	listed in --dynamic-list.
+	* testsuite/Makefile.am (dynamic_list_lib2.so): Add
+	-Bsymbolic-functions.
+	* testsuite/Makefile.in: Regenerate.
+
+2015-02-16  Cary Coutant  <ccoutant@google.com>
+
+	PR gold/17971
+	* incremental.cc: Remove redundant include of "output.h".
+
+2015-02-12  Jing Yu  <jingyu@google.com>
+
+	* aarch64-reloc.def (TLSLE_MOVW_TPREL_G2, TLSLE_MOVW_TPREL_G1,
+	TLSLE_MOVW_TPREL_G1_NC, TLSLE_MOVW_TPREL_G0, TLSLE_MOVW_TPREL_G0_NC,):
+	New relocation.
+	* aarch64.cc (Target_aarch64::Scan::local): Add cases for new
+	TLSLE_MOVW_* relocations.
+	(Target_aarch64::Scan::global): Likewise.
+	(Target_aarch64::Relocate::relocate): Likewise.
+	(Target_aarch64::Relocate::relocate_tls): Add cases and handlings
+	for new TLSLE_MOVW_* relocations.
+
+2015-02-11  Will Newton  <will.newton@linaro.org>
+
+	PR gold/13321
+	* arm.cc (Target_arm::make_plt_section): Create an ARM
+	state mapping symbol at the start of the PLT.
+
+2015-02-09  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* testsuite/Makefile.am (two_file_shared_2_pic_1_test_DEPENDENCIES):
+	Replace two_file_shared_2.so with two_file_shared_1.so.
+	* testsuite/Makefile.in: Regenerated.
+
 2015-02-09  Alan Modra  <amodra@gmail.com>
 
 	* testsuite/Makefile.am (MOSTLYCLEANFILES): Add libweak_undef_2.a,

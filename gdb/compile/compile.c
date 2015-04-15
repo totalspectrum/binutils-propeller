@@ -172,7 +172,7 @@ do_rmdir (void *arg)
   char *zap;
   int wstat;
 
-  gdb_assert (strncmp (dir, TMP_PREFIX, strlen (TMP_PREFIX)) == 0);
+  gdb_assert (startswith (dir, TMP_PREFIX));
   zap = concat ("rm -rf ", dir, (char *) NULL);
   wstat = system (zap);
   if (wstat == -1 || !WIFEXITED (wstat) || WEXITSTATUS (wstat) != 0)
@@ -313,7 +313,7 @@ get_selected_pc_producer_options (void)
   const char *cs;
 
   if (symtab == NULL || symtab->producer == NULL
-      || strncmp (symtab->producer, "GNU ", strlen ("GNU ")) != 0)
+      || !startswith (symtab->producer, "GNU "))
     return NULL;
 
   cs = symtab->producer;
@@ -483,7 +483,9 @@ compile_to_object (struct command_line *cmd, char *cmd_string,
 
   os_rx = osabi_triplet_regexp (gdbarch_osabi (gdbarch));
   arch_rx = gdbarch_gnu_triplet_regexp (gdbarch);
-  triplet_rx = concat (arch_rx, "-[^-]*-", os_rx, (char *) NULL);
+
+  /* Allow triplets with or without vendor set.  */
+  triplet_rx = concat (arch_rx, "(-[^-]*)?-", os_rx, (char *) NULL);
   make_cleanup (xfree, triplet_rx);
 
   /* Set compiler command-line arguments.  */

@@ -34,6 +34,7 @@
 #include "gdb/sim-h8300.h"
 #include "sys/stat.h"
 #include "sys/types.h"
+#include "sim-options.h"
 
 #ifndef SIGTRAP
 # define SIGTRAP 5
@@ -4595,15 +4596,6 @@ sim_resume (SIM_DESC sd, int step, int siggnal)
 }
 
 int
-sim_trace (SIM_DESC sd)
-{
-  /* FIXME: Unfinished.  */
-  (*sim_callback->printf_filtered) (sim_callback,
-				    "sim_trace: trace not supported.\n");
-  return 1;	/* Done.  */
-}
-
-int
 sim_write (SIM_DESC sd, SIM_ADDR addr, const unsigned char *buffer, int size)
 {
   int i;
@@ -4790,14 +4782,6 @@ sim_stop_reason (SIM_DESC sd, enum sim_stop *reason, int *sigrc)
   sim_engine_get_run_state (sd, reason, sigrc);
 }
 
-/* FIXME: Rename to sim_set_mem_size.  */
-
-void
-sim_size (int n)
-{
-  /* Memory size is fixed.  */
-}
-
 static void
 set_simcache_size (SIM_DESC sd, int n)
 {
@@ -4903,7 +4887,14 @@ sim_open (SIM_OPEN_KIND kind,
   sim_cpu *cpu;
 
   sd = sim_state_alloc (kind, callback);
-  sd->cpu = sim_cpu_alloc (sd, 0);
+
+  /* The cpu data is kept in a separately allocated chunk of memory.  */
+  if (sim_cpu_alloc_all (sd, 1, /*cgen_cpu_max_extra_bytes ()*/0) != SIM_RC_OK)
+    {
+      free_state (sd);
+      return 0;
+    }
+
   cpu = STATE_CPU (sd, 0);
   SIM_ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
   sim_state_initialize (sd, cpu);
@@ -5093,10 +5084,4 @@ sim_create_inferior (SIM_DESC sd, struct bfd *abfd, char **argv, char **env)
     }
   
   return SIM_RC_OK;
-}
-
-void
-sim_set_callbacks (struct host_callback_struct *ptr)
-{
-  sim_callback = ptr;
 }

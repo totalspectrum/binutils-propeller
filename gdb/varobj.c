@@ -201,7 +201,7 @@ static char *name_of_child (struct varobj *, int);
 
 static struct value *value_of_root (struct varobj **var_handle, int *);
 
-static struct value *value_of_child (struct varobj *parent, int index);
+static struct value *value_of_child (const struct varobj *parent, int index);
 
 static char *my_value_of_variable (struct varobj *var,
 				   enum varobj_display_formats format);
@@ -298,7 +298,6 @@ varobj_create (char *objname,
       const struct block *block;
       const char *p;
       struct value *value = NULL;
-      volatile struct gdb_exception except;
       CORE_ADDR pc;
 
       /* Parse and evaluate the expression, filling in as much of the
@@ -338,16 +337,17 @@ varobj_create (char *objname,
       innermost_block = NULL;
       /* Wrap the call to parse expression, so we can 
          return a sensible error.  */
-      TRY_CATCH (except, RETURN_MASK_ERROR)
+      TRY
 	{
 	  var->root->exp = parse_exp_1 (&p, pc, block, 0);
 	}
 
-      if (except.reason < 0)
+      CATCH (except, RETURN_MASK_ERROR)
 	{
 	  do_cleanups (old_chain);
 	  return NULL;
 	}
+      END_CATCH
 
       /* Don't allow variables to be created for types.  */
       if (var->root->exp->elts[0].opcode == OP_TYPE
@@ -388,12 +388,11 @@ varobj_create (char *objname,
       /* We definitely need to catch errors here.
          If evaluate_expression succeeds we got the value we wanted.
          But if it fails, we still go on with a call to evaluate_type().  */
-      TRY_CATCH (except, RETURN_MASK_ERROR)
+      TRY
 	{
 	  value = evaluate_expression (var->root->exp);
 	}
-
-      if (except.reason < 0)
+      CATCH (except, RETURN_MASK_ERROR)
 	{
 	  /* Error getting the value.  Try to at least get the
 	     right type.  */
@@ -401,14 +400,16 @@ varobj_create (char *objname,
 
 	  var->type = value_type (type_only_value);
 	}
-	else
-	  {
-	    int real_type_found = 0;
+      END_CATCH
 
-	    var->type = value_actual_type (value, 0, &real_type_found);
-	    if (real_type_found)
-	      value = value_cast (var->type, value);
-	  }
+      if (value != NULL)
+	{
+	  int real_type_found = 0;
+
+	  var->type = value_actual_type (value, 0, &real_type_found);
+	  if (real_type_found)
+	    value = value_cast (var->type, value);
+	}
 
       /* Set language info */
       var->root->lang_ops = var->root->exp->language_defn->la_varobj_ops;
@@ -702,7 +703,7 @@ static void
 install_dynamic_child (struct varobj *var,
 		       VEC (varobj_p) **changed,
 		       VEC (varobj_p) **type_changed,
-		       VEC (varobj_p) **new,
+		       VEC (varobj_p) **newobj,
 		       VEC (varobj_p) **unchanged,
 		       int *cchanged,
 		       int index,
@@ -713,9 +714,9 @@ install_dynamic_child (struct varobj *var,
       /* There's no child yet.  */
       struct varobj *child = varobj_add_child (var, item);
 
-      if (new)
+      if (newobj)
 	{
-	  VEC_safe_push (varobj_p, *new, child);
+	  VEC_safe_push (varobj_p, *newobj, child);
 	  *cchanged = 1;
 	}
     }
@@ -790,7 +791,7 @@ static int
 update_dynamic_varobj_children (struct varobj *var,
 				VEC (varobj_p) **changed,
 				VEC (varobj_p) **type_changed,
-				VEC (varobj_p) **new,
+				VEC (varobj_p) **newobj,
 				VEC (varobj_p) **unchanged,
 				int *cchanged,
 				int update_children,
@@ -851,7 +852,7 @@ update_dynamic_varobj_children (struct varobj *var,
 
 	  install_dynamic_child (var, can_mention ? changed : NULL,
 				 can_mention ? type_changed : NULL,
-				 can_mention ? new : NULL,
+				 can_mention ? newobj : NULL,
 				 can_mention ? unchanged : NULL,
 				 can_mention ? cchanged : NULL, i,
 				 item);
@@ -1019,10 +1020,10 @@ varobj_default_is_path_expr_parent (const struct varobj *var)
 
 /* Return the path expression parent for VAR.  */
 
-struct varobj *
-varobj_get_path_expr_parent (struct varobj *var)
+const struct varobj *
+varobj_get_path_expr_parent (const struct varobj *var)
 {
-  struct varobj *parent = var;
+  const struct varobj *parent = var;
 
   while (!is_root_p (parent) && !is_path_expr_parent (parent))
     parent = parent->parent;
@@ -1033,16 +1034,17 @@ varobj_get_path_expr_parent (struct varobj *var)
 /* Return a pointer to the full rooted expression of varobj VAR.
    If it has not been computed yet, compute it.  */
 char *
-varobj_get_path_expr (struct varobj *var)
+varobj_get_path_expr (const struct varobj *var)
 {
   if (var->path_expr == NULL)
     {
       /* For root varobjs, we initialize path_expr
 	 when creating varobj, so here it should be
 	 child varobj.  */
+      struct varobj *mutable_var = (struct varobj *) var;
       gdb_assert (!is_root_p (var));
 
-      var->path_expr = (*var->root->lang_ops->path_expr_of_child) (var);
+      mutable_var->path_expr = (*var->root->lang_ops->path_expr_of_child) (var);
     }
 
   return var->path_expr;
@@ -1102,23 +1104,23 @@ varobj_set_value (struct varobj *var, char *expression)
   struct value *value = NULL; /* Initialize to keep gcc happy.  */
   int saved_input_radix = input_radix;
   const char *s = expression;
-  volatile struct gdb_exception except;
 
   gdb_assert (varobj_editable_p (var));
 
   input_radix = 10;		/* ALWAYS reset to decimal temporarily.  */
   exp = parse_exp_1 (&s, 0, 0, 0);
-  TRY_CATCH (except, RETURN_MASK_ERROR)
+  TRY
     {
       value = evaluate_expression (exp);
     }
 
-  if (except.reason < 0)
+  CATCH (except, RETURN_MASK_ERROR)
     {
       /* We cannot proceed without a valid expression.  */
       xfree (exp);
       return 0;
     }
+  END_CATCH
 
   /* All types that are editable must also be changeable.  */
   gdb_assert (varobj_value_is_changeable_p (var));
@@ -1137,13 +1139,16 @@ varobj_set_value (struct varobj *var, char *expression)
 
   /* The new value may be lazy.  value_assign, or
      rather value_contents, will take care of this.  */
-  TRY_CATCH (except, RETURN_MASK_ERROR)
+  TRY
     {
       val = value_assign (var->value, value);
     }
 
-  if (except.reason < 0)
-    return 0;
+  CATCH (except, RETURN_MASK_ERROR)
+    {
+      return 0;
+    }
+  END_CATCH
 
   /* If the value has changed, record it, so that next -var-update can
      report this change.  If a variable had a value of '1', we've set it
@@ -1378,7 +1383,7 @@ install_new_value (struct varobj *var, struct value *value, int initial)
      will be lazy, which means we've lost that old value.  */
   if (need_to_fetch && value && value_lazy (value))
     {
-      struct varobj *parent = var->parent;
+      const struct varobj *parent = var->parent;
       int frozen = var->frozen;
 
       for (; !frozen && parent; parent = parent->parent)
@@ -1394,20 +1399,20 @@ install_new_value (struct varobj *var, struct value *value, int initial)
 	}
       else
 	{
-	  volatile struct gdb_exception except;
 
-	  TRY_CATCH (except, RETURN_MASK_ERROR)
+	  TRY
 	    {
 	      value_fetch_lazy (value);
 	    }
 
-	  if (except.reason < 0)
+	  CATCH (except, RETURN_MASK_ERROR)
 	    {
 	      /* Set the value to NULL, so that for the next -var-update,
 		 we don't try to compare the new value with this value,
 		 that we couldn't even read.  */
 	      value = NULL;
 	    }
+	  END_CATCH
 	}
     }
 
@@ -1621,11 +1626,11 @@ varobj_value_has_mutated (const struct varobj *var, struct value *new_value,
    to point to the new varobj.  */
 
 VEC(varobj_update_result) *
-varobj_update (struct varobj **varp, int explicit)
+varobj_update (struct varobj **varp, int is_explicit)
 {
   int type_changed = 0;
   int i;
-  struct value *new;
+  struct value *newobj;
   VEC (varobj_update_result) *stack = NULL;
   VEC (varobj_update_result) *result = NULL;
 
@@ -1634,7 +1639,7 @@ varobj_update (struct varobj **varp, int explicit)
      changing type.  One use case for frozen varobjs is
      retaining previously evaluated expressions, and we don't
      want them to be reevaluated at all.  */
-  if (!explicit && (*varp)->frozen)
+  if (!is_explicit && (*varp)->frozen)
     return result;
 
   if (!(*varp)->root->is_valid)
@@ -1659,15 +1664,15 @@ varobj_update (struct varobj **varp, int explicit)
 	 the frame in which a local existed.  We are letting the 
 	 value_of_root variable dispose of the varobj if the type
 	 has changed.  */
-      new = value_of_root (varp, &type_changed);
-      if (update_type_if_necessary(*varp, new))
+      newobj = value_of_root (varp, &type_changed);
+      if (update_type_if_necessary(*varp, newobj))
 	  type_changed = 1;
       r.varobj = *varp;
       r.type_changed = type_changed;
-      if (install_new_value ((*varp), new, type_changed))
+      if (install_new_value ((*varp), newobj, type_changed))
 	r.changed = 1;
       
-      if (new == NULL)
+      if (newobj == NULL)
 	r.status = VAROBJ_NOT_IN_SCOPE;
       r.value_installed = 1;
 
@@ -1702,15 +1707,15 @@ varobj_update (struct varobj **varp, int explicit)
 	{
 	  struct type *new_type;
 
-	  new = value_of_child (v->parent, v->index);
-	  if (update_type_if_necessary(v, new))
+	  newobj = value_of_child (v->parent, v->index);
+	  if (update_type_if_necessary(v, newobj))
 	    r.type_changed = 1;
-	  if (new)
-	    new_type = value_type (new);
+	  if (newobj)
+	    new_type = value_type (newobj);
 	  else
 	    new_type = v->root->lang_ops->type_of_child (v->parent, v->index);
 
-	  if (varobj_value_has_mutated (v, new, new_type))
+	  if (varobj_value_has_mutated (v, newobj, new_type))
 	    {
 	      /* The children are no longer valid; delete them now.
 	         Report the fact that its type changed as well.  */
@@ -1722,7 +1727,7 @@ varobj_update (struct varobj **varp, int explicit)
 	      r.type_changed = 1;
 	    }
 
-	  if (install_new_value (v, new, r.type_changed))
+	  if (install_new_value (v, newobj, r.type_changed))
 	    {
 	      r.changed = 1;
 	      v->updated = 0;
@@ -1734,7 +1739,7 @@ varobj_update (struct varobj **varp, int explicit)
       if (varobj_is_dynamic_p (v))
 	{
 	  VEC (varobj_p) *changed = 0, *type_changed = 0, *unchanged = 0;
-	  VEC (varobj_p) *new = 0;
+	  VEC (varobj_p) *newobj = 0;
 	  int i, children_changed = 0;
 
 	  if (v->frozen)
@@ -1766,14 +1771,14 @@ varobj_update (struct varobj **varp, int explicit)
 
 	  /* If update_dynamic_varobj_children returns 0, then we have
 	     a non-conforming pretty-printer, so we skip it.  */
-	  if (update_dynamic_varobj_children (v, &changed, &type_changed, &new,
+	  if (update_dynamic_varobj_children (v, &changed, &type_changed, &newobj,
 					      &unchanged, &children_changed, 1,
 					      v->from, v->to))
 	    {
-	      if (children_changed || new)
+	      if (children_changed || newobj)
 		{
 		  r.children_changed = 1;
-		  r.new = new;
+		  r.newobj = newobj;
 		}
 	      /* Push in reverse order so that the first child is
 		 popped from the work stack first, and so will be
@@ -2368,14 +2373,17 @@ value_of_root_1 (struct varobj **var_handle)
 
   if (within_scope)
     {
-      volatile struct gdb_exception except;
 
       /* We need to catch errors here, because if evaluate
          expression fails we want to just return NULL.  */
-      TRY_CATCH (except, RETURN_MASK_ERROR)
+      TRY
 	{
 	  new_val = evaluate_expression (var->root->exp);
 	}
+      CATCH (except, RETURN_MASK_ERROR)
+	{
+	}
+      END_CATCH
     }
 
   do_cleanups (back_to);
@@ -2483,7 +2491,7 @@ value_of_root (struct varobj **var_handle, int *type_changed)
 
 /* What is the ``struct value *'' for the INDEX'th child of PARENT?  */
 static struct value *
-value_of_child (struct varobj *parent, int index)
+value_of_child (const struct varobj *parent, int index)
 {
   struct value *value;
 

@@ -3146,7 +3146,8 @@ section_covers_vma (bfd *abfd ATTRIBUTE_UNUSED, asection *section, void *ptr)
 }
 
 /* Create synthetic symbols, effectively restoring "dot-symbol" function
-   entry syms.  Also generate @plt symbols for the glink branch table.  */
+   entry syms.  Also generate @plt symbols for the glink branch table.
+   Returns count of synthetic symbols in RET or -1 on error.  */
 
 static long
 ppc64_elf_get_synthetic_symtab (bfd *abfd,
@@ -3289,6 +3290,8 @@ ppc64_elf_get_synthetic_symtab (bfd *abfd,
 	    }
 	}
 
+      if (size == 0)
+	goto done;
       s = *ret = bfd_malloc (size);
       if (s == NULL)
 	{
@@ -3349,10 +3352,11 @@ ppc64_elf_get_synthetic_symtab (bfd *abfd,
 
       if (opd != NULL && !bfd_malloc_and_get_section (abfd, opd, &contents))
 	{
+	free_contents_and_exit_err:
+	  count = -1;
 	free_contents_and_exit:
 	  if (contents)
 	    free (contents);
-	  count = -1;
 	  goto done;
 	}
 
@@ -3383,7 +3387,7 @@ ppc64_elf_get_synthetic_symtab (bfd *abfd,
 	  void (*swap_dyn_in) (bfd *, const void *, Elf_Internal_Dyn *);
 
 	  if (!bfd_malloc_and_get_section (abfd, dynamic, &dynbuf))
-	    goto free_contents_and_exit;
+	    goto free_contents_and_exit_err;
 
 	  extdynsize = get_elf_backend_data (abfd)->s->sizeof_dyn;
 	  swap_dyn_in = get_elf_backend_data (abfd)->s->swap_dyn_in;
@@ -3445,7 +3449,7 @@ ppc64_elf_get_synthetic_symtab (bfd *abfd,
 	    {
 	      slurp_relocs = get_elf_backend_data (abfd)->s->slurp_reloc_table;
 	      if (! (*slurp_relocs) (abfd, relplt, dyn_syms, TRUE))
-		goto free_contents_and_exit;
+		goto free_contents_and_exit_err;
 
 	      plt_count = relplt->size / sizeof (Elf64_External_Rela);
 	      size += plt_count * sizeof (asymbol);
@@ -3460,9 +3464,11 @@ ppc64_elf_get_synthetic_symtab (bfd *abfd,
 	    }
 	}
 
+      if (size == 0)
+	goto free_contents_and_exit;
       s = *ret = bfd_malloc (size);
       if (s == NULL)
-	goto free_contents_and_exit;
+	goto free_contents_and_exit_err;
 
       names = (char *) (s + count + plt_count + (resolv_vma != 0));
 
@@ -5951,6 +5957,10 @@ opd_entry_value (asection *opd_sec,
 	  ppc64_elf_tdata (opd_bfd)->opd.contents = contents;
 	}
 
+      /* PR 17512: file: 64b9dfbb.  */
+      if (offset + 7 >= opd_sec->size || offset + 7 < offset)
+	return (bfd_vma) -1;
+
       val = bfd_get_64 (opd_bfd, contents + offset);
       if (code_sec != NULL)
 	{
@@ -5992,7 +6002,6 @@ opd_entry_value (asection *opd_sec,
 
   /* Go find the opd reloc at the sym address.  */
   lo = relocs;
-  BFD_ASSERT (lo != NULL);
   hi = lo + opd_sec->reloc_count - 1; /* ignore last reloc */
   val = (bfd_vma) -1;
   while (lo < hi)
@@ -7086,9 +7095,26 @@ ppc64_elf_adjust_dynamic_symbol (struct bfd_link_info *info,
   if (!h->def_dynamic || !h->ref_regular || h->def_regular)
     return TRUE;
 
+  /* If -z nocopyreloc was given, don't generate them either.  */
+  if (info->nocopyreloc)
+    {
+      h->non_got_ref = 0;
+      return TRUE;
+    }
+
   /* If we didn't find any dynamic relocs in read-only sections, then
      we'll be keeping the dynamic relocs and avoiding the copy reloc.  */
   if (ELIMINATE_COPY_RELOCS && !readonly_dynrelocs (h))
+    {
+      h->non_got_ref = 0;
+      return TRUE;
+    }
+
+  /* Protected variables do not work with .dynbss.  The copy in
+     .dynbss won't be used by the shared library with the protected
+     definition for the variable.  Text relocations are preferable
+     to an incorrect program.  */
+  if (h->protected_def)
     {
       h->non_got_ref = 0;
       return TRUE;
@@ -10200,7 +10226,10 @@ plt_stub_size (struct ppc_link_hash_table *htab,
       size += 4;
       if (htab->params->plt_static_chain)
 	size += 4;
-      if (htab->params->plt_thread_safe)
+      if (htab->params->plt_thread_safe
+	  && htab->elf.dynamic_sections_created
+	  && stub_entry->h != NULL
+	  && stub_entry->h->elf.dynindx != -1)
 	size += 8;
       if (PPC_HA (off + 8 + 8 * htab->params->plt_static_chain) != PPC_HA (off))
 	size += 4;
@@ -10240,16 +10269,18 @@ build_plt_stub (struct ppc_link_hash_table *htab,
   bfd *obfd = htab->params->stub_bfd;
   bfd_boolean plt_load_toc = htab->opd_abi;
   bfd_boolean plt_static_chain = htab->params->plt_static_chain;
-  bfd_boolean plt_thread_safe = htab->params->plt_thread_safe;
+  bfd_boolean plt_thread_safe = (htab->params->plt_thread_safe
+				 && htab->elf.dynamic_sections_created
+				 && stub_entry->h != NULL
+				 && stub_entry->h->elf.dynindx != -1);
   bfd_boolean use_fake_dep = plt_thread_safe;
   bfd_vma cmp_branch_off = 0;
 
   if (!ALWAYS_USE_FAKE_DEP
       && plt_load_toc
       && plt_thread_safe
-      && !(stub_entry->h != NULL
-	   && (stub_entry->h == htab->tls_get_addr_fd
-	       || stub_entry->h == htab->tls_get_addr)
+      && !((stub_entry->h == htab->tls_get_addr_fd
+	    || stub_entry->h == htab->tls_get_addr)
 	   && !htab->params->no_tls_get_addr_opt))
     {
       bfd_vma pltoff = stub_entry->plt_ent->plt.offset & ~1;
@@ -10442,8 +10473,8 @@ build_tls_get_addr_stub (struct ppc_link_hash_table *htab,
   p = build_plt_stub (htab, stub_entry, p, offset, r);
   bfd_put_32 (obfd, BCTRL, p - 4);
 
-  bfd_put_32 (obfd, LD_R11_0R1 + STK_LINKER (htab), p),	p += 4;
   bfd_put_32 (obfd, LD_R2_0R1 + STK_TOC (htab), p),	p += 4;
+  bfd_put_32 (obfd, LD_R11_0R1 + STK_LINKER (htab), p),	p += 4;
   bfd_put_32 (obfd, MTLR_R11, p),		p += 4;
   bfd_put_32 (obfd, BLR, p),			p += 4;
 
@@ -10947,6 +10978,7 @@ ppc_build_one_stub (struct bfd_hash_entry *gen_entry, void *in_arg)
 	  h->ref_regular_nonweak = 1;
 	  h->forced_local = 1;
 	  h->non_elf = 0;
+	  h->root.linker_def = 1;
 	}
     }
 
@@ -12650,6 +12682,7 @@ build_global_entry_stubs (struct elf_link_hash_entry *h, void *inf)
 		h->ref_regular_nonweak = 1;
 		h->forced_local = 1;
 		h->non_elf = 0;
+		h->root.linker_def = 1;
 	      }
 	  }
 
@@ -12723,6 +12756,7 @@ ppc64_elf_build_stubs (struct bfd_link_info *info,
 	      h->ref_regular_nonweak = 1;
 	      h->forced_local = 1;
 	      h->non_elf = 0;
+	      h->root.linker_def = 1;
 	    }
 	}
       plt0 = (htab->elf.splt->output_section->vma
@@ -14803,26 +14837,21 @@ ppc64_elf_relocate_section (bfd *output_bfd,
 
 	  if (r == bfd_reloc_overflow)
 	    {
-	      if (warned)
-		continue;
-	      if (h != NULL
-		  && h->elf.root.type == bfd_link_hash_undefweak
-		  && howto->pc_relative)
+	      /* On code like "if (foo) foo();" don't report overflow
+		 on a branch to zero when foo is undefined.  */
+	      if (!warned
+		  && (reloc_dest == DEST_STUB
+		      || !(h != NULL
+			   && (h->elf.root.type == bfd_link_hash_undefweak
+			       || h->elf.root.type == bfd_link_hash_undefined)
+			   && is_branch_reloc (r_type))))
 		{
-		  /* Assume this is a call protected by other code that
-		     detects the symbol is undefined.  If this is the case,
-		     we can safely ignore the overflow.  If not, the
-		     program is hosed anyway, and a little warning isn't
-		     going to help.  */
-
-		  continue;
+		  if (!((*info->callbacks->reloc_overflow)
+			(info, &h->elf.root, sym_name,
+			 reloc_name, orig_rel.r_addend,
+			 input_bfd, input_section, rel->r_offset)))
+		    return FALSE;
 		}
-
-	      if (!((*info->callbacks->reloc_overflow)
-		    (info, &h->elf.root, sym_name,
-		     reloc_name, orig_rel.r_addend,
-		     input_bfd, input_section, rel->r_offset)))
-		return FALSE;
 	    }
 	  else
 	    {
