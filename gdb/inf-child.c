@@ -204,70 +204,34 @@ inf_child_pid_to_exec_file (struct target_ops *self, int pid)
   return NULL;
 }
 
+/* Implementation of to_fileio_open.  */
 
-/* Target file operations.  */
-
-static int
-inf_child_fileio_open_flags_to_host (int fileio_open_flags, int *open_flags_p)
-{
-  int open_flags = 0;
-
-  if (fileio_open_flags & ~FILEIO_O_SUPPORTED)
-    return -1;
-
-  if (fileio_open_flags & FILEIO_O_CREAT)
-    open_flags |= O_CREAT;
-  if (fileio_open_flags & FILEIO_O_EXCL)
-    open_flags |= O_EXCL;
-  if (fileio_open_flags & FILEIO_O_TRUNC)
-    open_flags |= O_TRUNC;
-  if (fileio_open_flags & FILEIO_O_APPEND)
-    open_flags |= O_APPEND;
-  if (fileio_open_flags & FILEIO_O_RDONLY)
-    open_flags |= O_RDONLY;
-  if (fileio_open_flags & FILEIO_O_WRONLY)
-    open_flags |= O_WRONLY;
-  if (fileio_open_flags & FILEIO_O_RDWR)
-    open_flags |= O_RDWR;
-/* On systems supporting binary and text mode, always open files in
-   binary mode. */
-#ifdef O_BINARY
-  open_flags |= O_BINARY;
-#endif
-
-  *open_flags_p = open_flags;
-  return 0;
-}
-
-/* Open FILENAME on the target, using FLAGS and MODE.  Return a
-   target file descriptor, or -1 if an error occurs (and set
-   *TARGET_ERRNO).  */
 static int
 inf_child_fileio_open (struct target_ops *self,
-		       const char *filename, int flags, int mode,
+		       struct inferior *inf, const char *filename,
+		       int flags, int mode, int warn_if_slow,
 		       int *target_errno)
 {
   int nat_flags;
+  mode_t nat_mode;
   int fd;
 
-  if (inf_child_fileio_open_flags_to_host (flags, &nat_flags) == -1)
+  if (fileio_to_host_openflags (flags, &nat_flags) == -1
+      || fileio_to_host_mode (mode, &nat_mode) == -1)
     {
       *target_errno = FILEIO_EINVAL;
       return -1;
     }
 
-  /* We do not need to convert MODE, since the fileio protocol uses
-     the standard values.  */
-  fd = gdb_open_cloexec (filename, nat_flags, mode);
+  fd = gdb_open_cloexec (filename, nat_flags, nat_mode);
   if (fd == -1)
     *target_errno = host_to_fileio_error (errno);
 
   return fd;
 }
 
-/* Write up to LEN bytes from WRITE_BUF to FD on the target.
-   Return the number of bytes written, or -1 if an error occurs
-   (and set *TARGET_ERRNO).  */
+/* Implementation of to_fileio_pwrite.  */
+
 static int
 inf_child_fileio_pwrite (struct target_ops *self,
 			 int fd, const gdb_byte *write_buf, int len,
@@ -294,9 +258,8 @@ inf_child_fileio_pwrite (struct target_ops *self,
   return ret;
 }
 
-/* Read up to LEN bytes FD on the target into READ_BUF.
-   Return the number of bytes read, or -1 if an error occurs
-   (and set *TARGET_ERRNO).  */
+/* Implementation of to_fileio_pread.  */
+
 static int
 inf_child_fileio_pread (struct target_ops *self,
 			int fd, gdb_byte *read_buf, int len,
@@ -324,6 +287,7 @@ inf_child_fileio_pread (struct target_ops *self,
 }
 
 /* Implementation of to_fileio_fstat.  */
+
 static int
 inf_child_fileio_fstat (struct target_ops *self, int fd,
 			struct stat *sb, int *target_errno)
@@ -337,8 +301,8 @@ inf_child_fileio_fstat (struct target_ops *self, int fd,
   return ret;
 }
 
-/* Close FD on the target.  Return 0, or -1 if an error occurs
-   (and set *TARGET_ERRNO).  */
+/* Implementation of to_fileio_close.  */
+
 static int
 inf_child_fileio_close (struct target_ops *self, int fd, int *target_errno)
 {
@@ -351,11 +315,12 @@ inf_child_fileio_close (struct target_ops *self, int fd, int *target_errno)
   return ret;
 }
 
-/* Unlink FILENAME on the target.  Return 0, or -1 if an error
-   occurs (and set *TARGET_ERRNO).  */
+/* Implementation of to_fileio_unlink.  */
+
 static int
 inf_child_fileio_unlink (struct target_ops *self,
-			 const char *filename, int *target_errno)
+			 struct inferior *inf, const char *filename,
+			 int *target_errno)
 {
   int ret;
 
@@ -366,12 +331,12 @@ inf_child_fileio_unlink (struct target_ops *self,
   return ret;
 }
 
-/* Read value of symbolic link FILENAME on the target.  Return a
-   null-terminated string allocated via xmalloc, or NULL if an error
-   occurs (and set *TARGET_ERRNO).  */
+/* Implementation of to_fileio_readlink.  */
+
 static char *
 inf_child_fileio_readlink (struct target_ops *self,
-			   const char *filename, int *target_errno)
+			   struct inferior *inf, const char *filename,
+			   int *target_errno)
 {
   /* We support readlink only on systems that also provide a compile-time
      maximum path length (PATH_MAX), at least for now.  */
@@ -387,7 +352,7 @@ inf_child_fileio_readlink (struct target_ops *self,
       return NULL;
     }
 
-  ret = xmalloc (len + 1);
+  ret = (char *) xmalloc (len + 1);
   memcpy (ret, buf, len);
   ret[len] = '\0';
   return ret;

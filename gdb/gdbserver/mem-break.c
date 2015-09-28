@@ -21,12 +21,28 @@
 #include "server.h"
 #include "regcache.h"
 #include "ax.h"
-#include <stdint.h>
-
 const unsigned char *breakpoint_data;
 int breakpoint_len;
 
 #define MAX_BREAKPOINT_LEN 8
+
+/* Helper macro used in loops that append multiple items to a singly-linked
+   list instead of inserting items at the head of the list, as, say, in the
+   breakpoint lists.  LISTPP is a pointer to the pointer that is the head of
+   the new list.  ITEMP is a pointer to the item to be added to the list.
+   TAILP must be defined to be the same type as ITEMP, and initialized to
+   NULL.  */
+
+#define APPEND_TO_LIST(listpp, itemp, tailp) \
+	  do \
+	    { \
+	      if ((tailp) == NULL) \
+		*(listpp) = (itemp); \
+	      else \
+		(tailp)->next = (itemp); \
+	      (tailp) = (itemp); \
+	    } \
+	  while (0)
 
 /* GDB will never try to install multiple breakpoints at the same
    address.  However, we can see GDB requesting to insert a breakpoint
@@ -388,7 +404,7 @@ set_raw_breakpoint_at (enum raw_bkpt_type type, CORE_ADDR where, int size,
       return bp;
     }
 
-  bp = xcalloc (1, sizeof (*bp));
+  bp = XCNEW (struct raw_breakpoint);
   bp->pc = where;
   bp->size = size;
   bp->refcount = 1;
@@ -511,7 +527,7 @@ delete_fast_tracepoint_jump (struct fast_tracepoint_jump *todel)
 		 pass the current shadow contents, because
 		 write_inferior_memory updates any shadow memory with
 		 what we pass here, and we want that to be a nop.  */
-	      buf = alloca (bp->length);
+	      buf = (unsigned char *) alloca (bp->length);
 	      memcpy (buf, fast_tracepoint_jump_shadow (bp), bp->length);
 	      ret = write_inferior_memory (bp->pc, buf, bp->length);
 	      if (ret != 0)
@@ -569,12 +585,12 @@ set_fast_tracepoint_jump (CORE_ADDR where,
   /* We don't, so create a new object.  Double the length, because the
      flexible array member holds both the jump insn, and the
      shadow.  */
-  jp = xcalloc (1, sizeof (*jp) + (length * 2));
+  jp = (struct fast_tracepoint_jump *) xcalloc (1, sizeof (*jp) + (length * 2));
   jp->pc = where;
   jp->length = length;
   memcpy (fast_tracepoint_jump_insn (jp), insn, length);
   jp->refcount = 1;
-  buf = alloca (length);
+  buf = (unsigned char *) alloca (length);
 
   /* Note that there can be trap breakpoints inserted in the same
      address range.  To access the original memory contents, we use
@@ -654,7 +670,7 @@ uninsert_fast_tracepoint_jumps_at (CORE_ADDR pc)
 	 pass the current shadow contents, because
 	 write_inferior_memory updates any shadow memory with what we
 	 pass here, and we want that to be a nop.  */
-      buf = alloca (jp->length);
+      buf = (unsigned char *) alloca (jp->length);
       memcpy (buf, fast_tracepoint_jump_shadow (jp), jp->length);
       err = write_inferior_memory (jp->pc, buf, jp->length);
       if (err != 0)
@@ -701,7 +717,7 @@ reinsert_fast_tracepoint_jumps_at (CORE_ADDR where)
      to pass the current shadow contents, because
      write_inferior_memory updates any shadow memory with what we pass
      here, and we want that to be a nop.  */
-  buf = alloca (jp->length);
+  buf = (unsigned char *) alloca (jp->length);
   memcpy (buf, fast_tracepoint_jump_shadow (jp), jp->length);
   err = write_inferior_memory (where, buf, jp->length);
   if (err != 0)
@@ -739,7 +755,7 @@ set_breakpoint (enum bkpt_type type, enum raw_bkpt_type raw_type,
       return NULL;
     }
 
-  bp = xcalloc (1, sizeof (struct breakpoint));
+  bp = XCNEW (struct breakpoint);
   bp->type = type;
 
   bp->raw = raw;
@@ -1153,7 +1169,7 @@ add_condition_to_breakpoint (struct breakpoint *bp,
   struct point_cond_list *new_cond;
 
   /* Create new condition.  */
-  new_cond = xcalloc (1, sizeof (*new_cond));
+  new_cond = XCNEW (struct point_cond_list);
   new_cond->cond = condition;
 
   /* Add condition to the list.  */
@@ -1251,7 +1267,7 @@ add_commands_to_breakpoint (struct breakpoint *bp,
   struct point_command_list *new_cmd;
 
   /* Create new command.  */
-  new_cmd = xcalloc (1, sizeof (*new_cmd));
+  new_cmd = XCNEW (struct point_command_list);
   new_cmd->cmd = commands;
   new_cmd->persistence = persist;
 
@@ -1653,7 +1669,7 @@ validate_inserted_breakpoint (struct raw_breakpoint *bp)
   gdb_assert (bp->inserted);
   gdb_assert (bp->raw_type == raw_bkpt_type_sw);
 
-  buf = alloca (breakpoint_len);
+  buf = (unsigned char *) alloca (breakpoint_len);
   err = (*the_target->read_memory) (bp->pc, buf, breakpoint_len);
   if (err || memcmp (buf, breakpoint_data, breakpoint_len) != 0)
     {
@@ -1912,4 +1928,91 @@ free_all_breakpoints (struct process_info *proc)
      current_process from here on.  */
   while (proc->breakpoints)
     delete_breakpoint_1 (proc, proc->breakpoints);
+}
+
+/* Clone an agent expression.  */
+
+static struct agent_expr *
+clone_agent_expr (const struct agent_expr *src_ax)
+{
+  struct agent_expr *ax;
+
+  ax = XCNEW (struct agent_expr);
+  ax->length = src_ax->length;
+  ax->bytes = (unsigned char *) xcalloc (ax->length, 1);
+  memcpy (ax->bytes, src_ax->bytes, ax->length);
+  return ax;
+}
+
+/* Deep-copy the contents of one breakpoint to another.  */
+
+static struct breakpoint *
+clone_one_breakpoint (const struct breakpoint *src)
+{
+  struct breakpoint *dest;
+  struct raw_breakpoint *dest_raw;
+  struct point_cond_list *current_cond;
+  struct point_cond_list *new_cond;
+  struct point_cond_list *cond_tail = NULL;
+  struct point_command_list *current_cmd;
+  struct point_command_list *new_cmd;
+  struct point_command_list *cmd_tail = NULL;
+
+  /* Clone the raw breakpoint.  */
+  dest_raw = XCNEW (struct raw_breakpoint);
+  dest_raw->raw_type = src->raw->raw_type;
+  dest_raw->refcount = src->raw->refcount;
+  dest_raw->pc = src->raw->pc;
+  dest_raw->size = src->raw->size;
+  memcpy (dest_raw->old_data, src->raw->old_data, MAX_BREAKPOINT_LEN);
+  dest_raw->inserted = src->raw->inserted;
+
+  /* Clone the high-level breakpoint.  */
+  dest = XCNEW (struct breakpoint);
+  dest->type = src->type;
+  dest->raw = dest_raw;
+  dest->handler = src->handler;
+
+  /* Clone the condition list.  */
+  for (current_cond = src->cond_list; current_cond != NULL;
+       current_cond = current_cond->next)
+    {
+      new_cond = XCNEW (struct point_cond_list);
+      new_cond->cond = clone_agent_expr (current_cond->cond);
+      APPEND_TO_LIST (&dest->cond_list, new_cond, cond_tail);
+    }
+
+  /* Clone the command list.  */
+  for (current_cmd = src->command_list; current_cmd != NULL;
+       current_cmd = current_cmd->next)
+    {
+      new_cmd = XCNEW (struct point_command_list);
+      new_cmd->cmd = clone_agent_expr (current_cmd->cmd);
+      new_cmd->persistence = current_cmd->persistence;
+      APPEND_TO_LIST (&dest->command_list, new_cmd, cmd_tail);
+    }
+
+  return dest;
+}
+
+/* Create a new breakpoint list NEW_LIST that is a copy of the
+   list starting at SRC_LIST.  Create the corresponding new
+   raw_breakpoint list NEW_RAW_LIST as well.  */
+
+void
+clone_all_breakpoints (struct breakpoint **new_list,
+		       struct raw_breakpoint **new_raw_list,
+		       const struct breakpoint *src_list)
+{
+  const struct breakpoint *bp;
+  struct breakpoint *new_bkpt;
+  struct breakpoint *bkpt_tail = NULL;
+  struct raw_breakpoint *raw_bkpt_tail = NULL;
+
+  for (bp = src_list; bp != NULL; bp = bp->next)
+    {
+      new_bkpt = clone_one_breakpoint (bp);
+      APPEND_TO_LIST (new_list, new_bkpt, bkpt_tail);
+      APPEND_TO_LIST (new_raw_list, new_bkpt->raw, raw_bkpt_tail);
+    }
 }

@@ -20,6 +20,7 @@
 #include "common-defs.h"
 #include "fileio.h"
 #include <sys/stat.h>
+#include <fcntl.h>
 
 /* See fileio.h.  */
 
@@ -74,6 +75,89 @@ host_to_fileio_error (int error)
   return FILEIO_EUNKNOWN;
 }
 
+/* See fileio.h.  */
+
+int
+fileio_to_host_openflags (int fileio_open_flags, int *open_flags_p)
+{
+  int open_flags = 0;
+
+  if (fileio_open_flags & ~FILEIO_O_SUPPORTED)
+    return -1;
+
+  if (fileio_open_flags & FILEIO_O_CREAT)
+    open_flags |= O_CREAT;
+  if (fileio_open_flags & FILEIO_O_EXCL)
+    open_flags |= O_EXCL;
+  if (fileio_open_flags & FILEIO_O_TRUNC)
+    open_flags |= O_TRUNC;
+  if (fileio_open_flags & FILEIO_O_APPEND)
+    open_flags |= O_APPEND;
+  if (fileio_open_flags & FILEIO_O_RDONLY)
+    open_flags |= O_RDONLY;
+  if (fileio_open_flags & FILEIO_O_WRONLY)
+    open_flags |= O_WRONLY;
+  if (fileio_open_flags & FILEIO_O_RDWR)
+    open_flags |= O_RDWR;
+  /* On systems supporting binary and text mode, always open files
+     in binary mode. */
+#ifdef O_BINARY
+  open_flags |= O_BINARY;
+#endif
+
+  *open_flags_p = open_flags;
+  return 0;
+}
+
+/* See fileio.h.  */
+
+int
+fileio_to_host_mode (int fileio_mode, mode_t *mode_p)
+{
+  mode_t mode = 0;
+
+  if (fileio_mode & ~FILEIO_S_SUPPORTED)
+    return -1;
+
+  if (fileio_mode & FILEIO_S_IFREG)
+    mode |= S_IFREG;
+  if (fileio_mode & FILEIO_S_IFDIR)
+    mode |= S_IFDIR;
+  if (fileio_mode & FILEIO_S_IFCHR)
+    mode |= S_IFCHR;
+  if (fileio_mode & FILEIO_S_IRUSR)
+    mode |= S_IRUSR;
+  if (fileio_mode & FILEIO_S_IWUSR)
+    mode |= S_IWUSR;
+  if (fileio_mode & FILEIO_S_IXUSR)
+    mode |= S_IXUSR;
+#ifdef S_IRGRP
+  if (fileio_mode & FILEIO_S_IRGRP)
+    mode |= S_IRGRP;
+#endif
+#ifdef S_IWGRP
+  if (fileio_mode & FILEIO_S_IWGRP)
+    mode |= S_IWGRP;
+#endif
+#ifdef S_IXGRP
+  if (fileio_mode & FILEIO_S_IXGRP)
+    mode |= S_IXGRP;
+#endif
+  if (fileio_mode & FILEIO_S_IROTH)
+    mode |= S_IROTH;
+#ifdef S_IWOTH
+  if (fileio_mode & FILEIO_S_IWOTH)
+    mode |= S_IWOTH;
+#endif
+#ifdef S_IXOTH
+  if (fileio_mode & FILEIO_S_IXOTH)
+    mode |= S_IXOTH;
+#endif
+
+  *mode_p = mode;
+  return 0;
+}
+
 /* Convert a host-format mode_t into a bitmask of File-I/O flags.  */
 
 static LONGEST
@@ -97,7 +181,7 @@ fileio_mode_pack (mode_t mode)
   if (mode & S_IRGRP)
     tmode |= FILEIO_S_IRGRP;
 #endif
-#ifdef S_IWRGRP
+#ifdef S_IWGRP
   if (mode & S_IWGRP)
     tmode |= FILEIO_S_IWGRP;
 #endif

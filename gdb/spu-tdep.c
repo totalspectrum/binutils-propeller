@@ -45,7 +45,7 @@
 #include "dwarf2-frame.h"
 #include "ax.h"
 #include "spu-tdep.h"
-
+#include "location.h"
 
 /* The list of available "set spu " and "show spu " commands.  */
 static struct cmd_list_element *setspucmdlist = NULL;
@@ -881,8 +881,7 @@ spu_virtual_frame_pointer (struct gdbarch *gdbarch, CORE_ADDR pc,
     }
 }
 
-/* Return true if we are in the function's epilogue, i.e. after the
-   instruction that destroyed the function's stack frame.
+/* Implement the stack_frame_destroyed_p gdbarch method.
 
    1) scan forward from the point of execution:
        a) If you find an instruction that modifies the stack pointer
@@ -899,7 +898,7 @@ spu_virtual_frame_pointer (struct gdbarch *gdbarch, CORE_ADDR pc,
            limit for the size of an epilogue.  */
 
 static int
-spu_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
+spu_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   CORE_ADDR scan_pc, func_start, func_end, epilogue_start, epilogue_end;
@@ -1001,7 +1000,7 @@ spu_frame_unwind_cache (struct frame_info *this_frame,
   gdb_byte buf[16];
 
   if (*this_prologue_cache)
-    return *this_prologue_cache;
+    return (struct spu_unwind_cache *) *this_prologue_cache;
 
   info = FRAME_OBSTACK_ZALLOC (struct spu_unwind_cache);
   *this_prologue_cache = info;
@@ -1209,7 +1208,7 @@ struct spu2ppu_cache
 static struct gdbarch *
 spu2ppu_prev_arch (struct frame_info *this_frame, void **this_cache)
 {
-  struct spu2ppu_cache *cache = *this_cache;
+  struct spu2ppu_cache *cache = (struct spu2ppu_cache *) *this_cache;
   return get_regcache_arch (cache->regcache);
 }
 
@@ -1217,7 +1216,7 @@ static void
 spu2ppu_this_id (struct frame_info *this_frame,
 		 void **this_cache, struct frame_id *this_id)
 {
-  struct spu2ppu_cache *cache = *this_cache;
+  struct spu2ppu_cache *cache = (struct spu2ppu_cache *) *this_cache;
   *this_id = cache->frame_id;
 }
 
@@ -1225,11 +1224,11 @@ static struct value *
 spu2ppu_prev_register (struct frame_info *this_frame,
 		       void **this_cache, int regnum)
 {
-  struct spu2ppu_cache *cache = *this_cache;
+  struct spu2ppu_cache *cache = (struct spu2ppu_cache *) *this_cache;
   struct gdbarch *gdbarch = get_regcache_arch (cache->regcache);
   gdb_byte *buf;
 
-  buf = alloca (register_size (gdbarch, regnum));
+  buf = (gdb_byte *) alloca (register_size (gdbarch, regnum));
   regcache_cooked_read (cache->regcache, regnum, buf);
   return frame_unwind_got_bytes (this_frame, regnum, buf);
 }
@@ -1287,7 +1286,7 @@ spu2ppu_sniffer (const struct frame_unwind *self,
 static void
 spu2ppu_dealloc_cache (struct frame_info *self, void *this_cache)
 {
-  struct spu2ppu_cache *cache = this_cache;
+  struct spu2ppu_cache *cache = (struct spu2ppu_cache *) this_cache;
   regcache_xfree (cache->regcache);
 }
 
@@ -1726,8 +1725,10 @@ struct spu_dis_asm_data
 static void
 spu_dis_asm_print_address (bfd_vma addr, struct disassemble_info *info)
 {
-  struct spu_dis_asm_data *data = info->application_data;
-  print_address (data->gdbarch, SPUADDR (data->id, addr), info->stream);
+  struct spu_dis_asm_data *data
+    = (struct spu_dis_asm_data *) info->application_data;
+  print_address (data->gdbarch, SPUADDR (data->id, addr),
+		 (struct ui_file *) info->stream);
 }
 
 static int
@@ -1738,7 +1739,7 @@ gdb_print_insn_spu (bfd_vma memaddr, struct disassemble_info *info)
      call print_address.  */
   struct disassemble_info spu_info = *info;
   struct spu_dis_asm_data data;
-  data.gdbarch = info->application_data;
+  data.gdbarch = (struct gdbarch *) info->application_data;
   data.id = SPUADDR_SPU (memaddr);
 
   spu_info.application_data = &data;
@@ -1809,7 +1810,7 @@ spu_get_overlay_table (struct objfile *objfile)
   gdb_byte *ovly_table;
   int i;
 
-  tbl = objfile_data (objfile, spu_overlay_data);
+  tbl = (struct spu_overlay_table *) objfile_data (objfile, spu_overlay_data);
   if (tbl)
     return tbl;
 
@@ -1828,7 +1829,7 @@ spu_get_overlay_table (struct objfile *objfile)
   ovly_buf_table_base = BMSYMBOL_VALUE_ADDRESS (ovly_buf_table_msym);
   ovly_buf_table_size = MSYMBOL_SIZE (ovly_buf_table_msym.minsym);
 
-  ovly_table = xmalloc (ovly_table_size);
+  ovly_table = (gdb_byte *) xmalloc (ovly_table_size);
   read_memory (ovly_table_base, ovly_table, ovly_table_size);
 
   tbl = OBSTACK_CALLOC (&objfile->objfile_obstack,
@@ -1955,7 +1956,8 @@ spu_catch_start (struct objfile *objfile)
   struct bound_minimal_symbol minsym;
   struct compunit_symtab *cust;
   CORE_ADDR pc;
-  char buf[32];
+  struct event_location *location;
+  struct cleanup *back_to;
 
   /* Do this only if requested by "set spu stop-on-load on".  */
   if (!spu_stop_on_load_p)
@@ -1999,8 +2001,9 @@ spu_catch_start (struct objfile *objfile)
 
   /* Use a numerical address for the set_breakpoint command to avoid having
      the breakpoint re-set incorrectly.  */
-  xsnprintf (buf, sizeof buf, "*%s", core_addr_to_string (pc));
-  create_breakpoint (get_objfile_arch (objfile), buf /* arg */,
+  location = new_address_location (pc);
+  back_to = make_cleanup_delete_event_location (location);
+  create_breakpoint (get_objfile_arch (objfile), location,
 		     NULL /* cond_string */, -1 /* thread */,
 		     NULL /* extra_string */,
 		     0 /* parse_condition_and_thread */, 1 /* tempflag */,
@@ -2009,6 +2012,7 @@ spu_catch_start (struct objfile *objfile)
 		     AUTO_BOOLEAN_FALSE /* pending_break_support */,
 		     &bkpt_breakpoint_ops /* ops */, 0 /* from_tty */,
 		     1 /* enabled */, 0 /* internal  */, 0);
+  do_cleanups (back_to);
 }
 
 
@@ -2354,7 +2358,7 @@ info_spu_dma_cmdlist (gdb_byte *buf, int nr, enum bfd_endian byte_order)
              NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     };
 
-  int *seq = alloca (nr * sizeof (int));
+  int *seq = XALLOCAVEC (int, nr);
   int done = 0;
   struct cleanup *chain;
   int i, j;
@@ -2785,7 +2789,7 @@ spu_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_virtual_frame_pointer (gdbarch, spu_virtual_frame_pointer);
   set_gdbarch_frame_args_skip (gdbarch, 0);
   set_gdbarch_skip_prologue (gdbarch, spu_skip_prologue);
-  set_gdbarch_in_function_epilogue_p (gdbarch, spu_in_function_epilogue_p);
+  set_gdbarch_stack_frame_destroyed_p (gdbarch, spu_stack_frame_destroyed_p);
 
   /* Cell/B.E. cross-architecture unwinder support.  */
   frame_unwind_prepend_unwinder (gdbarch, &spu2ppu_unwind);

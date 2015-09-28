@@ -320,6 +320,7 @@ class Got_offset_list
 struct Compressed_section_info
 {
   section_size_type size;
+  elfcpp::Elf_Xword flag;
   const unsigned char* contents;
 };
 typedef std::map<unsigned int, Compressed_section_info> Compressed_section_map;
@@ -379,6 +380,12 @@ class Object
   bool
   is_dynamic() const
   { return this->is_dynamic_; }
+
+  // Return the word size of the object file.
+  virtual int elfsize() const = 0;
+
+  // Return TRUE if this is a big-endian object file.
+  virtual bool is_big_endian() const = 0;
 
   // Return whether this object is needed--true if it is a dynamic
   // object which defines some symbol referenced by a regular object.
@@ -723,6 +730,11 @@ class Object
   void
   set_as_needed()
   { this->as_needed_ = true; }
+
+  // Clear flag that this object was linked with --as-needed.
+  void
+  clear_as_needed()
+  { this->as_needed_ = false; }
 
   // Return whether this object was linked with --as-needed.
   bool
@@ -2829,7 +2841,7 @@ class Input_objects
   // The list of dynamic objects included in the link.
   Dynobj_list dynobj_list_;
   // SONAMEs that we have seen.
-  Unordered_set<std::string> sonames_;
+  Unordered_map<std::string, Object*> sonames_;
   // Manage cross-references if requested.
   Cref* cref_;
 };
@@ -2863,11 +2875,11 @@ struct Relocate_info
 
 // This is used to represent a section in an object and is used as the
 // key type for various section maps.
-typedef std::pair<Object*, unsigned int> Section_id;
+typedef std::pair<Relobj*, unsigned int> Section_id;
 
 // This is similar to Section_id but is used when the section
 // pointers are const.
-typedef std::pair<const Object*, unsigned int> Const_section_id;
+typedef std::pair<const Relobj*, unsigned int> Const_section_id;
 
 // The hash value is based on the address of an object in memory during
 // linking.  It is okay to use this for looking up sections but never use

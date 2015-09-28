@@ -150,6 +150,7 @@ static struct cmd_list_element *dump_cmdlist;
 static struct cmd_list_element *append_cmdlist;
 static struct cmd_list_element *srec_cmdlist;
 static struct cmd_list_element *ihex_cmdlist;
+static struct cmd_list_element *verilog_cmdlist;
 static struct cmd_list_element *tekhex_cmdlist;
 static struct cmd_list_element *binary_dump_cmdlist;
 static struct cmd_list_element *binary_append_cmdlist;
@@ -335,6 +336,18 @@ dump_ihex_value (char *args, int from_tty)
 }
 
 static void
+dump_verilog_memory (char *args, int from_tty)
+{
+  dump_memory_to_file (args, FOPEN_WB, "verilog");
+}
+
+static void
+dump_verilog_value (char *args, int from_tty)
+{
+  dump_value_to_file (args, FOPEN_WB, "verilog");
+}
+
+static void
 dump_tekhex_memory (char *args, int from_tty)
 {
   dump_memory_to_file (args, FOPEN_WB, "tekhex");
@@ -379,7 +392,7 @@ struct dump_context
 static void
 call_dump_func (struct cmd_list_element *c, char *args, int from_tty)
 {
-  struct dump_context *d = get_cmd_context (c);
+  struct dump_context *d = (struct dump_context *) get_cmd_context (c);
 
   d->func (args, d->mode);
 }
@@ -434,7 +447,7 @@ struct callback_data {
 static void
 restore_section_callback (bfd *ibfd, asection *isec, void *args)
 {
-  struct callback_data *data = args;
+  struct callback_data *data = (struct callback_data *) args;
   bfd_vma sec_start  = bfd_section_vma (ibfd, isec);
   bfd_size_type size = bfd_section_size (ibfd, isec);
   bfd_vma sec_end    = sec_start + size;
@@ -469,7 +482,7 @@ restore_section_callback (bfd *ibfd, asection *isec, void *args)
     sec_load_count -= sec_end - data->load_end;
 
   /* Get the data.  */
-  buf = xmalloc (size);
+  buf = (gdb_byte *) xmalloc (size);
   old_chain = make_cleanup (xfree, buf);
   if (!bfd_get_section_contents (ibfd, isec, buf, 0, size))
     error (_("Failed to read bfd file %s: '%s'."), bfd_get_filename (ibfd), 
@@ -540,7 +553,7 @@ restore_binary_file (const char *filename, struct callback_data *data)
     perror_with_name (filename);
 
   /* Now allocate a buffer and read the file contents.  */
-  buf = xmalloc (len);
+  buf = (gdb_byte *) xmalloc (len);
   make_cleanup (xfree, buf);
   if (fread (buf, 1, len, file) != len)
     perror_with_name (filename);
@@ -624,35 +637,42 @@ restore_command (char *args_in, int from_tty)
 static void
 srec_dump_command (char *cmd, int from_tty)
 {
-  printf_unfiltered ("\"dump srec\" must be followed by a subcommand.\n");
+  printf_unfiltered (_("\"dump srec\" must be followed by a subcommand.\n"));
   help_list (srec_cmdlist, "dump srec ", all_commands, gdb_stdout);
 }
 
 static void
 ihex_dump_command (char *cmd, int from_tty)
 {
-  printf_unfiltered ("\"dump ihex\" must be followed by a subcommand.\n");
+  printf_unfiltered (_("\"dump ihex\" must be followed by a subcommand.\n"));
   help_list (ihex_cmdlist, "dump ihex ", all_commands, gdb_stdout);
+}
+
+static void
+verilog_dump_command (char *cmd, int from_tty)
+{
+  printf_unfiltered (_("\"dump verilog\" must be followed by a subcommand.\n"));
+  help_list (verilog_cmdlist, "dump verilog ", all_commands, gdb_stdout);
 }
 
 static void
 tekhex_dump_command (char *cmd, int from_tty)
 {
-  printf_unfiltered ("\"dump tekhex\" must be followed by a subcommand.\n");
+  printf_unfiltered (_("\"dump tekhex\" must be followed by a subcommand.\n"));
   help_list (tekhex_cmdlist, "dump tekhex ", all_commands, gdb_stdout);
 }
 
 static void
 binary_dump_command (char *cmd, int from_tty)
 {
-  printf_unfiltered ("\"dump binary\" must be followed by a subcommand.\n");
+  printf_unfiltered (_("\"dump binary\" must be followed by a subcommand.\n"));
   help_list (binary_dump_cmdlist, "dump binary ", all_commands, gdb_stdout);
 }
 
 static void
 binary_append_command (char *cmd, int from_tty)
 {
-  printf_unfiltered ("\"append binary\" must be followed by a subcommand.\n");
+  printf_unfiltered (_("\"append binary\" must be followed by a subcommand.\n"));
   help_list (binary_append_cmdlist, "append binary ", all_commands,
 	     gdb_stdout);
 }
@@ -697,6 +717,12 @@ the specified FILE in raw target ordered bytes.");
 		  0 /*allow-unknown*/, 
 		  &dump_cmdlist);
 
+  add_prefix_cmd ("verilog", all_commands, verilog_dump_command,
+		  _("Write target code/data to a verilog hex file."),
+		  &verilog_cmdlist, "dump verilog ",
+		  0 /*allow-unknown*/,
+		  &dump_cmdlist);
+
   add_prefix_cmd ("tekhex", all_commands, tekhex_dump_command,
 		  _("Write target code/data to a tekhex file."),
 		  &tekhex_cmdlist, "dump tekhex ", 
@@ -738,6 +764,18 @@ Write the value of an expression to an ihex file.\n\
 Arguments are FILE EXPRESSION.  Writes the value of EXPRESSION\n\
 to the specified FILE in intel hex format."),
 	   &ihex_cmdlist);
+
+  add_cmd ("memory", all_commands, dump_verilog_memory, _("\
+Write contents of memory to a verilog hex file.\n\
+Arguments are FILE START STOP.  Writes the contents of memory within\n\
+the range [START .. STOP) to the specified FILE in verilog hex format."),
+	   &verilog_cmdlist);
+
+  add_cmd ("value", all_commands, dump_verilog_value, _("\
+Write the value of an expression to a verilog hex file.\n\
+Arguments are FILE EXPRESSION.  Writes the value of EXPRESSION\n\
+to the specified FILE in verilog hex format."),
+	   &verilog_cmdlist);
 
   add_cmd ("memory", all_commands, dump_tekhex_memory, _("\
 Write contents of memory to a tekhex file.\n\

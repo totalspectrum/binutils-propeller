@@ -1,23 +1,20 @@
-/*
- * This file is part of SIS.
- * 
- * SIS, SPARC instruction simulator V1.8 Copyright (C) 1995 Jiri Gaisler,
- * European Space Agency
- * 
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 3 of the License, or (at your option)
- * any later version.
- * 
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- * 
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
- * 
- */
+/* This file is part of SIS (SPARC instruction simulator)
+
+   Copyright (C) 1995-2015 Free Software Foundation, Inc.
+   Contributed by Jiri Gaisler, European Space Agency
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "config.h"
 #include "sis.h"
@@ -292,7 +289,7 @@ add32 (uint32 n1, uint32 n2, int *carry)
 {
   uint32 result = n1 + n2;
 
-  *carry = result < n1 || result < n1;
+  *carry = result < n1 || result < n2;
   return result;
 }
 
@@ -369,6 +366,36 @@ div64 (uint32 n1_hi, uint32 n1_low, uint32 n2, uint32 *result, int msigned)
   *result = (uint32) (n1 & 0xffffffff);
 }
 
+
+static int
+extract_short (uint32 data, uint32 address)
+{
+    return ((data >> ((2 - (address & 2)) * 8)) & 0xffff);
+}
+
+static int
+extract_short_signed (uint32 data, uint32 address)
+{
+    uint32 tmp = ((data >> ((2 - (address & 2)) * 8)) & 0xffff);
+    if (tmp & 0x8000)
+        tmp |= 0xffff0000;
+    return tmp;
+}
+
+static int
+extract_byte (uint32 data, uint32 address)
+{
+    return ((data >> ((3 - (address & 3)) * 8)) & 0xff);
+}
+
+static int
+extract_byte_signed (uint32 data, uint32 address)
+{
+    uint32 tmp = ((data >> ((3 - (address & 3)) * 8)) & 0xff);
+    if (tmp & 0x80)
+        tmp |= 0xffffff00;
+    return tmp;
+}
 
 int
 dispatch_instruction(sregs)
@@ -1077,7 +1104,8 @@ dispatch_instruction(sregs)
 		    sregs->trap = TRAP_PRIVI;
 		    break;
 		}
-		sregs->psr = (rs1 ^ operand2) & 0x00f03fff;
+		sregs->psr = (sregs->psr & 0xff000000) |
+			(rs1 ^ operand2) & 0x00f03fff;
 		break;
 	    case WRWIM:
 		if (!(sregs->psr & PSR_S)) {
@@ -1213,8 +1241,10 @@ dispatch_instruction(sregs)
 		else
 		    rdd = &(sregs->g[rd]);
 	    }
-	    mexc = memory_read(asi, address, ddata, 3, &ws);
-	    sregs->hold += ws * 2;
+	    mexc = memory_read (asi, address, ddata, 2, &ws);
+	    sregs->hold += ws;
+	    mexc |= memory_read (asi, address+4, &ddata[1], 2, &ws);
+	    sregs->hold += ws;
 	    sregs->icnt = T_LDD;
 	    if (mexc) {
 		sregs->trap = TRAP_DEXC;
@@ -1252,6 +1282,7 @@ dispatch_instruction(sregs)
 		sregs->trap = TRAP_DEXC;
 		break;
 	    }
+	    data = extract_byte (data, address);
 	    *rdd = data;
 	    data = 0x0ff;
 	    mexc = memory_write(asi, address, &data, 0, &ws);
@@ -1274,8 +1305,10 @@ dispatch_instruction(sregs)
 		sregs->trap = TRAP_DEXC;
 		break;
 	    }
-	    if ((op3 == LDSB) && (data & 0x80))
-		data |= 0xffffff00;
+	    if (op3 == LDSB)
+	        data = extract_byte_signed (data, address);
+	    else
+	        data = extract_byte (data, address);
 	    *rdd = data;
 	    break;
 	case LDSHA:
@@ -1293,8 +1326,10 @@ dispatch_instruction(sregs)
 		sregs->trap = TRAP_DEXC;
 		break;
 	    }
-	    if ((op3 == LDSH) && (data & 0x8000))
-		data |= 0xffff0000;
+	    if (op3 == LDSH)
+	        data = extract_short_signed (data, address);
+	    else
+	        data = extract_short (data, address);
 	    *rdd = data;
 	    break;
 	case LDF:
@@ -1337,8 +1372,10 @@ dispatch_instruction(sregs)
 		    ((sregs->frs2 >> 1) == (rd >> 1)))
 		    sregs->fhold += (sregs->ftime - ebase.simtime);
 	    }
-	    mexc = memory_read(asi, address, ddata, 3, &ws);
-	    sregs->hold += ws * 2;
+	    mexc = memory_read (asi, address, ddata, 2, &ws);
+	    sregs->hold += ws;
+	    mexc |= memory_read (asi, address+4, &ddata[1], 2, &ws);
+	    sregs->hold += ws;
 	    sregs->icnt = T_LDD;
 	    if (mexc) {
 		sregs->trap = TRAP_DEXC;

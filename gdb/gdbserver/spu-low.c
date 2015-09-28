@@ -147,7 +147,7 @@ fetch_ppc_memory (CORE_ADDR memaddr, char *myaddr, int len)
 
   int tid = ptid_get_lwp (current_ptid);
 
-  buffer = (PTRACE_TYPE_RET *) alloca (count * sizeof (PTRACE_TYPE_RET));
+  buffer = XALLOCAVEC (PTRACE_TYPE_RET, count);
   for (i = 0; i < count; i++, addr += sizeof (PTRACE_TYPE_RET))
     if ((ret = fetch_ppc_memory_1 (tid, addr, &buffer[i])) != 0)
       return ret;
@@ -172,7 +172,7 @@ store_ppc_memory (CORE_ADDR memaddr, char *myaddr, int len)
 
   int tid = ptid_get_lwp (current_ptid);
 
-  buffer = (PTRACE_TYPE_RET *) alloca (count * sizeof (PTRACE_TYPE_RET));
+  buffer = XALLOCAVEC (PTRACE_TYPE_RET, count);
 
   if (addr != memaddr || len < (int) sizeof (PTRACE_TYPE_RET))
     if ((ret = fetch_ppc_memory_1 (tid, addr, &buffer[0])) != 0)
@@ -383,11 +383,12 @@ spu_thread_alive (ptid_t ptid)
 static void
 spu_resume (struct thread_resume *resume_info, size_t n)
 {
+  struct thread_info *thr = get_first_thread ();
   size_t i;
 
   for (i = 0; i < n; i++)
     if (ptid_equal (resume_info[i].thread, minus_one_ptid)
-	|| ptid_equal (resume_info[i].thread, current_ptid))
+	|| ptid_equal (resume_info[i].thread, ptid_of (thr)))
       break;
 
   if (i == n)
@@ -401,7 +402,7 @@ spu_resume (struct thread_resume *resume_info, size_t n)
   regcache_invalidate ();
 
   errno = 0;
-  ptrace (PTRACE_CONT, ptid_get_lwp (current_ptid), 0, resume_info[i].sig);
+  ptrace (PTRACE_CONT, ptid_get_lwp (ptid_of (thr)), 0, resume_info[i].sig);
   if (errno)
     perror_with_name ("ptrace");
 }
@@ -633,11 +634,14 @@ spu_look_up_symbols (void)
 static void
 spu_request_interrupt (void)
 {
-  syscall (SYS_tkill, ptid_get_lwp (current_ptid), SIGINT);
+  struct thread_info *thr = get_first_thread ();
+
+  syscall (SYS_tkill, lwpid_of (thr), SIGINT);
 }
 
 static struct target_ops spu_target_ops = {
   spu_create_inferior,
+  NULL,  /* arch_setup */
   spu_attach,
   spu_kill,
   spu_detach,
@@ -662,6 +666,7 @@ static struct target_ops spu_target_ops = {
   NULL, /* supports_stopped_by_sw_breakpoint */
   NULL, /* stopped_by_hw_breakpoint */
   NULL, /* supports_stopped_by_hw_breakpoint */
+  NULL, /* supports_hardware_single_step */
   NULL,
   NULL,
   NULL,

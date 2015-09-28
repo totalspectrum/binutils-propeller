@@ -54,12 +54,6 @@ extern int linux_proc_pid_is_zombie_nowarn (pid_t pid);
 
 extern int linux_proc_pid_is_gone (pid_t pid);
 
-/* Return an opaque string identifying PID's NS namespace or NULL if
- * the information is unavailable.  The returned string must be
- * released with xfree.  */
-
-extern char *linux_proc_pid_get_ns (pid_t pid, const char *ns);
-
 /* Callback function for linux_proc_attach_tgid_threads.  If the PTID
    thread is not yet known, try to attach to it and return true,
    otherwise return false.  */
@@ -72,5 +66,11 @@ extern void linux_proc_attach_tgid_threads (pid_t pid,
 
 /* Return true if the /proc/PID/task/ directory exists.  */
 extern int linux_proc_task_list_dir_exists (pid_t pid);
+
+/* Return the full absolute name of the executable file that was run
+   to create the process PID.  The returned value persists until this
+   function is next called.  */
+
+extern char *linux_proc_pid_to_exec_file (int pid);
 
 #endif /* COMMON_LINUX_PROCFS_H */

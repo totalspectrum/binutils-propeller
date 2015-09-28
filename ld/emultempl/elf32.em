@@ -60,6 +60,7 @@ fragment <<EOF
 
 /* Declare functions used by various EXTRA_EM_FILEs.  */
 static void gld${EMULATION_NAME}_before_parse (void);
+static void gld${EMULATION_NAME}_after_parse (void);
 static void gld${EMULATION_NAME}_after_open (void);
 static void gld${EMULATION_NAME}_before_allocation (void);
 static void gld${EMULATION_NAME}_after_allocation (void);
@@ -102,6 +103,21 @@ gld${EMULATION_NAME}_before_parse (void)
   input_flags.dynamic = ${DYNAMIC_LINK-TRUE};
   config.has_shared = `if test -n "$GENERATE_SHLIB_SCRIPT" ; then echo TRUE ; else echo FALSE ; fi`;
   config.separate_code = `if test "x${SEPARATE_CODE}" = xyes ; then echo TRUE ; else echo FALSE ; fi`;
+}
+
+EOF
+fi
+
+if test x"$LDEMUL_AFTER_PARSE" != xgld"$EMULATION_NAME"_after_parse; then
+fragment <<EOF
+
+static void
+gld${EMULATION_NAME}_after_parse (void)
+{
+  if (bfd_link_pie (&link_info))
+    link_info.flags_1 |= (bfd_vma) DF_1_PIE;
+
+  after_parse_default ();
 }
 
 EOF
@@ -1029,7 +1045,7 @@ gld${EMULATION_NAME}_after_open (void)
 	}
     }
 
-  if (link_info.relocatable)
+  if (bfd_link_relocatable (&link_info))
     {
       if (link_info.execstack == ! link_info.noexecstack)
 	/* PR ld/16744: If "-z [no]execstack" has been specified on the
@@ -1045,30 +1061,57 @@ gld${EMULATION_NAME}_after_open (void)
       return;
     }
 
-  if (link_info.eh_frame_hdr
-      && !link_info.traditional_format)
+  if (!link_info.traditional_format)
     {
       bfd *abfd, *elfbfd = NULL;
       bfd_boolean warn_eh_frame = FALSE;
       asection *s;
+      int seen_type = 0;
 
       for (abfd = link_info.input_bfds; abfd; abfd = abfd->link.next)
 	{
+	  int type = 0;
+	  for (s = abfd->sections; s && type < COMPACT_EH_HDR; s = s->next)
+	    {
+	      const char *name = bfd_get_section_name (abfd, s);
+
+	      if (bfd_is_abs_section (s->output_section))
+		continue;
+	      if (CONST_STRNEQ (name, ".eh_frame_entry"))
+		type = COMPACT_EH_HDR;
+	      else if (strcmp (name, ".eh_frame") == 0 && s->size > 8)
+		type = DWARF2_EH_HDR;
+	    }
+
+	  if (type != 0)
+	    {
+	      if (seen_type == 0)
+		{
+		  seen_type = type;
+		}
+	      else if (seen_type != type)
+		{
+		  einfo (_("%P%F: compact frame descriptions incompatible with"
+			 " DWARF2 .eh_frame from %B\n"),
+			 type == DWARF2_EH_HDR ? abfd : elfbfd);
+		  break;
+		}
+
+	      if (!elfbfd
+		  && (type == COMPACT_EH_HDR || link_info.eh_frame_hdr_type != 0))
+		{
+		  if (bfd_get_flavour (abfd) == bfd_target_elf_flavour)
+		    elfbfd = abfd;
+
+		  warn_eh_frame = TRUE;
+		}
+	    }
+
+	  if (seen_type == COMPACT_EH_HDR)
+	    link_info.eh_frame_hdr_type = COMPACT_EH_HDR;
+
 	  if (bfd_count_sections (abfd) == 0)
 	    continue;
-	  if (bfd_get_flavour (abfd) == bfd_target_elf_flavour)
-	    elfbfd = abfd;
-	  if (!warn_eh_frame)
-	    {
-	      s = bfd_get_section_by_name (abfd, ".eh_frame");
-	      while (s != NULL
-		     && (s->size <= 8
-			 || bfd_is_abs_section (s->output_section)))
-		s = bfd_get_next_section_by_name (s);
-	      warn_eh_frame = s != NULL;
-	    }
-	  if (elfbfd && warn_eh_frame)
-	    break;
 	}
       if (elfbfd)
 	{
@@ -1213,12 +1256,16 @@ fragment <<EOF
 	  rp = bfd_elf_get_runpath_list (link_info.output_bfd, &link_info);
 	  for (; !found && rp != NULL; rp = rp->next)
 	    {
-	      char *tmpname = gld${EMULATION_NAME}_add_sysroot (rp->name);
+	      const char *tmpname = rp->name;
+
+	      if (IS_ABSOLUTE_PATH (tmpname))
+		tmpname = gld${EMULATION_NAME}_add_sysroot (tmpname);
 	      found = (rp->by == l->by
 		       && gld${EMULATION_NAME}_search_needed (tmpname,
 							      &n,
 							      force));
-	      free (tmpname);
+	      if (tmpname != rp->name)
+		free ((char *) tmpname);
 	    }
 	  if (found)
 	    break;
@@ -1272,6 +1319,10 @@ fragment <<EOF
       einfo ("%P: warning: %s, needed by %B, not found (try using -rpath or -rpath-link)\n",
 	     l->name, l->by);
     }
+
+  if (link_info.eh_frame_hdr_type == COMPACT_EH_HDR)
+    if (bfd_elf_parse_eh_frame_entries (NULL, &link_info) == FALSE)
+      einfo (_("%P%F: Failed to parse EH frame entries.\n"));
 }
 
 EOF
@@ -1402,6 +1453,11 @@ gld${EMULATION_NAME}_append_to_separated_string (char **to, char *op_arg)
     }
 }
 
+#if defined(__GNUC__) && GCC_VERSION < 4006
+  /* Work around a GCC uninitialized warning bug fixed in GCC 4.6.  */
+static struct bfd_link_hash_entry ehdr_start_empty;
+#endif
+
 /* This is called after the sections have been attached to output
    sections, but before any sizes or addresses have been set.  */
 
@@ -1414,7 +1470,7 @@ gld${EMULATION_NAME}_before_allocation (void)
   struct elf_link_hash_entry *ehdr_start = NULL;
 #if defined(__GNUC__) && GCC_VERSION < 4006
   /* Work around a GCC uninitialized warning bug fixed in GCC 4.6.  */
-  struct bfd_link_hash_entry ehdr_start_save = ehdr_start_save;
+  struct bfd_link_hash_entry ehdr_start_save = ehdr_start_empty;
 #else
   struct bfd_link_hash_entry ehdr_start_save;
 #endif
@@ -1425,7 +1481,7 @@ gld${EMULATION_NAME}_before_allocation (void)
 
       /* Make __ehdr_start hidden if it has been referenced, to
 	 prevent the symbol from being dynamic.  */
-      if (!link_info.relocatable)
+      if (!bfd_link_relocatable (&link_info))
        {
          struct elf_link_hash_entry *h
            = elf_link_hash_lookup (elf_hash_table (&link_info), "__ehdr_start",
@@ -1796,7 +1852,7 @@ gld${EMULATION_NAME}_place_orphan (asection *s,
   int iself = s->owner->xvec->flavour == bfd_target_elf_flavour;
   unsigned int sh_type = iself ? elf_section_type (s) : SHT_NULL;
 
-  if (! link_info.relocatable
+  if (!bfd_link_relocatable (&link_info)
       && link_info.combreloc
       && (s->flags & SEC_ALLOC))
     {
@@ -1878,8 +1934,7 @@ gld${EMULATION_NAME}_place_orphan (asection *s,
 
   /* If this is a final link, then always put .gnu.warning.SYMBOL
      sections into the .text section to get them out of the way.  */
-  if (link_info.executable
-      && ! link_info.relocatable
+  if (bfd_link_executable (&link_info)
       && CONST_STRNEQ (s->name, ".gnu.warning.")
       && hold[orphan_text].os != NULL)
     {
@@ -1978,11 +2033,11 @@ fragment <<EOF
 {
   *isfile = 0;
 
-  if (link_info.relocatable && config.build_constructors)
+  if (bfd_link_relocatable (&link_info) && config.build_constructors)
     return
 EOF
 sed $sc ldscripts/${EMULATION_NAME}.xu			>> e${EMULATION_NAME}.c
-echo '  ; else if (link_info.relocatable) return'	>> e${EMULATION_NAME}.c
+echo '  ; else if (bfd_link_relocatable (&link_info)) return' >> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.xr			>> e${EMULATION_NAME}.c
 echo '  ; else if (!config.text_read_only) return'	>> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.xbn			>> e${EMULATION_NAME}.c
@@ -1992,26 +2047,28 @@ sed $sc ldscripts/${EMULATION_NAME}.xn			>> e${EMULATION_NAME}.c
 fi
 if test -n "$GENERATE_PIE_SCRIPT" ; then
 if test -n "$GENERATE_COMBRELOC_SCRIPT" ; then
-echo '  ; else if (link_info.pie && link_info.combreloc' >> e${EMULATION_NAME}.c
-echo '             && link_info.relro' >> e${EMULATION_NAME}.c
+echo '  ; else if (bfd_link_pie (&link_info)'		>> e${EMULATION_NAME}.c
+echo '             && link_info.combreloc'		>> e${EMULATION_NAME}.c
+echo '             && link_info.relro'			>> e${EMULATION_NAME}.c
 echo '             && (link_info.flags & DF_BIND_NOW)) return' >> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.xdw			>> e${EMULATION_NAME}.c
-echo '  ; else if (link_info.pie && link_info.combreloc) return' >> e${EMULATION_NAME}.c
+echo '  ; else if (bfd_link_pie (&link_info)'		>> e${EMULATION_NAME}.c
+echo '             && link_info.combreloc) return'	>> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.xdc			>> e${EMULATION_NAME}.c
 fi
-echo '  ; else if (link_info.pie) return'		>> e${EMULATION_NAME}.c
+echo '  ; else if (bfd_link_pie (&link_info)) return'	>> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.xd			>> e${EMULATION_NAME}.c
 fi
 if test -n "$GENERATE_SHLIB_SCRIPT" ; then
 if test -n "$GENERATE_COMBRELOC_SCRIPT" ; then
-echo '  ; else if (link_info.shared && link_info.combreloc' >> e${EMULATION_NAME}.c
+echo '  ; else if (bfd_link_dll (&link_info) && link_info.combreloc' >> e${EMULATION_NAME}.c
 echo '             && link_info.relro' >> e${EMULATION_NAME}.c
 echo '             && (link_info.flags & DF_BIND_NOW)) return' >> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.xsw			>> e${EMULATION_NAME}.c
-echo '  ; else if (link_info.shared && link_info.combreloc) return' >> e${EMULATION_NAME}.c
+echo '  ; else if (bfd_link_dll (&link_info) && link_info.combreloc) return' >> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.xsc			>> e${EMULATION_NAME}.c
 fi
-echo '  ; else if (link_info.shared) return'		>> e${EMULATION_NAME}.c
+echo '  ; else if (bfd_link_dll (&link_info)) return'	>> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.xs			>> e${EMULATION_NAME}.c
 fi
 if test -n "$GENERATE_COMBRELOC_SCRIPT" ; then
@@ -2032,9 +2089,9 @@ fragment <<EOF
 {
   *isfile = 1;
 
-  if (link_info.relocatable && config.build_constructors)
+  if (bfd_link_relocatable (&link_info) && config.build_constructors)
     return "ldscripts/${EMULATION_NAME}.xu";
-  else if (link_info.relocatable)
+  else if (bfd_link_relocatable (&link_info))
     return "ldscripts/${EMULATION_NAME}.xr";
   else if (!config.text_read_only)
     return "ldscripts/${EMULATION_NAME}.xbn";
@@ -2049,30 +2106,33 @@ fi
 if test -n "$GENERATE_PIE_SCRIPT" ; then
 if test -n "$GENERATE_COMBRELOC_SCRIPT" ; then
 fragment <<EOF
-  else if (link_info.pie && link_info.combreloc
-	   && link_info.relro && (link_info.flags & DF_BIND_NOW))
+  else if (bfd_link_pie (&link_info)
+	   && link_info.combreloc
+	   && link_info.relro
+	   && (link_info.flags & DF_BIND_NOW))
     return "ldscripts/${EMULATION_NAME}.xdw";
-  else if (link_info.pie && link_info.combreloc)
+  else if (bfd_link_pie (&link_info)
+	   && link_info.combreloc)
     return "ldscripts/${EMULATION_NAME}.xdc";
 EOF
 fi
 fragment <<EOF
-  else if (link_info.pie)
+  else if (bfd_link_pie (&link_info))
     return "ldscripts/${EMULATION_NAME}.xd";
 EOF
 fi
 if test -n "$GENERATE_SHLIB_SCRIPT" ; then
 if test -n "$GENERATE_COMBRELOC_SCRIPT" ; then
 fragment <<EOF
-  else if (link_info.shared && link_info.combreloc
+  else if (bfd_link_dll (&link_info) && link_info.combreloc
 	   && link_info.relro && (link_info.flags & DF_BIND_NOW))
     return "ldscripts/${EMULATION_NAME}.xsw";
-  else if (link_info.shared && link_info.combreloc)
+  else if (bfd_link_dll (&link_info) && link_info.combreloc)
     return "ldscripts/${EMULATION_NAME}.xsc";
 EOF
 fi
 fragment <<EOF
-  else if (link_info.shared)
+  else if (bfd_link_dll (&link_info))
     return "ldscripts/${EMULATION_NAME}.xs";
 EOF
 fi
@@ -2192,7 +2252,7 @@ gld${EMULATION_NAME}_handle_option (int optc)
       if (strcasecmp (optarg, "none") == 0)
 	link_info.compress_debug = COMPRESS_DEBUG_NONE;
       else if (strcasecmp (optarg, "zlib") == 0)
-	link_info.compress_debug = COMPRESS_DEBUG_ZLIB;
+	link_info.compress_debug = COMPRESS_DEBUG_GABI_ZLIB;
       else if (strcasecmp (optarg, "zlib-gnu") == 0)
 	link_info.compress_debug = COMPRESS_DEBUG_GNU_ZLIB;
       else if (strcasecmp (optarg, "zlib-gabi") == 0)
@@ -2222,7 +2282,7 @@ fragment <<EOF
       break;
 
     case OPTION_EH_FRAME_HDR:
-      link_info.eh_frame_hdr = TRUE;
+      link_info.eh_frame_hdr_type = DWARF2_EH_HDR;
       break;
 
     case OPTION_GROUP:
@@ -2416,7 +2476,7 @@ struct ld_emulation_xfer_struct ld_${EMULATION_NAME}_emulation =
   ${LDEMUL_BEFORE_PARSE-gld${EMULATION_NAME}_before_parse},
   ${LDEMUL_SYSLIB-syslib_default},
   ${LDEMUL_HLL-hll_default},
-  ${LDEMUL_AFTER_PARSE-after_parse_default},
+  ${LDEMUL_AFTER_PARSE-gld${EMULATION_NAME}_after_parse},
   ${LDEMUL_AFTER_OPEN-gld${EMULATION_NAME}_after_open},
   ${LDEMUL_AFTER_ALLOCATION-gld${EMULATION_NAME}_after_allocation},
   ${LDEMUL_SET_OUTPUT_ARCH-set_output_arch_default},

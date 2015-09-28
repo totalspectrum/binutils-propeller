@@ -99,8 +99,7 @@ tui_find_disassembly_address (struct gdbarch *gdbarch, CORE_ADDR pc, int from)
   if (max_lines <= 1)
      return pc;
 
-  asm_lines = (struct tui_asm_line*) alloca (sizeof (struct tui_asm_line)
-                                         * max_lines);
+  asm_lines = XALLOCAVEC (struct tui_asm_line, max_lines);
   memset (asm_lines, 0, sizeof (struct tui_asm_line) * max_lines);
 
   new_low = pc;
@@ -192,15 +191,13 @@ tui_set_disassem_content (struct gdbarch *gdbarch, CORE_ADDR pc)
   TUI_DISASM_WIN->detail.source_info.gdbarch = gdbarch;
   TUI_DISASM_WIN->detail.source_info.start_line_or_addr.loa = LOA_ADDRESS;
   TUI_DISASM_WIN->detail.source_info.start_line_or_addr.u.addr = pc;
-  cur_pc = (CORE_ADDR) (((struct tui_win_element *)
-			 locator->content[0])->which_element.locator.addr);
+  cur_pc = locator->content[0]->which_element.locator.addr;
 
   max_lines = TUI_DISASM_WIN->generic.height - 2;	/* Account for
 							   hilite.  */
 
   /* Get temporary table that will hold all strings (addr & insn).  */
-  asm_lines = (struct tui_asm_line*) alloca (sizeof (struct tui_asm_line)
-                                         * max_lines);
+  asm_lines = XALLOCAVEC (struct tui_asm_line, max_lines);
   memset (asm_lines, 0, sizeof (struct tui_asm_line) * max_lines);
 
   tui_disassemble (gdbarch, asm_lines, pc, max_lines);
@@ -232,7 +229,7 @@ tui_set_disassem_content (struct gdbarch *gdbarch, CORE_ADDR pc)
       struct tui_source_element *src;
       int cur_len;
 
-      element = (struct tui_win_element *) TUI_DISASM_WIN->generic.content[i];
+      element = TUI_DISASM_WIN->generic.content[i];
       src = &element->which_element.source;
       strcpy (line, asm_lines[i].addr_string);
       cur_len = strlen (line);
@@ -334,8 +331,7 @@ tui_get_begin_asm_address (struct gdbarch **gdbarch_p, CORE_ADDR *addr_p)
   CORE_ADDR addr;
 
   locator = tui_locator_win_info_ptr ();
-  element = &((struct tui_win_element *)
-	      locator->content[0])->which_element.locator;
+  element = &locator->content[0]->which_element.locator;
 
   if (element->addr == 0)
     {

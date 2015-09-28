@@ -142,6 +142,9 @@ ldfile_try_open_bfd (const char *attempt,
   /* Linker needs to decompress sections.  */
   entry->the_bfd->flags |= BFD_DECOMPRESS;
 
+  /* This is a linker input BFD.  */
+  entry->the_bfd->is_linker_input = 1;
+
 #ifdef ENABLE_PLUGINS
   if (entry->flags.lto_output)
     entry->the_bfd->lto_output = 1;
@@ -354,7 +357,7 @@ ldfile_open_file_search (const char *arch,
     {
       char *string;
 
-      if (entry->flags.dynamic && ! link_info.relocatable)
+      if (entry->flags.dynamic && !bfd_link_relocatable (&link_info))
 	{
 	  if (ldemul_open_dynamic_archive (arch, search, entry))
 	    return TRUE;

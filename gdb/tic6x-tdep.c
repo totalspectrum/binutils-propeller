@@ -405,7 +405,7 @@ tic6x_frame_unwind_cache (struct frame_info *this_frame,
   struct tic6x_unwind_cache *cache;
 
   if (*this_prologue_cache)
-    return *this_prologue_cache;
+    return (struct tic6x_unwind_cache *) *this_prologue_cache;
 
   cache = FRAME_OBSTACK_ZALLOC (struct tic6x_unwind_cache);
   (*this_prologue_cache) = cache;
@@ -516,7 +516,7 @@ tic6x_stub_this_id (struct frame_info *this_frame, void **this_cache,
 
   if (*this_cache == NULL)
     *this_cache = tic6x_make_stub_cache (this_frame);
-  cache = *this_cache;
+  cache = (struct tic6x_unwind_cache *) *this_cache;
 
   *this_id = frame_id_build (cache->cfa, get_frame_pc (this_frame));
 }
@@ -807,7 +807,7 @@ tic6x_return_value (struct gdbarch *gdbarch, struct value *function,
     {
       if (type != NULL)
 	{
-	  CHECK_TYPEDEF (type);
+	  type = check_typedef (type);
 	  if (language_pass_by_reference (type))
 	    return RETURN_VALUE_STRUCT_CONVENTION;
 	}
@@ -1122,10 +1122,10 @@ tic6x_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   return sp;
 }
 
-/* This is the implementation of gdbarch method in_function_epilogue_p.  */
+/* This is the implementation of gdbarch method stack_frame_destroyed_p.  */
 
 static int
-tic6x_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
+tic6x_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   unsigned long inst = tic6x_fetch_instruction (gdbarch, pc);
   /* Normally, the epilogue is composed by instruction `b .S2 b3'.  */
@@ -1268,7 +1268,7 @@ tic6x_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 	return arches->gdbarch;
     }
 
-  tdep = xcalloc (1, sizeof (struct gdbarch_tdep));
+  tdep = XCNEW (struct gdbarch_tdep);
 
   tdep->has_gp = has_gp;
   gdbarch = gdbarch_alloc (&info, tdep);
@@ -1328,7 +1328,7 @@ tic6x_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   set_gdbarch_get_longjmp_target (gdbarch, tic6x_get_longjmp_target);
 
-  set_gdbarch_in_function_epilogue_p (gdbarch, tic6x_in_function_epilogue_p);
+  set_gdbarch_stack_frame_destroyed_p (gdbarch, tic6x_stack_frame_destroyed_p);
 
   set_gdbarch_return_in_first_hidden_param_p (gdbarch,
 					      tic6x_return_in_first_hidden_param_p);

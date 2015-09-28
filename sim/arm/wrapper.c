@@ -114,7 +114,7 @@ struct maverick_regs
     int i;
     float f;
   } upper;
-  
+
   union
   {
     int i;
@@ -257,6 +257,11 @@ sim_create_inferior (SIM_DESC sd ATTRIBUTE_UNUSED,
       mach = 0;
     }
 
+#ifdef MODET
+  if (abfd != NULL && (bfd_get_start_address (abfd) & 1))
+    SETT;
+#endif
+
   switch (mach)
     {
     default:
@@ -341,17 +346,6 @@ sim_create_inferior (SIM_DESC sd ATTRIBUTE_UNUSED,
       break;
     }
 
-  if (   mach != bfd_mach_arm_3
-      && mach != bfd_mach_arm_3M
-      && mach != bfd_mach_arm_2
-      && mach != bfd_mach_arm_2a)
-    {
-      /* Reset mode to ARM.  A gdb user may rerun a program that had entered
-	 THUMB mode from the start and cause the ARM-mode startup code to be
-	 executed in THUMB mode.  */
-      ARMul_SetCPSR (state, SVC32MODE);
-    }
-  
   memset (& info, 0, sizeof (info));
   INIT_DISASSEMBLE_INFO (info, stdout, op_printf);
   info.read_memory_func = sim_dis_read;
@@ -670,7 +664,7 @@ sim_fetch_register (SIM_DESC sd ATTRIBUTE_UNUSED,
       len -= 4;
       memory += 4;
       regval = 0;
-    }  
+    }
 
   return length;
 }
@@ -716,7 +710,7 @@ sim_target_parse_command_line (int argc, char ** argv)
 	  trace = 1;
 	  continue;
 	}
-      
+
       if (strcmp (ptr, "-z") == 0)
 	{
 	  /* Remove this option from the argv array.  */
@@ -727,7 +721,7 @@ sim_target_parse_command_line (int argc, char ** argv)
 	  trace_funcs = 1;
 	  continue;
 	}
-      
+
       if (strcmp (ptr, "-d") == 0)
 	{
 	  /* Remove this option from the argv array.  */
@@ -748,14 +742,14 @@ sim_target_parse_command_line (int argc, char ** argv)
 	  for (arg = i; arg < argc; arg ++)
 	    argv[arg] = argv[arg + 1];
 	  argc --;
-	  
+
 	  ptr = argv[i];
 	}
       else
 	ptr += sizeof SWI_SWITCH;
 
       swi_mask = 0;
-      
+
       while (* ptr)
 	{
 	  int i;
@@ -779,7 +773,7 @@ sim_target_parse_command_line (int argc, char ** argv)
 
       if (* ptr != 0)
 	fprintf (stderr, "Ignoring swi options: %s\n", ptr);
-      
+
       /* Remove this option from the argv array.  */
       for (arg = i; arg < argc; arg ++)
 	argv[arg] = argv[arg + 1];
@@ -800,6 +794,18 @@ sim_target_parse_arg_array (char ** argv)
   sim_target_parse_command_line (i, argv);
 }
 
+static sim_cia
+arm_pc_get (sim_cpu *cpu)
+{
+  return PC;
+}
+
+static void
+arm_pc_set (sim_cpu *cpu, sim_cia pc)
+{
+  ARMul_SetPC (state, pc);
+}
+
 static void
 free_state (SIM_DESC sd)
 {
@@ -815,6 +821,7 @@ sim_open (SIM_OPEN_KIND kind,
 	  struct bfd *abfd,
 	  char **argv)
 {
+  int i;
   SIM_DESC sd = sim_state_alloc (kind, cb);
   SIM_ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
 
@@ -866,6 +873,15 @@ sim_open (SIM_OPEN_KIND kind,
       return 0;
     }
 
+  /* CPU specific initialization.  */
+  for (i = 0; i < MAX_NR_PROCESSORS; ++i)
+    {
+      SIM_CPU *cpu = STATE_CPU (sd, i);
+
+      CPU_PC_FETCH (cpu) = arm_pc_get;
+      CPU_PC_STORE (cpu) = arm_pc_set;
+    }
+
   sim_callback = cb;
 
   sim_target_parse_arg_array (argv);
@@ -891,7 +907,6 @@ sim_open (SIM_OPEN_KIND kind,
 					       "Missing argument to -m option\n");
 		return NULL;
 	      }
-	      
 	  }
     }
 

@@ -810,8 +810,7 @@ static const struct trace_file_write_ops ctf_write_ops =
 struct trace_file_writer *
 ctf_trace_file_writer_new (void)
 {
-  struct ctf_trace_file_writer *writer
-    = xmalloc (sizeof (struct ctf_trace_file_writer));
+  struct ctf_trace_file_writer *writer = XNEW (struct ctf_trace_file_writer);
 
   writer->base.ops = &ctf_write_ops;
 
@@ -1339,7 +1338,7 @@ ctf_xfer_partial (struct target_ops *ops, enum target_object object,
 	      gdb_byte *contents;
 	      int k;
 
-	      contents = xmalloc (mlen);
+	      contents = (gdb_byte *) xmalloc (mlen);
 
 	      for (k = 0; k < mlen; k++)
 		{

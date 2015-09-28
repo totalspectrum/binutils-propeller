@@ -42,6 +42,7 @@
 
 #include <ctype.h>
 #include <sys/stat.h>
+#include "solist.h"
 
 void (*deprecated_file_changed_hook) (char *);
 
@@ -132,6 +133,45 @@ exec_file_clear (int from_tty)
 
   if (from_tty)
     printf_unfiltered (_("No executable file now.\n"));
+}
+
+/* See gdbcore.h.  */
+
+void
+exec_file_locate_attach (int pid, int from_tty)
+{
+  char *exec_file, *full_exec_path = NULL;
+
+  /* Do nothing if we already have an executable filename.  */
+  exec_file = (char *) get_exec_file (0);
+  if (exec_file != NULL)
+    return;
+
+  /* Try to determine a filename from the process itself.  */
+  exec_file = target_pid_to_exec_file (pid);
+  if (exec_file == NULL)
+    return;
+
+  /* If gdb_sysroot is not empty and the discovered filename
+     is absolute then prefix the filename with gdb_sysroot.  */
+  if (*gdb_sysroot != '\0' && IS_ABSOLUTE_PATH (exec_file))
+    full_exec_path = exec_file_find (exec_file, NULL);
+
+  if (full_exec_path == NULL)
+    {
+      /* It's possible we don't have a full path, but rather just a
+	 filename.  Some targets, such as HP-UX, don't provide the
+	 full path, sigh.
+
+	 Attempt to qualify the filename against the source path.
+	 (If that fails, we'll just fall back on the original
+	 filename.  Not much more we can do...)  */
+      if (!source_full_path_of (exec_file, &full_exec_path))
+	full_exec_path = xstrdup (exec_file);
+    }
+
+  exec_file_attach (full_exec_path, from_tty);
+  symbol_file_add_main (full_exec_path, from_tty);
 }
 
 /* Set FILENAME as the new exec file.
@@ -243,7 +283,7 @@ exec_file_attach (const char *filename, int from_tty)
 
       if (!exec_bfd)
 	{
-	  error (_("\"%s\": could not open as an executable file: %s"),
+	  error (_("\"%s\": could not open as an executable file: %s."),
 		 scratch_pathname, bfd_errmsg (bfd_get_error ()));
 	}
 
@@ -413,8 +453,8 @@ resize_section_table (struct target_section_table *table, int adjustment)
 
   if (new_count)
     {
-      table->sections = xrealloc (table->sections,
-				  sizeof (struct target_section) * new_count);
+      table->sections = XRESIZEVEC (struct target_section, table->sections,
+				    new_count);
       table->sections_end = table->sections + new_count;
     }
   else
@@ -435,7 +475,7 @@ build_section_table (struct bfd *some_bfd, struct target_section **start,
   count = bfd_count_sections (some_bfd);
   if (*start)
     xfree (* start);
-  *start = (struct target_section *) xmalloc (count * sizeof (**start));
+  *start = XNEWVEC (struct target_section, count);
   *end = *start;
   bfd_map_over_sections (some_bfd, add_to_section_table, (char *) end);
   if (*end > *start + count)

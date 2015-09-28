@@ -187,7 +187,7 @@ alloc_type (struct objfile *objfile)
 
 /* Allocate a new GDBARCH-associated type structure and fill it
    with some defaults.  Space for the type structure is allocated
-   on the heap.  */
+   on the obstack associated with GDBARCH.  */
 
 struct type *
 alloc_type_arch (struct gdbarch *gdbarch)
@@ -198,8 +198,8 @@ alloc_type_arch (struct gdbarch *gdbarch)
 
   /* Alloc the structure and start off with all fields zeroed.  */
 
-  type = XCNEW (struct type);
-  TYPE_MAIN_TYPE (type) = XCNEW (struct main_type);
+  type = GDBARCH_OBSTACK_ZALLOC (gdbarch, struct type);
+  TYPE_MAIN_TYPE (type) = GDBARCH_OBSTACK_ZALLOC (gdbarch, struct main_type);
 
   TYPE_OBJFILE_OWNED (type) = 0;
   TYPE_OWNER (type).gdbarch = gdbarch;
@@ -250,6 +250,17 @@ get_target_type (struct type *type)
     }
 
   return type;
+}
+
+/* See gdbtypes.h.  */
+
+unsigned int
+type_length_units (struct type *type)
+{
+  struct gdbarch *arch = get_type_arch (type);
+  int unit_size = gdbarch_addressable_memory_unit_size (arch);
+
+  return TYPE_LENGTH (type) / unit_size;
 }
 
 /* Alloc a new type instance structure, fill it with some defaults,
@@ -514,7 +525,8 @@ lookup_function_type_with_arguments (struct type *type,
     }
 
   TYPE_NFIELDS (fn) = nparams;
-  TYPE_FIELDS (fn) = TYPE_ZALLOC (fn, nparams * sizeof (struct field));
+  TYPE_FIELDS (fn)
+    = (struct field *) TYPE_ZALLOC (fn, nparams * sizeof (struct field));
   for (i = 0; i < nparams; ++i)
     TYPE_FIELD_TYPE (fn, i) = param_types[i];
 
@@ -898,7 +910,7 @@ has_static_range (const struct range_bounds *bounds)
 int
 get_discrete_bounds (struct type *type, LONGEST *lowp, LONGEST *highp)
 {
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
   switch (TYPE_CODE (type))
     {
     case TYPE_CODE_RANGE:
@@ -1004,6 +1016,45 @@ get_array_bounds (struct type *type, LONGEST *low_bound, LONGEST *high_bound)
   return 1;
 }
 
+/* Assuming that TYPE is a discrete type and VAL is a valid integer
+   representation of a value of this type, save the corresponding
+   position number in POS.
+
+   Its differs from VAL only in the case of enumeration types.  In
+   this case, the position number of the value of the first listed
+   enumeration literal is zero; the position number of the value of
+   each subsequent enumeration literal is one more than that of its
+   predecessor in the list.
+
+   Return 1 if the operation was successful.  Return zero otherwise,
+   in which case the value of POS is unmodified.
+*/
+
+int
+discrete_position (struct type *type, LONGEST val, LONGEST *pos)
+{
+  if (TYPE_CODE (type) == TYPE_CODE_ENUM)
+    {
+      int i;
+
+      for (i = 0; i < TYPE_NFIELDS (type); i += 1)
+        {
+          if (val == TYPE_FIELD_ENUMVAL (type, i))
+	    {
+	      *pos = i;
+	      return 1;
+	    }
+        }
+      /* Invalid enumeration value.  */
+      return 0;
+    }
+  else
+    {
+      *pos = val;
+      return 1;
+    }
+}
+
 /* Create an array type using either a blank type supplied in
    RESULT_TYPE, or creating a new type, inheriting the objfile from
    RANGE_TYPE.
@@ -1035,7 +1086,7 @@ create_array_type_with_stride (struct type *result_type,
 
       if (get_discrete_bounds (range_type, &low_bound, &high_bound) < 0)
 	low_bound = high_bound = 0;
-      CHECK_TYPEDEF (element_type);
+      element_type = check_typedef (element_type);
       /* Be careful when setting the array length.  Ada arrays can be
 	 empty arrays with the high_bound being smaller than the low_bound.
 	 In such cases, the array length should be zero.  */
@@ -1141,7 +1192,8 @@ create_set_type (struct type *result_type, struct type *domain_type)
 
   TYPE_CODE (result_type) = TYPE_CODE_SET;
   TYPE_NFIELDS (result_type) = 1;
-  TYPE_FIELDS (result_type) = TYPE_ZALLOC (result_type, sizeof (struct field));
+  TYPE_FIELDS (result_type)
+    = (struct field *) TYPE_ZALLOC (result_type, sizeof (struct field));
 
   if (!TYPE_STUB (domain_type))
     {
@@ -1344,7 +1396,7 @@ type_name_no_tag_or_error (struct type *type)
   const char *name;
   struct objfile *objfile;
 
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
 
   name = type_name_no_tag (type);
   if (name != NULL)
@@ -1370,7 +1422,7 @@ lookup_typename (const struct language_defn *language,
   struct type *type;
 
   sym = lookup_symbol_in_language (name, block, VAR_DOMAIN,
-				   language->la_language, NULL);
+				   language->la_language, NULL).symbol;
   if (sym != NULL && SYMBOL_CLASS (sym) == LOC_TYPEDEF)
     return SYMBOL_TYPE (sym);
 
@@ -1383,7 +1435,7 @@ struct type *
 lookup_unsigned_typename (const struct language_defn *language,
 			  struct gdbarch *gdbarch, const char *name)
 {
-  char *uns = alloca (strlen (name) + 10);
+  char *uns = (char *) alloca (strlen (name) + 10);
 
   strcpy (uns, "unsigned ");
   strcpy (uns + 9, name);
@@ -1395,7 +1447,7 @@ lookup_signed_typename (const struct language_defn *language,
 			struct gdbarch *gdbarch, const char *name)
 {
   struct type *t;
-  char *uns = alloca (strlen (name) + 8);
+  char *uns = (char *) alloca (strlen (name) + 8);
 
   strcpy (uns, "signed ");
   strcpy (uns + 7, name);
@@ -1414,7 +1466,7 @@ lookup_struct (const char *name, const struct block *block)
 {
   struct symbol *sym;
 
-  sym = lookup_symbol (name, block, STRUCT_DOMAIN, 0);
+  sym = lookup_symbol (name, block, STRUCT_DOMAIN, 0).symbol;
 
   if (sym == NULL)
     {
@@ -1437,7 +1489,7 @@ lookup_union (const char *name, const struct block *block)
   struct symbol *sym;
   struct type *t;
 
-  sym = lookup_symbol (name, block, STRUCT_DOMAIN, 0);
+  sym = lookup_symbol (name, block, STRUCT_DOMAIN, 0).symbol;
 
   if (sym == NULL)
     error (_("No union type named %s."), name);
@@ -1460,7 +1512,7 @@ lookup_enum (const char *name, const struct block *block)
 {
   struct symbol *sym;
 
-  sym = lookup_symbol (name, block, STRUCT_DOMAIN, 0);
+  sym = lookup_symbol (name, block, STRUCT_DOMAIN, 0).symbol;
   if (sym == NULL)
     {
       error (_("No enum type named %s."), name);
@@ -1489,7 +1541,7 @@ lookup_template_type (char *name, struct type *type,
   strcat (nam, TYPE_NAME (type));
   strcat (nam, " >");	/* FIXME, extra space still introduced in gcc?  */
 
-  sym = lookup_symbol (nam, block, VAR_DOMAIN, 0);
+  sym = lookup_symbol (nam, block, VAR_DOMAIN, 0).symbol;
 
   if (sym == NULL)
     {
@@ -1523,7 +1575,7 @@ lookup_struct_elt_type (struct type *type, const char *name, int noerr)
 
   for (;;)
     {
-      CHECK_TYPEDEF (type);
+      type = check_typedef (type);
       if (TYPE_CODE (type) != TYPE_CODE_PTR
 	  && TYPE_CODE (type) != TYPE_CODE_REF)
 	break;
@@ -1600,7 +1652,7 @@ get_unsigned_type_max (struct type *type, ULONGEST *max)
 {
   unsigned int n;
 
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_INT && TYPE_UNSIGNED (type));
   gdb_assert (TYPE_LENGTH (type) <= sizeof (ULONGEST));
 
@@ -1617,7 +1669,7 @@ get_signed_type_minmax (struct type *type, LONGEST *min, LONGEST *max)
 {
   unsigned int n;
 
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_INT && !TYPE_UNSIGNED (type));
   gdb_assert (TYPE_LENGTH (type) <= sizeof (LONGEST));
 
@@ -1636,7 +1688,7 @@ get_signed_type_minmax (struct type *type, LONGEST *min, LONGEST *max)
 int
 internal_type_vptr_fieldno (struct type *type)
 {
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
   if (!HAVE_CPLUS_STRUCT (type))
@@ -1649,7 +1701,7 @@ internal_type_vptr_fieldno (struct type *type)
 void
 set_type_vptr_fieldno (struct type *type, int fieldno)
 {
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
   if (!HAVE_CPLUS_STRUCT (type))
@@ -1663,7 +1715,7 @@ set_type_vptr_fieldno (struct type *type, int fieldno)
 struct type *
 internal_type_vptr_basetype (struct type *type)
 {
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
   gdb_assert (TYPE_SPECIFIC_FIELD (type) == TYPE_SPECIFIC_CPLUS_STUFF);
@@ -1675,7 +1727,7 @@ internal_type_vptr_basetype (struct type *type)
 void
 set_type_vptr_basetype (struct type *type, struct type *basetype)
 {
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
   if (!HAVE_CPLUS_STRUCT (type))
@@ -1698,7 +1750,7 @@ set_type_vptr_basetype (struct type *type, struct type *basetype)
 int
 get_vptr_fieldno (struct type *type, struct type **basetypep)
 {
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
 
   if (TYPE_VPTR_FIELDNO (type) < 0)
     {
@@ -1748,9 +1800,13 @@ stub_noname_complaint (void)
 /* Worker for is_dynamic_type.  */
 
 static int
-is_dynamic_type_internal (struct type *type)
+is_dynamic_type_internal (struct type *type, int top_level)
 {
   type = check_typedef (type);
+
+  /* We only want to recognize references at the outermost level.  */
+  if (top_level && TYPE_CODE (type) == TYPE_CODE_REF)
+    type = check_typedef (TYPE_TARGET_TYPE (type));
 
   /* Types that have a dynamic TYPE_DATA_LOCATION are considered
      dynamic, even if the type itself is statically defined.
@@ -1773,7 +1829,7 @@ is_dynamic_type_internal (struct type *type)
 	   of the range type are static.  It allows us to assume that
 	   the subtype of a static range type is also static.  */
 	return (!has_static_range (TYPE_RANGE_DATA (type))
-		|| is_dynamic_type_internal (TYPE_TARGET_TYPE (type)));
+		|| is_dynamic_type_internal (TYPE_TARGET_TYPE (type), 0));
       }
 
     case TYPE_CODE_ARRAY:
@@ -1782,9 +1838,9 @@ is_dynamic_type_internal (struct type *type)
 
 	/* The array is dynamic if either the bounds are dynamic,
 	   or the elements it contains have a dynamic contents.  */
-	if (is_dynamic_type_internal (TYPE_INDEX_TYPE (type)))
+	if (is_dynamic_type_internal (TYPE_INDEX_TYPE (type), 0))
 	  return 1;
-	return is_dynamic_type_internal (TYPE_TARGET_TYPE (type));
+	return is_dynamic_type_internal (TYPE_TARGET_TYPE (type), 0);
       }
 
     case TYPE_CODE_STRUCT:
@@ -1794,7 +1850,7 @@ is_dynamic_type_internal (struct type *type)
 
 	for (i = 0; i < TYPE_NFIELDS (type); ++i)
 	  if (!field_is_static (&TYPE_FIELD (type, i))
-	      && is_dynamic_type_internal (TYPE_FIELD_TYPE (type, i)))
+	      && is_dynamic_type_internal (TYPE_FIELD_TYPE (type, i), 0))
 	    return 1;
       }
       break;
@@ -1808,11 +1864,11 @@ is_dynamic_type_internal (struct type *type)
 int
 is_dynamic_type (struct type *type)
 {
-  return is_dynamic_type_internal (type);
+  return is_dynamic_type_internal (type, 1);
 }
 
 static struct type *resolve_dynamic_type_internal
-  (struct type *type, struct property_addr_info *addr_stack);
+  (struct type *type, struct property_addr_info *addr_stack, int top_level);
 
 /* Given a dynamic range type (dyn_range_type) and a stack of
    struct property_addr_info elements, return a static version
@@ -1831,7 +1887,7 @@ resolve_dynamic_range (struct type *dyn_range_type,
   gdb_assert (TYPE_CODE (dyn_range_type) == TYPE_CODE_RANGE);
 
   prop = &TYPE_RANGE_DATA (dyn_range_type)->low;
-  if (dwarf2_evaluate_property (prop, addr_stack, &value))
+  if (dwarf2_evaluate_property (prop, NULL, addr_stack, &value))
     {
       low_bound.kind = PROP_CONST;
       low_bound.data.const_val = value;
@@ -1843,7 +1899,7 @@ resolve_dynamic_range (struct type *dyn_range_type,
     }
 
   prop = &TYPE_RANGE_DATA (dyn_range_type)->high;
-  if (dwarf2_evaluate_property (prop, addr_stack, &value))
+  if (dwarf2_evaluate_property (prop, NULL, addr_stack, &value))
     {
       high_bound.kind = PROP_CONST;
       high_bound.data.const_val = value;
@@ -1860,7 +1916,7 @@ resolve_dynamic_range (struct type *dyn_range_type,
 
   static_target_type
     = resolve_dynamic_type_internal (TYPE_TARGET_TYPE (dyn_range_type),
-				     addr_stack);
+				     addr_stack, 0);
   static_range_type = create_range_type (copy_type (dyn_range_type),
 					 static_target_type,
 					 &low_bound, &high_bound);
@@ -1890,13 +1946,13 @@ resolve_dynamic_array (struct type *type,
   ary_dim = check_typedef (TYPE_TARGET_TYPE (elt_type));
 
   if (ary_dim != NULL && TYPE_CODE (ary_dim) == TYPE_CODE_ARRAY)
-    elt_type = resolve_dynamic_array (TYPE_TARGET_TYPE (type), addr_stack);
+    elt_type = resolve_dynamic_array (ary_dim, addr_stack);
   else
     elt_type = TYPE_TARGET_TYPE (type);
 
-  return create_array_type (copy_type (type),
-			    elt_type,
-			    range_type);
+  return create_array_type_with_stride (copy_type (type),
+					elt_type, range_type,
+					TYPE_FIELD_BITSIZE (type, 0));
 }
 
 /* Resolve dynamic bounds of members of the union TYPE to static
@@ -1915,8 +1971,9 @@ resolve_dynamic_union (struct type *type,
 
   resolved_type = copy_type (type);
   TYPE_FIELDS (resolved_type)
-    = TYPE_ALLOC (resolved_type,
-		  TYPE_NFIELDS (resolved_type) * sizeof (struct field));
+    = (struct field *) TYPE_ALLOC (resolved_type,
+				   TYPE_NFIELDS (resolved_type)
+				   * sizeof (struct field));
   memcpy (TYPE_FIELDS (resolved_type),
 	  TYPE_FIELDS (type),
 	  TYPE_NFIELDS (resolved_type) * sizeof (struct field));
@@ -1928,7 +1985,7 @@ resolve_dynamic_union (struct type *type,
 	continue;
 
       t = resolve_dynamic_type_internal (TYPE_FIELD_TYPE (resolved_type, i),
-					 addr_stack);
+					 addr_stack, 0);
       TYPE_FIELD_TYPE (resolved_type, i) = t;
       if (TYPE_LENGTH (t) > max_len)
 	max_len = TYPE_LENGTH (t);
@@ -1955,8 +2012,9 @@ resolve_dynamic_struct (struct type *type,
 
   resolved_type = copy_type (type);
   TYPE_FIELDS (resolved_type)
-    = TYPE_ALLOC (resolved_type,
-		  TYPE_NFIELDS (resolved_type) * sizeof (struct field));
+    = (struct field *) TYPE_ALLOC (resolved_type,
+				   TYPE_NFIELDS (resolved_type)
+				   * sizeof (struct field));
   memcpy (TYPE_FIELDS (resolved_type),
 	  TYPE_FIELDS (type),
 	  TYPE_NFIELDS (resolved_type) * sizeof (struct field));
@@ -1980,12 +2038,13 @@ resolve_dynamic_struct (struct type *type,
 		 " (invalid location kind)"));
 
       pinfo.type = check_typedef (TYPE_FIELD_TYPE (type, i));
+      pinfo.valaddr = addr_stack->valaddr;
       pinfo.addr = addr_stack->addr;
       pinfo.next = addr_stack;
 
       TYPE_FIELD_TYPE (resolved_type, i)
 	= resolve_dynamic_type_internal (TYPE_FIELD_TYPE (resolved_type, i),
-					 &pinfo);
+					 &pinfo, 0);
       gdb_assert (TYPE_FIELD_LOC_KIND (resolved_type, i)
 		  == FIELD_LOC_KIND_BITPOS);
 
@@ -2009,6 +2068,10 @@ resolve_dynamic_struct (struct type *type,
   TYPE_LENGTH (resolved_type)
     = (resolved_type_bit_length + TARGET_CHAR_BIT - 1) / TARGET_CHAR_BIT;
 
+  /* The Ada language uses this field as a cache for static fixed types: reset
+     it as RESOLVED_TYPE must have its own static fixed type.  */
+  TYPE_TARGET_TYPE (resolved_type) = NULL;
+
   return resolved_type;
 }
 
@@ -2016,21 +2079,23 @@ resolve_dynamic_struct (struct type *type,
 
 static struct type *
 resolve_dynamic_type_internal (struct type *type,
-			       struct property_addr_info *addr_stack)
+			       struct property_addr_info *addr_stack,
+			       int top_level)
 {
   struct type *real_type = check_typedef (type);
   struct type *resolved_type = type;
   struct dynamic_prop *prop;
   CORE_ADDR value;
 
-  if (!is_dynamic_type_internal (real_type))
+  if (!is_dynamic_type_internal (real_type, top_level))
     return type;
 
   if (TYPE_CODE (type) == TYPE_CODE_TYPEDEF)
     {
       resolved_type = copy_type (type);
       TYPE_TARGET_TYPE (resolved_type)
-	= resolve_dynamic_type_internal (TYPE_TARGET_TYPE (type), addr_stack);
+	= resolve_dynamic_type_internal (TYPE_TARGET_TYPE (type), addr_stack,
+					 top_level);
     }
   else 
     {
@@ -2039,6 +2104,25 @@ resolve_dynamic_type_internal (struct type *type,
 
       switch (TYPE_CODE (type))
 	{
+	case TYPE_CODE_REF:
+	  {
+	    struct property_addr_info pinfo;
+
+	    pinfo.type = check_typedef (TYPE_TARGET_TYPE (type));
+	    pinfo.valaddr = NULL;
+	    if (addr_stack->valaddr != NULL)
+	      pinfo.addr = extract_typed_address (addr_stack->valaddr, type);
+	    else
+	      pinfo.addr = read_memory_typed_address (addr_stack->addr, type);
+	    pinfo.next = addr_stack;
+
+	    resolved_type = copy_type (type);
+	    TYPE_TARGET_TYPE (resolved_type)
+	      = resolve_dynamic_type_internal (TYPE_TARGET_TYPE (type),
+					       &pinfo, top_level);
+	    break;
+	  }
+
 	case TYPE_CODE_ARRAY:
 	  resolved_type = resolve_dynamic_array (type, addr_stack);
 	  break;
@@ -2059,7 +2143,8 @@ resolve_dynamic_type_internal (struct type *type,
 
   /* Resolve data_location attribute.  */
   prop = TYPE_DATA_LOCATION (resolved_type);
-  if (prop != NULL && dwarf2_evaluate_property (prop, addr_stack, &value))
+  if (prop != NULL
+      && dwarf2_evaluate_property (prop, NULL, addr_stack, &value))
     {
       TYPE_DYN_PROP_ADDR (prop) = value;
       TYPE_DYN_PROP_KIND (prop) = PROP_CONST;
@@ -2071,11 +2156,13 @@ resolve_dynamic_type_internal (struct type *type,
 /* See gdbtypes.h  */
 
 struct type *
-resolve_dynamic_type (struct type *type, CORE_ADDR addr)
+resolve_dynamic_type (struct type *type, const gdb_byte *valaddr,
+		      CORE_ADDR addr)
 {
-  struct property_addr_info pinfo = {check_typedef (type), addr, NULL};
+  struct property_addr_info pinfo
+    = {check_typedef (type), valaddr, addr, NULL};
 
-  return resolve_dynamic_type_internal (type, &pinfo);
+  return resolve_dynamic_type_internal (type, &pinfo, 1);
 }
 
 /* See gdbtypes.h  */
@@ -2104,8 +2191,7 @@ add_dyn_prop (enum dynamic_prop_node_kind prop_kind, struct dynamic_prop prop,
 
   gdb_assert (TYPE_OBJFILE_OWNED (type));
 
-  temp = obstack_alloc (&objfile->objfile_obstack,
-			sizeof (struct dynamic_prop_list));
+  temp = XOBNEW (&objfile->objfile_obstack, struct dynamic_prop_list);
   temp->prop_kind = prop_kind;
   temp->prop = prop;
   temp->next = TYPE_DYN_PROP_LIST (type);
@@ -2174,7 +2260,7 @@ check_typedef (struct type *type)
 	      stub_noname_complaint ();
 	      return make_qualified_type (type, instance_flags, NULL);
 	    }
-	  sym = lookup_symbol (name, 0, STRUCT_DOMAIN, 0);
+	  sym = lookup_symbol (name, 0, STRUCT_DOMAIN, 0).symbol;
 	  if (sym)
 	    TYPE_TARGET_TYPE (type) = SYMBOL_TYPE (sym);
 	  else					/* TYPE_CODE_UNDEF */
@@ -2265,7 +2351,7 @@ check_typedef (struct type *type)
 	  stub_noname_complaint ();
 	  return make_qualified_type (type, instance_flags, NULL);
 	}
-      sym = lookup_symbol (name, 0, STRUCT_DOMAIN, 0);
+      sym = lookup_symbol (name, 0, STRUCT_DOMAIN, 0).symbol;
       if (sym)
         {
           /* Same as above for opaque types, we can replace the stub
@@ -2608,7 +2694,7 @@ can_dereference (struct type *t)
 {
   /* FIXME: Should we return true for references as well as
      pointers?  */
-  CHECK_TYPEDEF (t);
+  t = check_typedef (t);
   return
     (t != NULL
      && TYPE_CODE (t) == TYPE_CODE_PTR
@@ -2618,7 +2704,7 @@ can_dereference (struct type *t)
 int
 is_integral_type (struct type *t)
 {
-  CHECK_TYPEDEF (t);
+  t = check_typedef (t);
   return
     ((t != NULL)
      && ((TYPE_CODE (t) == TYPE_CODE_INT)
@@ -2634,7 +2720,7 @@ is_integral_type (struct type *t)
 static int
 is_scalar_type (struct type *type)
 {
-  CHECK_TYPEDEF (type);
+  type = check_typedef (type);
 
   switch (TYPE_CODE (type))
     {
@@ -2656,7 +2742,7 @@ is_scalar_type (struct type *type)
 int
 is_scalar_type_recursive (struct type *t)
 {
-  CHECK_TYPEDEF (t);
+  t = check_typedef (t);
 
   if (is_scalar_type (t))
     return 1;
@@ -2738,8 +2824,8 @@ distance_to_ancestor (struct type *base, struct type *dclass, int is_public)
   int i;
   int d;
 
-  CHECK_TYPEDEF (base);
-  CHECK_TYPEDEF (dclass);
+  base = check_typedef (base);
+  dclass = check_typedef (dclass);
 
   if (class_types_same_p (base, dclass))
     return 0;
@@ -2788,8 +2874,8 @@ is_unique_ancestor_worker (struct type *base, struct type *dclass,
 {
   int i, count = 0;
 
-  CHECK_TYPEDEF (base);
-  CHECK_TYPEDEF (dclass);
+  base = check_typedef (base);
+  dclass = check_typedef (dclass);
 
   for (i = 0; i < TYPE_N_BASECLASSES (dclass) && count < 2; ++i)
     {
@@ -2939,10 +3025,9 @@ rank_function (struct type **parms, int nparms,
 	       struct value **args, int nargs)
 {
   int i;
-  struct badness_vector *bv;
+  struct badness_vector *bv = XNEW (struct badness_vector);
   int min_len = nparms < nargs ? nparms : nargs;
 
-  bv = xmalloc (sizeof (struct badness_vector));
   bv->length = nargs + 1;	/* add 1 for the length-match rank.  */
   bv->rank = XNEWVEC (struct rank, nargs + 1);
 
@@ -3108,8 +3193,8 @@ static int
 check_types_equal (struct type *type1, struct type *type2,
 		   VEC (type_equality_entry_d) **worklist)
 {
-  CHECK_TYPEDEF (type1);
-  CHECK_TYPEDEF (type2);
+  type1 = check_typedef (type1);
+  type2 = check_typedef (type2);
 
   if (type1 == type2)
     return 1;
@@ -3867,7 +3952,13 @@ print_gnat_stuff (struct type *type, int spaces)
 {
   struct type *descriptive_type = TYPE_DESCRIPTIVE_TYPE (type);
 
-  recursive_dump_type (descriptive_type, spaces + 2);
+  if (descriptive_type == NULL)
+    printfi_filtered (spaces + 2, "no descriptive type\n");
+  else
+    {
+      printfi_filtered (spaces + 2, "descriptive type\n");
+      recursive_dump_type (descriptive_type, spaces + 4);
+    }
 }
 
 static struct obstack dont_print_type_obstack;
@@ -4217,7 +4308,7 @@ struct type_pair
 static hashval_t
 type_pair_hash (const void *item)
 {
-  const struct type_pair *pair = item;
+  const struct type_pair *pair = (const struct type_pair *) item;
 
   return htab_hash_pointer (pair->old);
 }
@@ -4225,7 +4316,8 @@ type_pair_hash (const void *item)
 static int
 type_pair_eq (const void *item_lhs, const void *item_rhs)
 {
-  const struct type_pair *lhs = item_lhs, *rhs = item_rhs;
+  const struct type_pair *lhs = (const struct type_pair *) item_lhs;
+  const struct type_pair *rhs = (const struct type_pair *) item_rhs;
 
   return lhs->old == rhs->old;
 }
@@ -4256,8 +4348,9 @@ copy_dynamic_prop_list (struct obstack *objfile_obstack,
     {
       struct dynamic_prop_list *node_copy;
 
-      node_copy = obstack_copy (objfile_obstack, *node_ptr,
-				sizeof (struct dynamic_prop_list));
+      node_copy = ((struct dynamic_prop_list *)
+		   obstack_copy (objfile_obstack, *node_ptr,
+				 sizeof (struct dynamic_prop_list)));
       node_copy->prop = (*node_ptr)->prop;
       *node_ptr = node_copy;
 
@@ -4268,9 +4361,9 @@ copy_dynamic_prop_list (struct obstack *objfile_obstack,
 }
 
 /* Recursively copy (deep copy) TYPE, if it is associated with
-   OBJFILE.  Return a new type allocated using malloc, a saved type if
-   we have already visited TYPE (using COPIED_TYPES), or TYPE if it is
-   not associated with OBJFILE.  */
+   OBJFILE.  Return a new type owned by the gdbarch associated with the type, a
+   saved type if we have already visited TYPE (using COPIED_TYPES), or TYPE if
+   it is not associated with OBJFILE.  */
 
 struct type *
 copy_type_recursive (struct objfile *objfile, 
@@ -4297,8 +4390,7 @@ copy_type_recursive (struct objfile *objfile,
 
   /* We must add the new type to the hash table immediately, in case
      we encounter this type again during a recursive call below.  */
-  stored
-    = obstack_alloc (&objfile->objfile_obstack, sizeof (struct type_pair));
+  stored = XOBNEW (&objfile->objfile_obstack, struct type_pair);
   stored->old = type;
   stored->newobj = new_type;
   *slot = stored;
@@ -4366,7 +4458,7 @@ copy_type_recursive (struct objfile *objfile,
   /* For range types, copy the bounds information.  */
   if (TYPE_CODE (type) == TYPE_CODE_RANGE)
     {
-      TYPE_RANGE_DATA (new_type) = xmalloc (sizeof (struct range_bounds));
+      TYPE_RANGE_DATA (new_type) = XNEW (struct range_bounds);
       *TYPE_RANGE_DATA (new_type) = *TYPE_RANGE_DATA (type);
     }
 
@@ -4462,7 +4554,7 @@ arch_type (struct gdbarch *gdbarch,
   TYPE_LENGTH (type) = length;
 
   if (name)
-    TYPE_NAME (type) = xstrdup (name);
+    TYPE_NAME (type) = gdbarch_obstack_strdup (gdbarch, name);
 
   return type;
 }
@@ -4571,7 +4663,8 @@ arch_flags_type (struct gdbarch *gdbarch, char *name, int length)
   type = arch_type (gdbarch, TYPE_CODE_FLAGS, length, name);
   TYPE_UNSIGNED (type) = 1;
   TYPE_NFIELDS (type) = nfields;
-  TYPE_FIELDS (type) = TYPE_ZALLOC (type, nfields * sizeof (struct field));
+  TYPE_FIELDS (type)
+    = (struct field *) TYPE_ZALLOC (type, nfields * sizeof (struct field));
 
   return type;
 }
@@ -4624,8 +4717,8 @@ append_composite_type_field_raw (struct type *t, char *name,
   struct field *f;
 
   TYPE_NFIELDS (t) = TYPE_NFIELDS (t) + 1;
-  TYPE_FIELDS (t) = xrealloc (TYPE_FIELDS (t),
-			      sizeof (struct field) * TYPE_NFIELDS (t));
+  TYPE_FIELDS (t) = XRESIZEVEC (struct field, TYPE_FIELDS (t),
+				TYPE_NFIELDS (t));
   f = &(TYPE_FIELDS (t)[TYPE_NFIELDS (t) - 1]);
   memset (f, 0, sizeof f[0]);
   FIELD_TYPE (f[0]) = field;
@@ -4688,7 +4781,7 @@ static struct gdbarch_data *gdbtypes_data;
 const struct builtin_type *
 builtin_type (struct gdbarch *gdbarch)
 {
-  return gdbarch_data (gdbarch, gdbtypes_data);
+  return (const struct builtin_type *) gdbarch_data (gdbarch, gdbtypes_data);
 }
 
 static void *
@@ -4833,7 +4926,7 @@ objfile_type (struct objfile *objfile)
 {
   struct gdbarch *gdbarch;
   struct objfile_type *objfile_type
-    = objfile_data (objfile, objfile_type_data);
+    = (struct objfile_type *) objfile_data (objfile, objfile_type_data);
 
   if (objfile_type)
     return objfile_type;

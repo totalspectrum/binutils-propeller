@@ -670,8 +670,7 @@ dwarf2_directive_loc (int dummy ATTRIBUTE_UNUSED)
       char *p, c;
       offsetT value;
 
-      p = input_line_pointer;
-      c = get_symbol_end ();
+      c = get_symbol_name (& p);
 
       if (strcmp (p, "basic_block") == 0)
 	{
@@ -690,7 +689,7 @@ dwarf2_directive_loc (int dummy ATTRIBUTE_UNUSED)
 	}
       else if (strcmp (p, "is_stmt") == 0)
 	{
-	  *input_line_pointer = c;
+	  (void) restore_line_pointer (c);
 	  value = get_absolute_expression ();
 	  if (value == 0)
 	    current.flags &= ~DWARF2_FLAG_IS_STMT;
@@ -704,7 +703,7 @@ dwarf2_directive_loc (int dummy ATTRIBUTE_UNUSED)
 	}
       else if (strcmp (p, "isa") == 0)
 	{
-	  *input_line_pointer = c;
+	  (void) restore_line_pointer (c);
 	  value = get_absolute_expression ();
 	  if (value >= 0)
 	    current.isa = value;
@@ -716,7 +715,7 @@ dwarf2_directive_loc (int dummy ATTRIBUTE_UNUSED)
 	}
       else if (strcmp (p, "discriminator") == 0)
 	{
-	  *input_line_pointer = c;
+	  (void) restore_line_pointer (c);
 	  value = get_absolute_expression ();
 	  if (value >= 0)
 	    current.discriminator = value;
@@ -729,11 +728,11 @@ dwarf2_directive_loc (int dummy ATTRIBUTE_UNUSED)
       else
 	{
 	  as_bad (_("unknown .loc sub-directive `%s'"), p);
-	  *input_line_pointer = c;
+	  (void) restore_line_pointer (c);
 	  return;
 	}
 
-      SKIP_WHITESPACE ();
+      SKIP_WHITESPACE_AFTER_NAME ();
     }
 
   demand_empty_rest_of_line ();
@@ -1296,7 +1295,7 @@ process_entries (segT seg, struct line_entry *e)
 	 section, as well as our sub-sections, and we have to ensure
 	 that all of the sub-sections are merged into a proper
 	 .debug_line section before a debugger sees them.  */
-	 
+
       sec_name = bfd_get_section_name (stdoutput, seg);
       if (strcmp (sec_name, ".text") != 0)
 	{
@@ -1458,7 +1457,8 @@ out_file_list (void)
 
 /* Switch to SEC and output a header length field.  Return the size of
    offsets used in SEC.  The caller must set EXPR->X_add_symbol value
-   to the end of the section.  */
+   to the end of the section.  EXPR->X_add_number will be set to the
+   negative size of the header.  */
 
 static int
 out_header (asection *sec, expressionS *exp)
@@ -1638,6 +1638,7 @@ static void
 out_debug_aranges (segT aranges_seg, segT info_seg)
 {
   unsigned int addr_size = sizeof_address;
+  offsetT size;
   struct line_seg *s;
   expressionS exp;
   symbolS *aranges_end;
@@ -1646,21 +1647,27 @@ out_debug_aranges (segT aranges_seg, segT info_seg)
 
   sizeof_offset = out_header (aranges_seg, &exp);
   aranges_end = exp.X_add_symbol;
+  size = -exp.X_add_number;
 
   /* Version.  */
   out_two (DWARF2_ARANGES_VERSION);
+  size += 2;
 
   /* Offset to .debug_info.  */
   TC_DWARF2_EMIT_OFFSET (section_symbol (info_seg), sizeof_offset);
+  size += sizeof_offset;
 
   /* Size of an address (offset portion).  */
   out_byte (addr_size);
+  size++;
 
   /* Size of a segment descriptor.  */
   out_byte (0);
+  size++;
 
   /* Align the header.  */
-  frag_align (ffs (2 * addr_size) - 1, 0, 0);
+  while ((size++ % (2 * addr_size)) > 0)
+    out_byte (0);
 
   for (s = all_segs; s; s = s->next)
     {

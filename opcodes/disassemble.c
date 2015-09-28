@@ -212,6 +212,7 @@ disassembler (abfd)
 #endif
 #ifdef ARCH_i386
     case bfd_arch_i386:
+    case bfd_arch_iamcu:
     case bfd_arch_l1om:
     case bfd_arch_k1om:
       disassemble = print_insn_i386;
@@ -391,7 +392,7 @@ disassembler (abfd)
 #endif
 #ifdef ARCH_rl78
     case bfd_arch_rl78:
-      disassemble = print_insn_rl78;
+      disassemble = rl78_get_disassembler (abfd);
       break;
 #endif
 #ifdef ARCH_rx

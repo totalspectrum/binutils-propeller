@@ -517,16 +517,15 @@ static void
 pseudo_compress (int x ATTRIBUTE_UNUSED)
 {
   char *opt;
-  char c;
+  char delim;
 
-  opt = input_line_pointer;
-  c = get_symbol_end ();
+  delim = get_symbol_name (&opt);
 
-  if (strncmp (opt, "on", 2) == 0)
+  if (strcasecmp (opt, "on") == 0)
     {
       compress = 1;
     }
-  else if (strncmp (opt, "off", 3) == 0)
+  else if (strcasecmp (opt, "off") == 0)
     {
       compress = 0;
     }
@@ -543,7 +542,7 @@ pseudo_compress (int x ATTRIBUTE_UNUSED)
       /* compression is off, make sure code is aligned */
       frag_align_code (2, 0);
     }
-  *input_line_pointer = c;
+  (void) restore_line_pointer (delim);
   demand_empty_rest_of_line ();
 }
 

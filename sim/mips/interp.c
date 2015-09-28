@@ -22,13 +22,6 @@ code on the hardware.
 
 */
 
-/* The TRACE manifests enable the provision of extra features. If they
-   are not defined then a simpler (quicker) simulator is constructed
-   without the required run-time checks, etc. */
-#if 1 /* 0 to allow user build selection, 1 to force inclusion */
-#define TRACE (1)
-#endif
-
 #include "config.h"
 #include "bfd.h"
 #include "sim-main.h"
@@ -78,7 +71,7 @@ char* pr_uword64 (uword64 addr);
    trap is required. NOTE: Care must be taken, since this value may be
    used in later revisions of the MIPS ISA. */
 
-#define RSVD_INSTRUCTION           (0x00000005)
+#define RSVD_INSTRUCTION           (0x00000039)
 #define RSVD_INSTRUCTION_MASK      (0xFC00003F)
 
 #define RSVD_INSTRUCTION_ARG_SHIFT 6
@@ -153,15 +146,16 @@ static SIM_ADDR lsipmon_monitor_base = 0xBFC00200;
 
 static SIM_RC sim_firmware_command (SIM_DESC sd, char* arg);
 
-
 #define MEM_SIZE (8 << 20)	/* 8 MBytes */
 
 
-#if defined(TRACE)
+#if WITH_TRACE_ANY_P
 static char *tracefile = "trace.din"; /* default filename for trace log */
 FILE *tracefh = NULL;
 static void open_trace (SIM_DESC sd);
-#endif /* TRACE */
+#else
+#define open_trace(sd)
+#endif
 
 static const char * get_insn_name (sim_cpu *, int);
 
@@ -189,7 +183,7 @@ mips_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt, char *arg,
   switch (opt)
     {
     case OPTION_DINERO_TRACE: /* ??? */
-#if defined(TRACE)
+#if WITH_TRACE_ANY_P
       /* Eventually the simTRACE flag could be treated as a toggle, to
 	 allow external control of the program points being traced
 	 (i.e. only from main onwards, excluding the run-time setup,
@@ -214,15 +208,15 @@ mips_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt, char *arg,
 	    }
 	}
       return SIM_RC_OK;
-#else /* !TRACE */
+#else /* !WITH_TRACE_ANY_P */
       fprintf(stderr,"\
 Simulator constructed without dinero tracing support (for performance).\n\
-Re-compile simulator with \"-DTRACE\" to enable this option.\n");
+Re-compile simulator with \"-DWITH_TRACE_ANY_P\" to enable this option.\n");
       return SIM_RC_FAIL;
-#endif /* !TRACE */
+#endif /* !WITH_TRACE_ANY_P */
 
     case OPTION_DINERO_FILE:
-#if defined(TRACE)
+#if WITH_TRACE_ANY_P
       if (optarg != NULL) {
 	char *tmp;
 	tmp = (char *)malloc(strlen(optarg) + 1);
@@ -237,7 +231,7 @@ Re-compile simulator with \"-DTRACE\" to enable this option.\n");
 	  sim_io_printf(sd,"Placing trace information into file \"%s\"\n",tracefile);
 	}
       }
-#endif /* TRACE */
+#endif /* WITH_TRACE_ANY_P */
       return SIM_RC_OK;
 
     case OPTION_FIRMWARE:
@@ -311,7 +305,7 @@ void
 interrupt_event (SIM_DESC sd, void *data)
 {
   sim_cpu *cpu = STATE_CPU (sd, 0); /* FIXME */
-  address_word cia = CIA_GET (cpu);
+  address_word cia = CPU_PC_GET (cpu);
   if (SR & status_IE)
     {
       interrupt_pending = 0;
@@ -695,10 +689,8 @@ sim_open (SIM_OPEN_KIND kind, host_callback *cb, struct bfd *abfd, char **argv)
 
   }
 
-#if defined(TRACE)
   if (STATE & simTRACE)
     open_trace(sd);
-#endif /* TRACE */
 
   /*
   sim_io_eprintf (sd, "idt@%x pmon@%x lsipmon@%x\n", 
@@ -821,7 +813,7 @@ sim_open (SIM_OPEN_KIND kind, host_callback *cb, struct bfd *abfd, char **argv)
   return sd;
 }
 
-#if defined(TRACE)
+#if WITH_TRACE_ANY_P
 static void
 open_trace (SIM_DESC sd)
 {
@@ -832,7 +824,7 @@ open_trace (SIM_DESC sd)
       tracefh = stderr;
   }
 }
-#endif /* TRACE */
+#endif
 
 /* Return name of an insn, used by insn profiling.  */
 static const char *
@@ -858,11 +850,11 @@ sim_close (SIM_DESC sd, int quitting)
      mechanism are released: */
   sim_io_shutdown (sd);
 
-#if defined(TRACE)
+#if WITH_TRACE_ANY_P
   if (tracefh != NULL && tracefh != stderr)
    fclose(tracefh);
   tracefh = NULL;
-#endif /* TRACE */
+#endif
 
   /* FIXME - free SD */
 
@@ -1112,7 +1104,7 @@ sim_create_inferior (SIM_DESC sd, struct bfd *abfd, char **argv, char **env)
       for (cpu_nr = 0; cpu_nr < sim_engine_nr_cpus (sd); cpu_nr++)
 	{
 	  sim_cpu *cpu = STATE_CPU (sd, cpu_nr);
-	  CIA_SET (cpu, (unsigned64) bfd_get_start_address (abfd));
+	  CPU_PC_SET (cpu, (unsigned64) bfd_get_start_address (abfd));
 	}
     }
 
@@ -1676,16 +1668,16 @@ mips16_entry (SIM_DESC sd,
 
 /*-- trace support ----------------------------------------------------------*/
 
-/* The TRACE support is provided (if required) in the memory accessing
+/* The trace support is provided (if required) in the memory accessing
    routines. Since we are also providing the architecture specific
    features, the architecture simulation code can also deal with
-   notifying the TRACE world of cache flushes, etc. Similarly we do
+   notifying the trace world of cache flushes, etc. Similarly we do
    not need to provide profiling support in the simulator engine,
    since we can sample in the instruction fetch control loop. By
-   defining the TRACE manifest, we add tracing as a run-time
+   defining the trace manifest, we add tracing as a run-time
    option. */
 
-#if defined(TRACE)
+#if WITH_TRACE_ANY_P
 /* Tracing by default produces "din" format (as required by
    dineroIII). Each line of such a trace file *MUST* have a din label
    and address field. The rest of the line is ignored, so comments can
@@ -1749,7 +1741,7 @@ dotrace (SIM_DESC sd,
 
   return;
 }
-#endif /* TRACE */
+#endif /* WITH_TRACE_ANY_P */
 
 /*---------------------------------------------------------------------------*/
 /*-- simulator engine -------------------------------------------------------*/
@@ -2193,18 +2185,17 @@ void
 decode_coproc (SIM_DESC sd,
 	       sim_cpu *cpu,
 	       address_word cia,
-	       unsigned int instruction)
+	       unsigned int instruction,
+	       int coprocnum,
+	       CP0_operation op,
+	       int rt,
+	       int rd,
+	       int sel)
 {
-  int coprocnum = ((instruction >> 26) & 3);
-
   switch (coprocnum)
     {
     case 0: /* standard CPU control and cache registers */
       {
-        int code = ((instruction >> 21) & 0x1F);
-	int rt = ((instruction >> 16) & 0x1F);
-	int rd = ((instruction >> 11) & 0x1F);
-	int tail = instruction & 0x3ff;
         /* R4000 Users Manual (second edition) lists the following CP0
            instructions:
 	                                                           CODE><-RT><RD-><--TAIL--->
@@ -2219,15 +2210,10 @@ decode_coproc (SIM_DESC sd,
 	   CACHE   Cache operation                 (VR4100 = 101111bbbbbpppppiiiiiiiiiiiiiiii)
 	   ERET    Exception return                (VR4100 = 01000010000000000000000000011000)
 	   */
-        if (((code == 0x00) || (code == 0x04)      /* MFC0  /  MTC0  */        
-	     || (code == 0x01) || (code == 0x05))  /* DMFC0 / DMTC0  */        
-	    && tail == 0)
+	if (((op == cp0_mfc0) || (op == cp0_mtc0)      /* MFC0  /  MTC0  */
+	     || (op == cp0_dmfc0) || (op == cp0_dmtc0))  /* DMFC0 / DMTC0  */
+	    && sel == 0)
 	  {
-	    /* Clear double/single coprocessor move bit. */
-	    code &= ~1;
-
-	    /* M[TF]C0 (32 bits) | DM[TF]C0 (64 bits) */
-	    
 	    switch (rd)  /* NOTEs: Standard CP0 registers */
 	      {
 		/* 0 = Index               R4000   VR4100  VR4300 */
@@ -2255,7 +2241,7 @@ decode_coproc (SIM_DESC sd,
 
 	      case 8:
 		/* 8 = BadVAddr            R4000   VR4100  VR4300 */
-		if (code == 0x00)
+		if (op == cp0_mfc0 || op == cp0_dmfc0)
 		  GPR[rt] = (signed_word) (signed_address) COP0_BADVADDR;
 		else
 		  COP0_BADVADDR = GPR[rt];
@@ -2263,21 +2249,21 @@ decode_coproc (SIM_DESC sd,
 
 #endif /* SUBTARGET_R3900 */
 	      case 12:
-		if (code == 0x00)
+		if (op == cp0_mfc0 || op == cp0_dmfc0)
 		  GPR[rt] = SR;
 		else
 		  SR = GPR[rt];
 		break;
 		/* 13 = Cause              R4000   VR4100  VR4300 */
 	      case 13:
-		if (code == 0x00)
+		if (op == cp0_mfc0 || op == cp0_dmfc0)
 		  GPR[rt] = CAUSE;
 		else
 		  CAUSE = GPR[rt];
 		break;
 		/* 14 = EPC                R4000   VR4100  VR4300 */
 	      case 14:
-		if (code == 0x00)
+		if (op == cp0_mfc0 || op == cp0_dmfc0)
 		  GPR[rt] = (signed_word) (signed_address) EPC;
 		else
 		  EPC = GPR[rt];
@@ -2286,7 +2272,7 @@ decode_coproc (SIM_DESC sd,
 #ifdef SUBTARGET_R3900
                 /* 16 = Debug */
               case 16:
-                if (code == 0x00)
+                if (op == cp0_mfc0 || op == cp0_dmfc0)
                   GPR[rt] = Debug;
                 else
                   Debug = GPR[rt];
@@ -2294,7 +2280,7 @@ decode_coproc (SIM_DESC sd,
 #else
 		/* 16 = Config             R4000   VR4100  VR4300 */
               case 16:
-		if (code == 0x00)
+	        if (op == cp0_mfc0 || op == cp0_dmfc0)
 		  GPR[rt] = C0_CONFIG;
 		else
 		  /* only bottom three bits are writable */
@@ -2304,7 +2290,7 @@ decode_coproc (SIM_DESC sd,
 #ifdef SUBTARGET_R3900
                 /* 17 = Debug */
               case 17:
-                if (code == 0x00)
+                if (op == cp0_mfc0 || op == cp0_dmfc0)
                   GPR[rt] = DEPC;
                 else
                   DEPC = GPR[rt];
@@ -2327,7 +2313,7 @@ decode_coproc (SIM_DESC sd,
 		GPR[rt] = 0xDEADC0DE; /* CPR[0,rd] */
 		/* CPR[0,rd] = GPR[rt]; */
 	      default:
-		if (code == 0x00)
+		if (op == cp0_mfc0 || op == cp0_dmfc0)
 		  GPR[rt] = (signed_word) (signed32) COP0_GPR[rd];
 		else
 		  COP0_GPR[rd] = GPR[rt];
@@ -2339,12 +2325,12 @@ decode_coproc (SIM_DESC sd,
 #endif
 	      }
 	  }
-	else if ((code == 0x00 || code == 0x01)
+	else if ((op == cp0_mfc0 || op == cp0_dmfc0)
 		 && rd == 16)
 	  {
 	    /* [D]MFC0 RT,C0_CONFIG,SEL */
 	    signed32 cfg = 0;
-	    switch (tail & 0x07) 
+	    switch (sel)
 	      {
 	      case 0:
 		cfg = C0_CONFIG;
@@ -2373,7 +2359,7 @@ decode_coproc (SIM_DESC sd,
 	      }
 	    GPR[rt] = cfg;
 	  }
-	else if (code == 0x10 && (tail & 0x3f) == 0x18)
+	else if (op == cp0_eret && sel == 0x18)
 	  {
 	    /* ERET */
 	    if (SR & status_ERL)
@@ -2389,7 +2375,7 @@ decode_coproc (SIM_DESC sd,
 		SR &= ~status_EXL;
 	      }
 	  }
-        else if (code == 0x10 && (tail & 0x3f) == 0x10)
+        else if (op == cp0_rfe && sel == 0x10)
           {
             /* RFE */
 #ifdef SUBTARGET_R3900
@@ -2401,7 +2387,7 @@ decode_coproc (SIM_DESC sd,
 	    /* TODO: CACHE register */
 #endif /* SUBTARGET_R3900 */
           }
-        else if (code == 0x10 && (tail & 0x3f) == 0x1F)
+        else if (op == cp0_deret && sel == 0x1F)
           {
             /* DERET */
             Debug &= ~Debug_DM;

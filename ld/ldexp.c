@@ -49,13 +49,25 @@ segment_type *segments;
 struct ldexp_control expld;
 
 /* This structure records symbols for which we need to keep track of
-   definedness for use in the DEFINED () test.  */
+   definedness for use in the DEFINED () test.  It is also used in
+   making absolute symbols section relative late in the link.   */
 
 struct definedness_hash_entry
 {
   struct bfd_hash_entry root;
+
+  /* If this symbol was assigned from "dot" outside of an output
+     section statement, the section we'd like it relative to.  */
+  asection *final_sec;
+
+  /* Symbol was defined by an object file.  */
   unsigned int by_object : 1;
+
+  /* Symbols was defined by a script.  */
   unsigned int by_script : 1;
+
+  /* Low bit of iteration count.  Symbols with matching iteration have
+     been defined in this pass over the script.  */
   unsigned int iteration : 1;
 };
 
@@ -174,6 +186,7 @@ make_abs (void)
   if (expld.result.section != NULL)
     expld.result.value += expld.result.section->vma;
   expld.result.section = bfd_abs_section_ptr;
+  expld.rel_from_abs = FALSE;
 }
 
 static void
@@ -249,8 +262,7 @@ new_rel_from_abs (bfd_vma value)
 {
   asection *s = expld.section;
 
-  if (s == bfd_abs_section_ptr && expld.phase == lang_final_phase_enum)
-    s = section_for_dot ();
+  expld.rel_from_abs = TRUE;
   expld.result.valid_p = TRUE;
   expld.result.value = value - s->vma;
   expld.result.str = NULL;
@@ -322,6 +334,11 @@ update_definedness (const char *name, struct bfd_link_hash_entry *h)
 
   defentry->by_script = 1;
   defentry->iteration = lang_statement_iteration;
+  defentry->final_sec = bfd_abs_section_ptr;
+  if (expld.phase == lang_final_phase_enum
+      && expld.rel_from_abs
+      && expld.result.section == bfd_abs_section_ptr)
+    defentry->final_sec = section_for_dot ();
   return ret;
 }
 
@@ -575,7 +592,6 @@ fold_binary (etree_type *tree)
 		  else if (expld.dataseg.phase == exp_dataseg_none)
 		    {
 		      expld.dataseg.phase = exp_dataseg_align_seen;
-		      expld.dataseg.min_base = expld.dot;
 		      expld.dataseg.base = expld.result.value;
 		      expld.dataseg.pagesize = commonpage;
 		      expld.dataseg.maxpagesize = maxpage;
@@ -591,6 +607,7 @@ fold_binary (etree_type *tree)
 	  /* Operands swapped!  DATA_SEGMENT_RELRO_END(offset,exp)
 	     has offset in expld.result and exp in lhs.  */
 	  expld.dataseg.relro = exp_dataseg_relro_end;
+	  expld.dataseg.relro_offset = expld.result.value;
 	  if (expld.phase == lang_first_phase_enum
 	      || expld.section != bfd_abs_section_ptr)
 	    expld.result.valid_p = FALSE;
@@ -877,7 +894,7 @@ fold_name (etree_type *tree)
 }
 
 /* Return true if TREE is '.'.  */
- 
+
 static bfd_boolean
 is_dot (const etree_type *tree)
 {
@@ -1026,7 +1043,12 @@ exp_fold_tree_1 (etree_type *tree)
 	      /* If we are assigning to dot inside an output section
 		 arrange to keep the section, except for certain
 		 expressions that evaluate to zero.  We ignore . = 0,
-		 . = . + 0, and . = ALIGN (. != 0 ? expr : 1).  */
+		 . = . + 0, and . = ALIGN (. != 0 ? expr : 1).
+		 We can't ignore all expressions that evaluate to zero
+		 because an otherwise empty section might have padding
+		 added by an alignment expression that changes with
+		 relaxation.  Such a section might have zero size
+		 before relaxation and so be stripped incorrectly.  */
 	      if (expld.phase == lang_mark_phase_enum
 		  && expld.section != bfd_abs_section_ptr
 		  && !(expld.result.valid_p
@@ -1139,6 +1161,7 @@ exp_fold_tree_1 (etree_type *tree)
 	      h->type = bfd_link_hash_defined;
 	      h->u.def.value = expld.result.value;
 	      h->u.def.section = expld.result.section;
+	      h->linker_def = 0;
 	      if (tree->type.node_class == etree_provide)
 		tree->type.node_class = etree_provided;
 
@@ -1183,6 +1206,7 @@ exp_fold_tree_1 (etree_type *tree)
 void
 exp_fold_tree (etree_type *tree, asection *current_section, bfd_vma *dotp)
 {
+  expld.rel_from_abs = FALSE;
   expld.dot = *dotp;
   expld.dotp = dotp;
   expld.section = current_section;
@@ -1192,6 +1216,7 @@ exp_fold_tree (etree_type *tree, asection *current_section, bfd_vma *dotp)
 void
 exp_fold_tree_no_dot (etree_type *tree)
 {
+  expld.rel_from_abs = FALSE;
   expld.dot = 0;
   expld.dotp = NULL;
   expld.section = bfd_abs_section_ptr;
@@ -1573,6 +1598,36 @@ ldexp_init (void)
 			      sizeof (struct definedness_hash_entry),
 			      13))
     einfo (_("%P%F: can not create hash table: %E\n"));
+}
+
+/* Convert absolute symbols defined by a script from "dot" (also
+   SEGMENT_START or ORIGIN) outside of an output section statement,
+   to section relative.  */
+
+static bfd_boolean
+set_sym_sections (struct bfd_hash_entry *bh, void *inf ATTRIBUTE_UNUSED)
+{
+  struct definedness_hash_entry *def = (struct definedness_hash_entry *) bh;
+  if (def->final_sec != bfd_abs_section_ptr)
+    {
+      struct bfd_link_hash_entry *h;
+      h = bfd_link_hash_lookup (link_info.hash, bh->string,
+				FALSE, FALSE, TRUE);
+      if (h != NULL
+	  && h->type == bfd_link_hash_defined
+	  && h->u.def.section == bfd_abs_section_ptr)
+	{
+	  h->u.def.value -= def->final_sec->vma;
+	  h->u.def.section = def->final_sec;
+	}
+    }
+  return TRUE;
+}
+
+void
+ldexp_finalize_syms (void)
+{
+  bfd_hash_traverse (&definedness_table, set_sym_sections, NULL);
 }
 
 void

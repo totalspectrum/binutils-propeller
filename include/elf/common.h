@@ -106,7 +106,7 @@
 #define EM_386		  3	/* Intel 80386 */
 #define EM_68K		  4	/* Motorola m68k family */
 #define EM_88K		  5	/* Motorola m88k family */
-#define EM_486		  6	/* Intel 80486 *//* Reserved for future use */
+#define EM_IAMCU	  6	/* Intel MCU */
 #define EM_860		  7	/* Intel 80860 */
 #define EM_MIPS		  8	/* MIPS R3000 (officially, big-endian only) */
 #define EM_S370		  9	/* IBM System/370 */
@@ -638,6 +638,8 @@
 #define GNU_ABI_TAG_SOLARIS	2
 #define GNU_ABI_TAG_FREEBSD	3
 #define GNU_ABI_TAG_NETBSD	4
+#define GNU_ABI_TAG_SYLLABLE	5
+#define GNU_ABI_TAG_NACL	6
 
 /* Values for NetBSD .note.netbsd.ident notes.  Note name is "NetBSD".  */
 
@@ -868,6 +870,8 @@
 #define	DF_1_SYMINTPOSE	0x00800000
 #define	DF_1_GLOBAUDIT	0x01000000
 #define	DF_1_SINGLETON	0x02000000
+#define	DF_1_STUB	0x04000000
+#define	DF_1_PIE	0x08000000
 
 /* Flag values for the DT_FLAGS entry.	*/
 #define DF_ORIGIN	(1 << 0)

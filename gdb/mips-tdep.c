@@ -2818,7 +2818,7 @@ mips_insn16_frame_cache (struct frame_info *this_frame, void **this_cache)
   struct mips_frame_cache *cache;
 
   if ((*this_cache) != NULL)
-    return (*this_cache);
+    return (struct mips_frame_cache *) (*this_cache);
   cache = FRAME_OBSTACK_ZALLOC (struct mips_frame_cache);
   (*this_cache) = cache;
   cache->saved_regs = trad_frame_alloc_saved_regs (this_frame);
@@ -2836,7 +2836,8 @@ mips_insn16_frame_cache (struct frame_info *this_frame, void **this_cache)
     if (start_addr == 0)
       return cache;
 
-    mips16_scan_prologue (gdbarch, start_addr, pc, this_frame, *this_cache);
+    mips16_scan_prologue (gdbarch, start_addr, pc, this_frame,
+			  (struct mips_frame_cache *) *this_cache);
   }
   
   /* gdbarch_sp_regnum contains the value and not the address.  */
@@ -2844,7 +2845,7 @@ mips_insn16_frame_cache (struct frame_info *this_frame, void **this_cache)
 			gdbarch_num_regs (gdbarch) + MIPS_SP_REGNUM,
 			cache->base);
 
-  return (*this_cache);
+  return (struct mips_frame_cache *) (*this_cache);
 }
 
 static void
@@ -3263,7 +3264,7 @@ mips_micro_frame_cache (struct frame_info *this_frame, void **this_cache)
   struct mips_frame_cache *cache;
 
   if ((*this_cache) != NULL)
-    return (*this_cache);
+    return (struct mips_frame_cache *) (*this_cache);
 
   cache = FRAME_OBSTACK_ZALLOC (struct mips_frame_cache);
   (*this_cache) = cache;
@@ -3282,7 +3283,8 @@ mips_micro_frame_cache (struct frame_info *this_frame, void **this_cache)
     if (start_addr == 0)
       return cache;
 
-    micromips_scan_prologue (gdbarch, start_addr, pc, this_frame, *this_cache);
+    micromips_scan_prologue (gdbarch, start_addr, pc, this_frame,
+			     (struct mips_frame_cache *) *this_cache);
   }
 
   /* gdbarch_sp_regnum contains the value and not the address.  */
@@ -3290,7 +3292,7 @@ mips_micro_frame_cache (struct frame_info *this_frame, void **this_cache)
 			gdbarch_num_regs (gdbarch) + MIPS_SP_REGNUM,
 			cache->base);
 
-  return (*this_cache);
+  return (struct mips_frame_cache *) (*this_cache);
 }
 
 static void
@@ -3640,7 +3642,7 @@ mips_insn32_frame_cache (struct frame_info *this_frame, void **this_cache)
   struct mips_frame_cache *cache;
 
   if ((*this_cache) != NULL)
-    return (*this_cache);
+    return (struct mips_frame_cache *) (*this_cache);
 
   cache = FRAME_OBSTACK_ZALLOC (struct mips_frame_cache);
   (*this_cache) = cache;
@@ -3659,7 +3661,8 @@ mips_insn32_frame_cache (struct frame_info *this_frame, void **this_cache)
     if (start_addr == 0)
       return cache;
 
-    mips32_scan_prologue (gdbarch, start_addr, pc, this_frame, *this_cache);
+    mips32_scan_prologue (gdbarch, start_addr, pc, this_frame,
+			  (struct mips_frame_cache *) *this_cache);
   }
   
   /* gdbarch_sp_regnum contains the value and not the address.  */
@@ -3667,7 +3670,7 @@ mips_insn32_frame_cache (struct frame_info *this_frame, void **this_cache)
 			gdbarch_num_regs (gdbarch) + MIPS_SP_REGNUM,
 			cache->base);
 
-  return (*this_cache);
+  return (struct mips_frame_cache *) (*this_cache);
 }
 
 static void
@@ -3749,7 +3752,7 @@ mips_stub_frame_cache (struct frame_info *this_frame, void **this_cache)
   int num_regs = gdbarch_num_regs (gdbarch);
 
   if ((*this_cache) != NULL)
-    return (*this_cache);
+    return (struct trad_frame_cache *) (*this_cache);
   this_trad_cache = trad_frame_cache_zalloc (this_frame);
   (*this_cache) = this_trad_cache;
 
@@ -6205,7 +6208,7 @@ mips_read_fp_register_single (struct frame_info *frame, int regno,
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
   int raw_size = register_size (gdbarch, regno);
-  gdb_byte *raw_buffer = alloca (raw_size);
+  gdb_byte *raw_buffer = (gdb_byte *) alloca (raw_size);
 
   if (!deprecated_frame_register_read (frame, regno, raw_buffer))
     error (_("can't read register %d (%s)"),
@@ -6281,8 +6284,9 @@ mips_print_fp_register (struct ui_file *file, struct frame_info *frame,
   double doub, flt1;	/* Doubles extracted from raw hex data.  */
   int inv1, inv2;
 
-  raw_buffer = alloca (2 * register_size (gdbarch,
-					  mips_regnum (gdbarch)->fp0));
+  raw_buffer
+    = ((gdb_byte *)
+       alloca (2 * register_size (gdbarch, mips_regnum (gdbarch)->fp0)));
 
   fprintf_filtered (file, "%s:", gdbarch_register_name (gdbarch, regnum));
   fprintf_filtered (file, "%*s",
@@ -6693,10 +6697,11 @@ mips_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
     return mips32_scan_prologue (gdbarch, pc, limit_pc, NULL, NULL);
 }
 
-/* Check whether the PC is in a function epilogue (32-bit version).
-   This is a helper function for mips_in_function_epilogue_p.  */
+/* Implement the stack_frame_destroyed_p gdbarch method (32-bit version).
+   This is a helper function for mips_stack_frame_destroyed_p.  */
+
 static int
-mips32_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
+mips32_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   CORE_ADDR func_addr = 0, func_end = 0;
 
@@ -6731,11 +6736,11 @@ mips32_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
   return 0;
 }
 
-/* Check whether the PC is in a function epilogue (microMIPS version).
-   This is a helper function for mips_in_function_epilogue_p.  */
+/* Implement the stack_frame_destroyed_p gdbarch method (microMIPS version).
+   This is a helper function for mips_stack_frame_destroyed_p.  */
 
 static int
-micromips_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
+micromips_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   CORE_ADDR func_addr = 0;
   CORE_ADDR func_end = 0;
@@ -6832,10 +6837,11 @@ micromips_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
   return 1;
 }
 
-/* Check whether the PC is in a function epilogue (16-bit version).
-   This is a helper function for mips_in_function_epilogue_p.  */
+/* Implement the stack_frame_destroyed_p gdbarch method (16-bit version).
+   This is a helper function for mips_stack_frame_destroyed_p.  */
+
 static int
-mips16_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
+mips16_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   CORE_ADDR func_addr = 0, func_end = 0;
 
@@ -6872,17 +6878,20 @@ mips16_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
   return 0;
 }
 
-/* The epilogue is defined here as the area at the end of a function,
+/* Implement the stack_frame_destroyed_p gdbarch method.
+
+   The epilogue is defined here as the area at the end of a function,
    after an instruction which destroys the function's stack frame.  */
+
 static int
-mips_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
+mips_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   if (mips_pc_is_mips16 (gdbarch, pc))
-    return mips16_in_function_epilogue_p (gdbarch, pc);
+    return mips16_stack_frame_destroyed_p (gdbarch, pc);
   else if (mips_pc_is_micromips (gdbarch, pc))
-    return micromips_in_function_epilogue_p (gdbarch, pc);
+    return micromips_stack_frame_destroyed_p (gdbarch, pc);
   else
-    return mips32_in_function_epilogue_p (gdbarch, pc);
+    return mips32_stack_frame_destroyed_p (gdbarch, pc);
 }
 
 /* Root of all "set mips "/"show mips " commands.  This will eventually be
@@ -7029,7 +7038,7 @@ reinit_frame_cache_sfunc (char *args, int from_tty,
 static int
 gdb_print_insn_mips (bfd_vma memaddr, struct disassemble_info *info)
 {
-  struct gdbarch *gdbarch = info->application_data;
+  struct gdbarch *gdbarch = (struct gdbarch *) info->application_data;
 
   /* FIXME: cagney/2003-06-26: Is this even necessary?  The
      disassembler needs to be able to locally determine the ISA, and
@@ -8180,7 +8189,7 @@ mips_register_g_packet_guesses (struct gdbarch *gdbarch)
 static struct value *
 value_of_mips_user_reg (struct frame_info *frame, const void *baton)
 {
-  const int *reg_p = baton;
+  const int *reg_p = (const int *) baton;
   return value_of_register (*reg_p, frame);
 }
 
@@ -8603,7 +8612,7 @@ mips_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     }
 
   /* Need a new architecture.  Fill in a target specific vector.  */
-  tdep = (struct gdbarch_tdep *) xmalloc (sizeof (struct gdbarch_tdep));
+  tdep = XNEW (struct gdbarch_tdep);
   gdbarch = gdbarch_alloc (&info, tdep);
   tdep->elf_flags = elf_flags;
   tdep->mips64_transfers_32bit_regs_p = mips64_transfers_32bit_regs_p;
@@ -8843,7 +8852,7 @@ mips_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   set_gdbarch_skip_prologue (gdbarch, mips_skip_prologue);
 
-  set_gdbarch_in_function_epilogue_p (gdbarch, mips_in_function_epilogue_p);
+  set_gdbarch_stack_frame_destroyed_p (gdbarch, mips_stack_frame_destroyed_p);
 
   set_gdbarch_pointer_to_address (gdbarch, signed_pointer_to_address);
   set_gdbarch_address_to_pointer (gdbarch, address_to_signed_pointer);
@@ -8889,7 +8898,7 @@ mips_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   mips_register_g_packet_guesses (gdbarch);
 
   /* Hook in OS ABI-specific overrides, if they have been registered.  */
-  info.tdep_info = (void *) tdesc_data;
+  info.tdep_info = (struct gdbarch_tdep_info *) tdesc_data;
   gdbarch_init_osabi (info, gdbarch);
 
   /* The hook may have adjusted num_regs, fetch the final value and

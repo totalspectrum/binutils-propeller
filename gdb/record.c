@@ -234,7 +234,7 @@ cmd_record_delete (char *args, int from_tty)
 {
   require_record_target ();
 
-  if (!target_record_is_replaying ())
+  if (!target_record_is_replaying (inferior_ptid))
     {
       printf_unfiltered (_("Already at end of record list.\n"));
       return;
@@ -458,7 +458,7 @@ get_insn_history_modifiers (char **arg)
 	  switch (*args)
 	    {
 	    case 'm':
-	      modifiers |= DISASSEMBLY_SOURCE;
+	      modifiers |= DISASSEMBLY_SOURCE_DEPRECATED;
 	      modifiers |= DISASSEMBLY_FILENAME;
 	      break;
 	    case 'r':

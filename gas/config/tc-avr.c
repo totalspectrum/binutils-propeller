@@ -1230,7 +1230,7 @@ valueT
 md_section_align (asection *seg, valueT addr)
 {
   int align = bfd_get_section_alignment (stdoutput, seg);
-  return ((addr + (1 << align) - 1) & (-1 << align));
+  return ((addr + (1 << align) - 1) & (-1UL << align));
 }
 
 /* If you define this macro, it should return the offset between the
@@ -1618,6 +1618,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED,
 	      fixS *fixp)
 {
   arelent *reloc;
+  bfd_reloc_code_real_type code = fixp->fx_r_type;
 
   if (fixp->fx_subsy != NULL)
     {
@@ -1631,7 +1632,21 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED,
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
 
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
-  reloc->howto = bfd_reloc_type_lookup (stdoutput, fixp->fx_r_type);
+
+  if ((fixp->fx_r_type == BFD_RELOC_32) && (fixp->fx_pcrel))
+    {
+      if (seg->use_rela_p)
+        fixp->fx_offset -= md_pcrel_from_section (fixp, seg);
+      else
+        fixp->fx_offset = reloc->address;
+
+      code = BFD_RELOC_32_PCREL;
+    }
+
+  reloc->addend = fixp->fx_offset;
+
+  reloc->howto = bfd_reloc_type_lookup (stdoutput, code);
+
   if (reloc->howto == (reloc_howto_type *) NULL)
     {
       as_bad_where (fixp->fx_file, fixp->fx_line,
@@ -1644,7 +1659,6 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED,
       || fixp->fx_r_type == BFD_RELOC_VTABLE_ENTRY)
     reloc->address = fixp->fx_offset;
 
-  reloc->addend = fixp->fx_offset;
 
   return reloc;
 }
@@ -2060,41 +2074,41 @@ exclude_section_from_property_tables (segT sec)
 static struct avr_property_record_link *
 create_record_for_frag (segT sec, fragS *fragP)
 {
-  struct avr_property_record_link *link;
+  struct avr_property_record_link *prop_rec_link;
 
-  link = xmalloc (sizeof (struct avr_property_record_link));
-  memset (link, 0, sizeof (*link));
+  prop_rec_link = xmalloc (sizeof (struct avr_property_record_link));
+  memset (prop_rec_link, 0, sizeof (*prop_rec_link));
 
   if (fragP->tc_frag_data.is_org)
     {
-      link->record.offset = fragP->fr_next->fr_address;
-      link->record.section = sec;
+      prop_rec_link->record.offset = fragP->fr_next->fr_address;
+      prop_rec_link->record.section = sec;
 
       if (fragP->tc_frag_data.has_fill)
         {
-          link->record.data.org.fill = fragP->tc_frag_data.fill;
-          link->record.type = RECORD_ORG_AND_FILL;
+          prop_rec_link->record.data.org.fill = fragP->tc_frag_data.fill;
+          prop_rec_link->record.type = RECORD_ORG_AND_FILL;
         }
       else
-        link->record.type = RECORD_ORG;
+        prop_rec_link->record.type = RECORD_ORG;
     }
   else
     {
-      link->record.offset = fragP->fr_address;
-      link->record.section = sec;
+      prop_rec_link->record.offset = fragP->fr_address;
+      prop_rec_link->record.section = sec;
 
       gas_assert (fragP->tc_frag_data.is_align);
       if (fragP->tc_frag_data.has_fill)
         {
-          link->record.data.align.fill = fragP->tc_frag_data.fill;
-          link->record.type = RECORD_ALIGN_AND_FILL;
+          prop_rec_link->record.data.align.fill = fragP->tc_frag_data.fill;
+          prop_rec_link->record.type = RECORD_ALIGN_AND_FILL;
         }
       else
-        link->record.type = RECORD_ALIGN;
-      link->record.data.align.bytes = fragP->tc_frag_data.alignment;
+        prop_rec_link->record.type = RECORD_ALIGN;
+      prop_rec_link->record.data.align.bytes = fragP->tc_frag_data.alignment;
     }
 
-  return link;
+  return prop_rec_link;
 }
 
 /* Build a list of AVR_PROPERTY_RECORD_LINK structures for section SEC, and

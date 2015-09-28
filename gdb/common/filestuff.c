@@ -316,7 +316,7 @@ gdb_fopen_cloexec (const char *filename, const char *opentype)
     {
       char *copy;
 
-      copy = alloca (strlen (opentype) + 2);
+      copy = (char *) alloca (strlen (opentype) + 2);
       strcpy (copy, opentype);
       /* This is a glibc extension but we try it unconditionally on
 	 this path.  */
@@ -403,4 +403,25 @@ gdb_pipe_cloexec (int filedes[2])
 #endif /* HAVE_PIPE2 */
 
   return result;
+}
+
+/* Helper function which does the work for make_cleanup_close.  */
+
+static void
+do_close_cleanup (void *arg)
+{
+  int *fd = (int *) arg;
+
+  close (*fd);
+}
+
+/* See cleanup-utils.h.  */
+
+struct cleanup *
+make_cleanup_close (int fd)
+{
+  int *saved_fd = XNEW (int);
+
+  *saved_fd = fd;
+  return make_cleanup_dtor (do_close_cleanup, saved_fd, xfree);
 }

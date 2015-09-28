@@ -107,8 +107,7 @@ specify_exec_file_hook (void (*hook) (const char *))
 	{
 	  /* If this is the first extra hook, initialize the hook
 	     array.  */
-	  exec_file_extra_hooks = (hook_type *)
-	    xmalloc (sizeof (hook_type));
+	  exec_file_extra_hooks = XNEW (hook_type);
 	  exec_file_extra_hooks[0] = deprecated_exec_file_display_hook;
 	  deprecated_exec_file_display_hook = call_extra_exec_file_hooks;
 	  exec_file_hook_count = 1;
@@ -377,14 +376,14 @@ read_memory_string (CORE_ADDR memaddr, char *buffer, int max_len)
 CORE_ADDR
 read_memory_typed_address (CORE_ADDR addr, struct type *type)
 {
-  gdb_byte *buf = alloca (TYPE_LENGTH (type));
+  gdb_byte *buf = (gdb_byte *) alloca (TYPE_LENGTH (type));
 
   read_memory (addr, buf, TYPE_LENGTH (type));
   return extract_typed_address (buf, type);
 }
 
-/* Same as target_write_memory, but report an error if can't
-   write.  */
+/* See gdbcore.h.  */
+
 void
 write_memory (CORE_ADDR memaddr, 
 	      const bfd_byte *myaddr, ssize_t len)
@@ -413,7 +412,7 @@ write_memory_unsigned_integer (CORE_ADDR addr, int len,
 			       enum bfd_endian byte_order,
 			       ULONGEST value)
 {
-  gdb_byte *buf = alloca (len);
+  gdb_byte *buf = (gdb_byte *) alloca (len);
 
   store_unsigned_integer (buf, len, byte_order, value);
   write_memory (addr, buf, len);
@@ -426,7 +425,7 @@ write_memory_signed_integer (CORE_ADDR addr, int len,
 			     enum bfd_endian byte_order,
 			     LONGEST value)
 {
-  gdb_byte *buf = alloca (len);
+  gdb_byte *buf = (gdb_byte *) alloca (len);
 
   store_signed_integer (buf, len, byte_order, value);
   write_memory (addr, buf, len);
@@ -481,7 +480,7 @@ complete_set_gnutarget (struct cmd_list_element *cmd,
       for (last = 0; bfd_targets[last] != NULL; ++last)
 	;
 
-      bfd_targets = xrealloc (bfd_targets, (last + 2) * sizeof (const char **));
+      bfd_targets = XRESIZEVEC (const char *, bfd_targets, last + 2);
       bfd_targets[last] = "auto";
       bfd_targets[last + 1] = NULL;
     }

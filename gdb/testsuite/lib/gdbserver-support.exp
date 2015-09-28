@@ -351,6 +351,14 @@ if { [info procs gdbserver_gdb_exit] == "" } {
 proc gdb_exit {} {
     global gdb_spawn_id server_spawn_id inferior_spawn_id
     global gdb_prompt
+    global gdbserver_reconnect_p
+
+    # Leave GDBserver running if we're exiting GDB in order to
+    # reconnect to the same instance of GDBserver again.
+    if {[info exists gdbserver_reconnect_p] && $gdbserver_reconnect_p} {
+	gdbserver_orig_gdb_exit
+	return
+    }
 
     if {[info exists gdb_spawn_id] && [info exists server_spawn_id]} {
 	# GDB may be terminated in an expected way or an unexpected way,
@@ -426,15 +434,21 @@ proc gdbserver_reconnect { } {
     return [gdb_target_cmd $gdbserver_protocol $gdbserver_gdbport]
 }
 
-# Start and connect to a gdbserver in extended mode.  Note this frobs
-# $gdbserver_protocol, so should be used only from a board that
-# usually connects in target remote mode.
-proc gdbserver_start_extended { } {
+# Start gdbserver in extended mode with OPTIONS and connect to it.  Note
+# this frobs $gdbserver_protocol, so should be used only from a board
+# that usually connects in target remote mode.
+proc gdbserver_start_extended { {options ""} } {
     global gdbserver_protocol
     global gdbserver_gdbport
     global use_gdb_stub
 
-    if { [catch { gdbserver_start "--multi" "" } res] == 1 } {
+    set gdbserver_options "--multi"
+
+    if { $options != "" } {
+	append gdbserver_options " $options"
+    }
+
+    if { [catch { gdbserver_start $gdbserver_options "" } res] == 1 } {
 	perror $res
 	return 2
     }

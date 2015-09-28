@@ -110,7 +110,7 @@ static uint32_t
 ft32_read_item (SIM_DESC sd, int dw, uint32_t ea)
 {
   sim_cpu *cpu = STATE_CPU (sd, 0);
-  address_word cia = CIA_GET (cpu);
+  address_word cia = CPU_PC_GET (cpu);
   uint8_t byte[4];
   uint32_t r;
 
@@ -133,7 +133,7 @@ static void
 ft32_write_item (SIM_DESC sd, int dw, uint32_t ea, uint32_t v)
 {
   sim_cpu *cpu = STATE_CPU (sd, 0);
-  address_word cia = CIA_GET (cpu);
+  address_word cia = CPU_PC_GET (cpu);
   uint8_t byte[4];
 
   ea = ft32_align (dw, ea);
@@ -169,6 +169,8 @@ static uint32_t cpu_mem_read (SIM_DESC sd, uint32_t dw, uint32_t ea)
       /* Simulate some IO devices */
       switch (ea)
 	{
+	case 0x10000:
+	  return getchar ();
 	case 0x1fff4:
 	  /* Read the simulator cycle timer.  */
 	  return cpu->state.cycles / 100;
@@ -311,7 +313,7 @@ static void
 step_once (SIM_DESC sd)
 {
   sim_cpu *cpu = STATE_CPU (sd, 0);
-  address_word cia = CIA_GET (cpu);
+  address_word cia = CPU_PC_GET (cpu);
   uint32_t inst;
   uint32_t dw;
   uint32_t cb;

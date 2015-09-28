@@ -185,25 +185,6 @@ linux_proc_pid_is_zombie (pid_t pid)
   return linux_proc_pid_is_zombie_maybe_warn (pid, 1);
 }
 
-/* See linux-procfs.h declaration.  */
-
-char *
-linux_proc_pid_get_ns (pid_t pid, const char *ns)
-{
-  char buf[100];
-  char nsval[64];
-  int ret;
-  xsnprintf (buf, sizeof (buf), "/proc/%d/ns/%s", (int) pid, ns);
-  ret = readlink (buf, nsval, sizeof (nsval));
-  if (0 < ret && ret < sizeof (nsval))
-    {
-      nsval[ret] = '\0';
-      return xstrdup (nsval);
-    }
-
-  return NULL;
-}
-
 /* See linux-procfs.h.  */
 
 void
@@ -272,4 +253,23 @@ linux_proc_task_list_dir_exists (pid_t pid)
 
   xsnprintf (pathname, sizeof (pathname), "/proc/%ld/task", (long) pid);
   return (stat (pathname, &buf) == 0);
+}
+
+/* See linux-procfs.h.  */
+
+char *
+linux_proc_pid_to_exec_file (int pid)
+{
+  static char buf[PATH_MAX];
+  char name[PATH_MAX];
+  ssize_t len;
+
+  xsnprintf (name, PATH_MAX, "/proc/%d/exe", pid);
+  len = readlink (name, buf, PATH_MAX - 1);
+  if (len <= 0)
+    strcpy (buf, name);
+  else
+    buf[len] = '\0';
+
+  return buf;
 }

@@ -223,8 +223,8 @@ hppa_init_objfile_priv_data (struct objfile *objfile)
 static int
 compare_unwind_entries (const void *arg1, const void *arg2)
 {
-  const struct unwind_table_entry *a = arg1;
-  const struct unwind_table_entry *b = arg2;
+  const struct unwind_table_entry *a = (const struct unwind_table_entry *) arg1;
+  const struct unwind_table_entry *b = (const struct unwind_table_entry *) arg2;
 
   if (a->region_start > b->region_start)
     return 1;
@@ -261,7 +261,7 @@ internalize_unwinds (struct objfile *objfile, struct unwind_table_entry *table,
       struct gdbarch *gdbarch = get_objfile_arch (objfile);
       unsigned long tmp;
       unsigned i;
-      char *buf = alloca (size);
+      char *buf = (char *) alloca (size);
       CORE_ADDR low_text_segment_address;
 
       /* For ELF targets, then unwinds are supposed to
@@ -434,7 +434,7 @@ read_unwind_info (struct objfile *objfile)
   if (stub_unwind_size > 0)
     {
       unsigned int i;
-      char *buf = alloca (stub_unwind_size);
+      char *buf = (char *) alloca (stub_unwind_size);
 
       /* Read in the stub unwind entries.  */
       bfd_get_section_contents (objfile->obfd, stub_unwind_sec, buf,
@@ -504,14 +504,16 @@ find_unwind_entry (CORE_ADDR pc)
   {
     struct hppa_unwind_info *ui;
     ui = NULL;
-    priv = objfile_data (objfile, hppa_objfile_priv_data);
+    priv = ((struct hppa_objfile_private *)
+	    objfile_data (objfile, hppa_objfile_priv_data));
     if (priv)
       ui = ((struct hppa_objfile_private *) priv)->unwind_info;
 
     if (!ui)
       {
 	read_unwind_info (objfile);
-        priv = objfile_data (objfile, hppa_objfile_priv_data);
+        priv = ((struct hppa_objfile_private *)
+		objfile_data (objfile, hppa_objfile_priv_data));
 	if (priv == NULL)
 	  error (_("Internal error reading unwind information."));
         ui = ((struct hppa_objfile_private *) priv)->unwind_info;
@@ -560,13 +562,16 @@ find_unwind_entry (CORE_ADDR pc)
   return NULL;
 }
 
-/* The epilogue is defined here as the area either on the `bv' instruction 
+/* Implement the stack_frame_destroyed_p gdbarch method.
+
+   The epilogue is defined here as the area either on the `bv' instruction 
    itself or an instruction which destroys the function's stack frame.
    
    We do not assume that the epilogue is at the end of a function as we can
    also have return sequences in the middle of a function.  */
+
 static int
-hppa_in_function_epilogue_p (struct gdbarch *gdbarch, CORE_ADDR pc)
+hppa_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   unsigned long status;
@@ -1901,7 +1906,7 @@ hppa_frame_cache (struct frame_info *this_frame, void **this_cache)
       if (hppa_debug)
         fprintf_unfiltered (gdb_stdlog, "base=%s (cached) }",
           paddress (gdbarch, ((struct hppa_frame_cache *)*this_cache)->base));
-      return (*this_cache);
+      return (struct hppa_frame_cache *) (*this_cache);
     }
   cache = FRAME_OBSTACK_ZALLOC (struct hppa_frame_cache);
   (*this_cache) = cache;
@@ -1913,7 +1918,7 @@ hppa_frame_cache (struct frame_info *this_frame, void **this_cache)
     {
       if (hppa_debug)
         fprintf_unfiltered (gdb_stdlog, "base=NULL (no unwind entry) }");
-      return (*this_cache);
+      return (struct hppa_frame_cache *) (*this_cache);
     }
 
   /* Turn the Entry_GR field into a bitmask.  */
@@ -2003,7 +2008,7 @@ hppa_frame_cache (struct frame_info *this_frame, void **this_cache)
 	  {
 	    error (_("Cannot read instruction at %s."),
 		   paddress (gdbarch, pc));
-	    return (*this_cache);
+	    return (struct hppa_frame_cache *) (*this_cache);
 	  }
 
 	inst = extract_unsigned_integer (buf4, sizeof buf4, byte_order);
@@ -2276,7 +2281,7 @@ hppa_frame_cache (struct frame_info *this_frame, void **this_cache)
   if (hppa_debug)
     fprintf_unfiltered (gdb_stdlog, "base=%s }",
       paddress (gdbarch, ((struct hppa_frame_cache *)*this_cache)->base));
-  return (*this_cache);
+  return (struct hppa_frame_cache *) (*this_cache);
 }
 
 static void
@@ -2450,7 +2455,7 @@ hppa_stub_frame_unwind_cache (struct frame_info *this_frame,
   struct unwind_table_entry *u;
 
   if (*this_cache)
-    return *this_cache;
+    return (struct hppa_stub_unwind_cache *) *this_cache;
 
   info = FRAME_OBSTACK_ZALLOC (struct hppa_stub_unwind_cache);
   *this_cache = info;
@@ -3135,8 +3140,8 @@ hppa_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   /* The following gdbarch vector elements do not depend on the address
      size, or in any other gdbarch element previously set.  */
   set_gdbarch_skip_prologue (gdbarch, hppa_skip_prologue);
-  set_gdbarch_in_function_epilogue_p (gdbarch,
-				      hppa_in_function_epilogue_p);
+  set_gdbarch_stack_frame_destroyed_p (gdbarch,
+				       hppa_stack_frame_destroyed_p);
   set_gdbarch_inner_than (gdbarch, core_addr_greaterthan);
   set_gdbarch_sp_regnum (gdbarch, HPPA_SP_REGNUM);
   set_gdbarch_fp0_regnum (gdbarch, HPPA_FP0_REGNUM);

@@ -21,8 +21,6 @@
 #include "xml-utils.h"
 #include "buffer.h"
 #include "inttypes.h"
-#include <stdint.h>
-
 void
 buffer_grow (struct buffer *buffer, const char *data, size_t size)
 {
@@ -39,7 +37,7 @@ buffer_grow (struct buffer *buffer, const char *data, size_t size)
 
   while (buffer->used_size + size > new_buffer_size)
     new_buffer_size *= 2;
-  new_buffer = xrealloc (buffer->buffer, new_buffer_size);
+  new_buffer = (char *) xrealloc (buffer->buffer, new_buffer_size);
   memcpy (new_buffer + buffer->used_size, data, size);
   buffer->buffer = new_buffer;
   buffer->buffer_size = new_buffer_size;

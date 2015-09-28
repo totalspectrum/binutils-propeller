@@ -38,8 +38,10 @@ struct static_tracepoint_marker;
 struct traceframe_info;
 struct expression;
 struct dcache_struct;
+struct inferior;
 
 #include "infrun.h" /* For enum exec_direction_kind.  */
+#include "breakpoint.h" /* For enum bptype.  */
 
 /* This include file defines the interface between the main part
    of the debugger, and the part which is target-specific, or
@@ -71,6 +73,8 @@ struct dcache_struct;
 #include "gdb_signals.h"
 #include "btrace.h"
 #include "command.h"
+
+#include "break-common.h" /* For enum target_hw_bp_type.  */
 
 enum strata
   {
@@ -118,15 +122,8 @@ enum inferior_event_type
     /* Process a normal inferior event which will result in target_wait
        being called.  */
     INF_REG_EVENT,
-    /* We are called because a timer went off.  */
-    INF_TIMER,
     /* We are called to do stuff after the inferior stops.  */
     INF_EXEC_COMPLETE,
-    /* We are called to do some stuff after the inferior stops, but we
-       are expected to reenter the proceed() and
-       handle_inferior_event() functions.  This is used only in case of
-       'step n' like commands.  */
-    INF_EXEC_CONTINUE
   };
 
 /* Target objects which can be transfered using target_read,
@@ -204,7 +201,12 @@ enum target_object
   /* Branch trace data, in XML format.  */
   TARGET_OBJECT_BTRACE,
   /* Branch trace configuration, in XML format.  */
-  TARGET_OBJECT_BTRACE_CONF
+  TARGET_OBJECT_BTRACE_CONF,
+  /* The pathname of the executable file that was run to create
+     a specified process.  ANNEX should be a string representation
+     of the process ID of the process in question, in hexadecimal
+     format.  */
+  TARGET_OBJECT_EXEC_FILE,
   /* Possible future objects: TARGET_OBJECT_FILE, ...  */
 };
 
@@ -259,13 +261,22 @@ typedef enum target_xfer_status
 			     ULONGEST len,
 			     ULONGEST *xfered_len);
 
-/* Request that OPS transfer up to LEN 8-bit bytes of the target's
-   OBJECT.  The OFFSET, for a seekable object, specifies the
-   starting point.  The ANNEX can be used to provide additional
-   data-specific information to the target.
+enum target_xfer_status
+  raw_memory_xfer_partial (struct target_ops *ops, gdb_byte *readbuf,
+			   const gdb_byte *writebuf, ULONGEST memaddr,
+			   LONGEST len, ULONGEST *xfered_len);
 
-   Return the number of bytes actually transfered, or a negative error
-   code (an 'enum target_xfer_error' value) if the transfer is not
+/* Request that OPS transfer up to LEN addressable units of the target's
+   OBJECT.  When reading from a memory object, the size of an addressable unit
+   is architecture dependent and can be found using
+   gdbarch_addressable_memory_unit_size.  Otherwise, an addressable unit is 1
+   byte long.  BUF should point to a buffer large enough to hold the read data,
+   taking into account the addressable unit size.  The OFFSET, for a seekable
+   object, specifies the starting point.  The ANNEX can be used to provide
+   additional data-specific information to the target.
+
+   Return the number of addressable units actually transferred, or a negative
+   error code (an 'enum target_xfer_error' value) if the transfer is not
    supported or otherwise fails.  Return of a positive value less than
    LEN indicates that no further transfer is possible.  Unlike the raw
    to_xfer_partial interface, callers of these functions do not need
@@ -291,9 +302,24 @@ DEF_VEC_O(memory_read_result_s);
 extern void free_memory_read_result_vector (void *);
 
 extern VEC(memory_read_result_s)* read_memory_robust (struct target_ops *ops,
-						      ULONGEST offset,
-						      LONGEST len);
-  
+						      const ULONGEST offset,
+						      const LONGEST len);
+
+/* Request that OPS transfer up to LEN addressable units from BUF to the
+   target's OBJECT.  When writing to a memory object, the addressable unit
+   size is architecture dependent and can be found using
+   gdbarch_addressable_memory_unit_size.  Otherwise, an addressable unit is 1
+   byte long.  The OFFSET, for a seekable object, specifies the starting point.
+   The ANNEX can be used to provide additional data-specific information to
+   the target.
+
+   Return the number of addressable units actually transferred, or a negative
+   error code (an 'enum target_xfer_status' value) if the transfer is not
+   supported or otherwise fails.  Return of a positive value less than
+   LEN indicates that no further transfer is possible.  Unlike the raw
+   to_xfer_partial interface, callers of these functions do not need to
+   retry partial transfers.  */
+
 extern LONGEST target_write (struct target_ops *ops,
 			     enum target_object object,
 			     const char *annex, const gdb_byte *buf,
@@ -438,7 +464,7 @@ struct target_ops
     ptid_t (*to_wait) (struct target_ops *,
 		       ptid_t, struct target_waitstatus *,
 		       int TARGET_DEBUG_PRINTER (target_debug_print_options))
-      TARGET_DEFAULT_NORETURN (noprocess ());
+      TARGET_DEFAULT_FUNC (default_target_wait);
     void (*to_fetch_registers) (struct target_ops *, struct regcache *, int)
       TARGET_DEFAULT_IGNORE ();
     void (*to_store_registers) (struct target_ops *, struct regcache *, int)
@@ -483,7 +509,8 @@ struct target_ops
     int (*to_supports_stopped_by_hw_breakpoint) (struct target_ops *)
       TARGET_DEFAULT_RETURN (0);
 
-    int (*to_can_use_hw_breakpoint) (struct target_ops *, int, int, int)
+    int (*to_can_use_hw_breakpoint) (struct target_ops *,
+				     enum bptype, int, int)
       TARGET_DEFAULT_RETURN (0);
     int (*to_ranged_break_num_registers) (struct target_ops *)
       TARGET_DEFAULT_RETURN (-1);
@@ -496,11 +523,11 @@ struct target_ops
 
     /* Documentation of what the two routines below are expected to do is
        provided with the corresponding target_* macros.  */
-    int (*to_remove_watchpoint) (struct target_ops *,
-				 CORE_ADDR, int, int, struct expression *)
+    int (*to_remove_watchpoint) (struct target_ops *, CORE_ADDR, int,
+				 enum target_hw_bp_type, struct expression *)
       TARGET_DEFAULT_RETURN (-1);
-    int (*to_insert_watchpoint) (struct target_ops *,
-				 CORE_ADDR, int, int, struct expression *)
+    int (*to_insert_watchpoint) (struct target_ops *, CORE_ADDR, int,
+				 enum target_hw_bp_type, struct expression *)
       TARGET_DEFAULT_RETURN (-1);
 
     int (*to_insert_mask_watchpoint) (struct target_ops *,
@@ -532,6 +559,12 @@ struct target_ops
     int (*to_masked_watch_num_registers) (struct target_ops *,
 					  CORE_ADDR, CORE_ADDR)
       TARGET_DEFAULT_RETURN (-1);
+
+    /* Return 1 for sure target can do single step.  Return -1 for
+       unknown.  Return 0 for target can't do.  */
+    int (*to_can_do_single_step) (struct target_ops *)
+      TARGET_DEFAULT_RETURN (-1);
+
     void (*to_terminal_init) (struct target_ops *)
       TARGET_DEFAULT_IGNORE ();
     void (*to_terminal_inferior) (struct target_ops *)
@@ -569,6 +602,8 @@ struct target_ops
       TARGET_DEFAULT_RETURN (1);
     int (*to_remove_exec_catchpoint) (struct target_ops *, int)
       TARGET_DEFAULT_RETURN (1);
+    void (*to_follow_exec) (struct target_ops *, struct inferior *, char *)
+      TARGET_DEFAULT_IGNORE ();
     int (*to_set_syscall_catchpoint) (struct target_ops *,
 				      int, int, int, int, int *)
       TARGET_DEFAULT_RETURN (1);
@@ -606,6 +641,10 @@ struct target_ops
       TARGET_DEFAULT_RETURN (NULL);
     void (*to_stop) (struct target_ops *, ptid_t)
       TARGET_DEFAULT_IGNORE ();
+    void (*to_interrupt) (struct target_ops *, ptid_t)
+      TARGET_DEFAULT_IGNORE ();
+    void (*to_check_pending_interrupt) (struct target_ops *)
+      TARGET_DEFAULT_IGNORE ();
     void (*to_rcmd) (struct target_ops *,
 		     const char *command, struct ui_file *output)
       TARGET_DEFAULT_FUNC (default_rcmd);
@@ -634,6 +673,10 @@ struct target_ops
     /* This method must be implemented in some situations.  See the
        comment on 'to_can_run'.  */
     int (*to_supports_non_stop) (struct target_ops *)
+      TARGET_DEFAULT_RETURN (0);
+    /* Return true if the target operates in non-stop mode even with
+       "set non-stop off".  */
+    int (*to_always_non_stop_p) (struct target_ops *)
       TARGET_DEFAULT_RETURN (0);
     /* find_memory_regions support method for gcore */
     int (*to_find_memory_regions) (struct target_ops *,
@@ -825,17 +868,21 @@ struct target_ops
 
     /* Target file operations.  */
 
-    /* Return nonzero if the filesystem accessed by the
-       target_fileio_* methods is the local filesystem,
-       zero otherwise.  */
+    /* Return nonzero if the filesystem seen by the current inferior
+       is the local filesystem, zero otherwise.  */
     int (*to_filesystem_is_local) (struct target_ops *)
       TARGET_DEFAULT_RETURN (1);
 
-    /* Open FILENAME on the target, using FLAGS and MODE.  Return a
+    /* Open FILENAME on the target, in the filesystem as seen by INF,
+       using FLAGS and MODE.  If INF is NULL, use the filesystem seen
+       by the debugger (GDB or, for remote targets, the remote stub).
+       If WARN_IF_SLOW is nonzero, print a warning message if the file
+       is being accessed over a link that may be slow.  Return a
        target file descriptor, or -1 if an error occurs (and set
        *TARGET_ERRNO).  */
     int (*to_fileio_open) (struct target_ops *,
-			   const char *filename, int flags, int mode,
+			   struct inferior *inf, const char *filename,
+			   int flags, int mode, int warn_if_slow,
 			   int *target_errno);
 
     /* Write up to LEN bytes from WRITE_BUF to FD on the target.
@@ -862,16 +909,24 @@ struct target_ops
        (and set *TARGET_ERRNO).  */
     int (*to_fileio_close) (struct target_ops *, int fd, int *target_errno);
 
-    /* Unlink FILENAME on the target.  Return 0, or -1 if an error
-       occurs (and set *TARGET_ERRNO).  */
+    /* Unlink FILENAME on the target, in the filesystem as seen by
+       INF.  If INF is NULL, use the filesystem seen by the debugger
+       (GDB or, for remote targets, the remote stub).  Return 0, or
+       -1 if an error occurs (and set *TARGET_ERRNO).  */
     int (*to_fileio_unlink) (struct target_ops *,
-			     const char *filename, int *target_errno);
+			     struct inferior *inf,
+			     const char *filename,
+			     int *target_errno);
 
-    /* Read value of symbolic link FILENAME on the target.  Return a
-       null-terminated string allocated via xmalloc, or NULL if an error
-       occurs (and set *TARGET_ERRNO).  */
+    /* Read value of symbolic link FILENAME on the target, in the
+       filesystem as seen by INF.  If INF is NULL, use the filesystem
+       seen by the debugger (GDB or, for remote targets, the remote
+       stub).  Return a null-terminated string allocated via xmalloc,
+       or NULL if an error occurs (and set *TARGET_ERRNO).  */
     char *(*to_fileio_readlink) (struct target_ops *,
-				 const char *filename, int *target_errno);
+				 struct inferior *inf,
+				 const char *filename,
+				 int *target_errno);
 
 
     /* Implement the "info proc" command.  */
@@ -1098,9 +1153,18 @@ struct target_ops
     void (*to_delete_record) (struct target_ops *)
       TARGET_DEFAULT_NORETURN (tcomplain ());
 
-    /* Query if the record target is currently replaying.  */
-    int (*to_record_is_replaying) (struct target_ops *)
+    /* Query if the record target is currently replaying PTID.  */
+    int (*to_record_is_replaying) (struct target_ops *, ptid_t ptid)
       TARGET_DEFAULT_RETURN (0);
+
+    /* Query if the record target will replay PTID if it were resumed in
+       execution direction DIR.  */
+    int (*to_record_will_replay) (struct target_ops *, ptid_t ptid, int dir)
+      TARGET_DEFAULT_RETURN (0);
+
+    /* Stop replaying.  */
+    void (*to_record_stop_replaying) (struct target_ops *)
+      TARGET_DEFAULT_IGNORE ();
 
     /* Go to the begin of the execution trace.  */
     void (*to_goto_record_begin) (struct target_ops *)
@@ -1249,8 +1313,8 @@ extern void target_detach (const char *, int);
 extern void target_disconnect (const char *, int);
 
 /* Resume execution of the target process PTID (or a group of
-   threads).  STEP says whether to single-step or to run free; SIGGNAL
-   is the signal to be given to the target, or GDB_SIGNAL_0 for no
+   threads).  STEP says whether to hardware single-step or to run free;
+   SIGGNAL is the signal to be given to the target, or GDB_SIGNAL_0 for no
    signal.  The caller may not pass GDB_SIGNAL_DEFAULT.  A specific
    PTID means `step/resume only this process id'.  A wildcard PTID
    (all threads, or all threads of process) means `step/resume
@@ -1272,6 +1336,13 @@ extern void target_resume (ptid_t ptid, int step, enum gdb_signal signal);
 
 extern ptid_t target_wait (ptid_t ptid, struct target_waitstatus *status,
 			   int options);
+
+/* The default target_ops::to_wait implementation.  */
+
+extern ptid_t default_target_wait (struct target_ops *ops,
+				   ptid_t ptid,
+				   struct target_waitstatus *status,
+				   int options);
 
 /* Fetch at least register REGNO, or all regs if regno == -1.  No result.  */
 
@@ -1523,6 +1594,11 @@ extern void target_load (const char *arg, int from_tty);
 
 int target_follow_fork (int follow_child, int detach_fork);
 
+/* Handle the target-specific bookkeeping required when the inferior
+   makes an exec call.  INF is the exec'd inferior.  */
+
+void target_follow_exec (struct inferior *inf, char *execd_pathname);
+
 /* On some targets, we can catch an inferior exec event when it
    occurs.  These functions insert/remove an already-created
    catchpoint for such events.  They return  0 for success, 1 if the
@@ -1626,6 +1702,20 @@ extern void target_update_thread_list (void);
 
 extern void target_stop (ptid_t ptid);
 
+/* Interrupt the target just like the user typed a ^C on the
+   inferior's controlling terminal.  (For instance, under Unix, this
+   should act like SIGINT).  This function is asynchronous.  */
+
+extern void target_interrupt (ptid_t ptid);
+
+/* Some targets install their own SIGINT handler while the target is
+   running.  This method is called from the QUIT macro to give such
+   targets a chance to process a Ctrl-C.  The target may e.g., choose
+   to interrupt the (potentially) long running operation, or give up
+   waiting and disconnect.  */
+
+extern void target_check_pending_interrupt (void);
+
 /* Send the specified COMMAND to the target's monitor
    (shell,interpreter) for execution.  The result of the query is
    placed in OUTBUF.  */
@@ -1699,8 +1789,16 @@ extern int target_async_permitted;
 #define target_is_async_p() (current_target.to_is_async_p (&current_target))
 
 /* Enables/disabled async target events.  */
-#define target_async(ENABLE) \
-     (current_target.to_async (&current_target, (ENABLE)))
+extern void target_async (int enable);
+
+/* Whether support for controlling the target backends always in
+   non-stop mode is enabled.  */
+extern enum auto_boolean target_non_stop_enabled;
+
+/* Is the target in non-stop mode?  Some targets control the inferior
+   in non-stop mode even with "set non-stop off".  Always true if "set
+   non-stop" is on.  */
+extern int target_is_non_stop_p (void);
 
 #define target_execution_direction() \
   (current_target.to_execution_direction (&current_target))
@@ -1807,14 +1905,17 @@ extern char *target_thread_name (struct thread_info *);
 /* If the *_hw_beakpoint functions have not been defined
    elsewhere use the definitions in the target vector.  */
 
-/* Returns non-zero if we can set a hardware watchpoint of type TYPE.  TYPE is
-   one of bp_hardware_watchpoint, bp_read_watchpoint, bp_write_watchpoint, or
-   bp_hardware_breakpoint.  CNT is the number of such watchpoints used so far
-   (including this one?).  OTHERTYPE is who knows what...  */
+/* Returns positive if we can set a hardware watchpoint of type TYPE.
+   Returns negative if the target doesn't have enough hardware debug
+   registers available.  Return zero if hardware watchpoint of type
+   TYPE isn't supported.  TYPE is one of bp_hardware_watchpoint,
+   bp_read_watchpoint, bp_write_watchpoint, or bp_hardware_breakpoint.
+   CNT is the number of such watchpoints used so far, including this
+   one.  OTHERTYPE is who knows what...  */
 
 #define target_can_use_hardware_watchpoint(TYPE,CNT,OTHERTYPE) \
  (*current_target.to_can_use_hw_breakpoint) (&current_target,  \
-					     TYPE, CNT, OTHERTYPE);
+					     TYPE, CNT, OTHERTYPE)
 
 /* Returns the number of debug registers needed to watch the given
    memory region, or zero if not supported.  */
@@ -1823,6 +1924,9 @@ extern char *target_thread_name (struct thread_info *);
     (*current_target.to_region_ok_for_hw_watchpoint) (&current_target,	\
 						      addr, len)
 
+
+#define target_can_do_single_step() \
+  (*current_target.to_can_do_single_step) (&current_target)
 
 /* Set/clear a hardware watchpoint starting at ADDR, for LEN bytes.
    TYPE is 0 for write, 1 for read, and 2 for read/write accesses.
@@ -1927,16 +2031,27 @@ extern int target_search_memory (CORE_ADDR start_addr,
 
 /* Target file operations.  */
 
-/* Return nonzero if the filesystem accessed by the target_fileio_*
-   methods is the local filesystem, zero otherwise.  */
+/* Return nonzero if the filesystem seen by the current inferior
+   is the local filesystem, zero otherwise.  */
 #define target_filesystem_is_local() \
   current_target.to_filesystem_is_local (&current_target)
 
-/* Open FILENAME on the target, using FLAGS and MODE.  Return a
-   target file descriptor, or -1 if an error occurs (and set
-   *TARGET_ERRNO).  */
-extern int target_fileio_open (const char *filename, int flags, int mode,
-			       int *target_errno);
+/* Open FILENAME on the target, in the filesystem as seen by INF,
+   using FLAGS and MODE.  If INF is NULL, use the filesystem seen
+   by the debugger (GDB or, for remote targets, the remote stub).
+   Return a target file descriptor, or -1 if an error occurs (and
+   set *TARGET_ERRNO).  */
+extern int target_fileio_open (struct inferior *inf,
+			       const char *filename, int flags,
+			       int mode, int *target_errno);
+
+/* Like target_fileio_open, but print a warning message if the
+   file is being accessed over a link that may be slow.  */
+extern int target_fileio_open_warn_if_slow (struct inferior *inf,
+					    const char *filename,
+					    int flags,
+					    int mode,
+					    int *target_errno);
 
 /* Write up to LEN bytes from WRITE_BUF to FD on the target.
    Return the number of bytes written, or -1 if an error occurs
@@ -1960,33 +2075,48 @@ extern int target_fileio_fstat (int fd, struct stat *sb,
    (and set *TARGET_ERRNO).  */
 extern int target_fileio_close (int fd, int *target_errno);
 
-/* Unlink FILENAME on the target.  Return 0, or -1 if an error
+/* Unlink FILENAME on the target, in the filesystem as seen by INF.
+   If INF is NULL, use the filesystem seen by the debugger (GDB or,
+   for remote targets, the remote stub).  Return 0, or -1 if an error
    occurs (and set *TARGET_ERRNO).  */
-extern int target_fileio_unlink (const char *filename, int *target_errno);
+extern int target_fileio_unlink (struct inferior *inf,
+				 const char *filename,
+				 int *target_errno);
 
-/* Read value of symbolic link FILENAME on the target.  Return a
-   null-terminated string allocated via xmalloc, or NULL if an error
-   occurs (and set *TARGET_ERRNO).  */
-extern char *target_fileio_readlink (const char *filename, int *target_errno);
+/* Read value of symbolic link FILENAME on the target, in the
+   filesystem as seen by INF.  If INF is NULL, use the filesystem seen
+   by the debugger (GDB or, for remote targets, the remote stub).
+   Return a null-terminated string allocated via xmalloc, or NULL if
+   an error occurs (and set *TARGET_ERRNO).  */
+extern char *target_fileio_readlink (struct inferior *inf,
+				     const char *filename,
+				     int *target_errno);
 
-/* Read target file FILENAME.  The return value will be -1 if the transfer
-   fails or is not supported; 0 if the object is empty; or the length
-   of the object otherwise.  If a positive value is returned, a
-   sufficiently large buffer will be allocated using xmalloc and
-   returned in *BUF_P containing the contents of the object.
+/* Read target file FILENAME, in the filesystem as seen by INF.  If
+   INF is NULL, use the filesystem seen by the debugger (GDB or, for
+   remote targets, the remote stub).  The return value will be -1 if
+   the transfer fails or is not supported; 0 if the object is empty;
+   or the length of the object otherwise.  If a positive value is
+   returned, a sufficiently large buffer will be allocated using
+   xmalloc and returned in *BUF_P containing the contents of the
+   object.
 
    This method should be used for objects sufficiently small to store
    in a single xmalloc'd buffer, when no fixed bound on the object's
    size is known in advance.  */
-extern LONGEST target_fileio_read_alloc (const char *filename,
+extern LONGEST target_fileio_read_alloc (struct inferior *inf,
+					 const char *filename,
 					 gdb_byte **buf_p);
 
-/* Read target file FILENAME.  The result is NUL-terminated and
+/* Read target file FILENAME, in the filesystem as seen by INF.  If
+   INF is NULL, use the filesystem seen by the debugger (GDB or, for
+   remote targets, the remote stub).  The result is NUL-terminated and
    returned as a string, allocated using xmalloc.  If an error occurs
    or the transfer is unsupported, NULL is returned.  Empty objects
    are returned as allocated but empty strings.  A warning is issued
    if the result contains any embedded NUL bytes.  */
-extern char *target_fileio_read_stralloc (const char *filename);
+extern char *target_fileio_read_stralloc (struct inferior *inf,
+					  const char *filename);
 
 
 /* Tracepoint-related operations.  */
@@ -2319,7 +2449,13 @@ extern int target_supports_delete_record (void);
 extern void target_delete_record (void);
 
 /* See to_record_is_replaying in struct target_ops.  */
-extern int target_record_is_replaying (void);
+extern int target_record_is_replaying (ptid_t ptid);
+
+/* See to_record_will_replay in struct target_ops.  */
+extern int target_record_will_replay (ptid_t ptid, int dir);
+
+/* See to_record_stop_replaying in struct target_ops.  */
+extern void target_record_stop_replaying (void);
 
 /* See to_goto_record_begin in struct target_ops.  */
 extern void target_goto_record_begin (void);

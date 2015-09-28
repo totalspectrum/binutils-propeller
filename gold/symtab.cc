@@ -419,9 +419,13 @@ Symbol::should_add_dynsym_entry(Symbol_table* symtab) const
     }
 
   // If exporting all symbols or building a shared library,
+  // or the symbol should be globally unique (GNU_UNIQUE),
   // and the symbol is defined in a regular object and is
   // externally visible, we need to add it.
-  if ((parameters->options().export_dynamic() || parameters->options().shared())
+  if ((parameters->options().export_dynamic()
+       || parameters->options().shared()
+       || (parameters->options().gnu_unique()
+           && this->binding() == elfcpp::STB_GNU_UNIQUE))
       && !this->is_from_dynobj()
       && !this->is_undefined()
       && this->is_externally_visible())
@@ -581,7 +585,7 @@ Symbol_table::Symbol_table_eq::operator()(const Symbol_table_key& k1,
 }
 
 bool
-Symbol_table::is_section_folded(Object* obj, unsigned int shndx) const
+Symbol_table::is_section_folded(Relobj* obj, unsigned int shndx) const
 {
   return (parameters->options().icf_enabled()
           && this->icf_->is_section_folded(obj, shndx));
@@ -646,10 +650,11 @@ Symbol_table::gc_mark_symbol(Symbol* sym)
   // Add the object and section to the work list.
   bool is_ordinary;
   unsigned int shndx = sym->shndx(&is_ordinary);
-  if (is_ordinary && shndx != elfcpp::SHN_UNDEF)
+  if (is_ordinary && shndx != elfcpp::SHN_UNDEF && !sym->object()->is_dynamic())
     {
       gold_assert(this->gc_!= NULL);
-      this->gc_->worklist().push(Section_id(sym->object(), shndx));
+      Relobj* relobj = static_cast<Relobj*>(sym->object());
+      this->gc_->worklist().push_back(Section_id(relobj, shndx));
     }
   parameters->target().gc_mark_symbol(this, sym);
 }
@@ -732,7 +737,7 @@ Symbol_table::resolve(Sized_symbol<size>* to, const Sized_symbol<size>* from)
   bool is_ordinary;
   unsigned int shndx = from->shndx(&is_ordinary);
   this->resolve(to, esym.sym(), shndx, is_ordinary, shndx, from->object(),
-		from->version());
+		from->version(), true);
   if (from->in_reg())
     to->set_in_reg();
   if (from->in_dyn())
@@ -986,13 +991,40 @@ Symbol_table::add_from_object(Object* object,
       was_common = ret->is_common() && ret->object()->pluginobj() == NULL;
 
       this->resolve(ret, sym, st_shndx, is_ordinary, orig_st_shndx, object,
-		    version);
+		    version, is_default_version);
       if (parameters->options().gc_sections())
         this->gc_mark_dyn_syms(ret);
 
       if (is_default_version)
 	this->define_default_version<size, big_endian>(ret, insdefault.second,
 						       insdefault.first);
+      else
+	{
+	  bool dummy;
+	  if (version != NULL
+	      && ret->source() == Symbol::FROM_OBJECT
+	      && ret->object() == object
+	      && is_ordinary
+	      && ret->shndx(&dummy) == st_shndx
+	      && ret->is_default())
+	    {
+	      // We have seen NAME/VERSION already, and marked it as the
+	      // default version, but now we see a definition for
+	      // NAME/VERSION that is not the default version. This can
+	      // happen when the assembler generates two symbols for
+	      // a symbol as a result of a ".symver foo,foo@VER"
+	      // directive. We see the first unversioned symbol and
+	      // we may mark it as the default version (from a
+	      // version script); then we see the second versioned
+	      // symbol and we need to override the first.
+	      // In any other case, the two symbols should have generated
+	      // a multiple definition error.
+	      // (See PR gold/18703.)
+	      ret->set_is_not_default();
+	      const Stringpool::Key vnull_key = 0;
+	      this->table_.erase(std::make_pair(name_key, vnull_key));
+	    }
+	}
     }
   else
     {
@@ -1010,7 +1042,7 @@ Symbol_table::add_from_object(Object* object,
 	  was_common = ret->is_common() && ret->object()->pluginobj() == NULL;
 
 	  this->resolve(ret, sym, st_shndx, is_ordinary, orig_st_shndx, object,
-			version);
+			version, is_default_version);
           if (parameters->options().gc_sections())
             this->gc_mark_dyn_syms(ret);
 	  ins.first->second = ret;
@@ -1436,14 +1468,20 @@ Symbol_table::add_from_dynobj(
       // A protected symbol in a shared library must be treated as a
       // normal symbol when viewed from outside the shared library.
       // Implement this by overriding the visibility here.
+      // Likewise, an IFUNC symbol in a shared library must be treated
+      // as a normal FUNC symbol.
       elfcpp::Sym<size, big_endian>* psym = &sym;
       unsigned char symbuf[sym_size];
       elfcpp::Sym<size, big_endian> sym2(symbuf);
-      if (sym.get_st_visibility() == elfcpp::STV_PROTECTED)
+      if (sym.get_st_visibility() == elfcpp::STV_PROTECTED
+	  || sym.get_st_type() == elfcpp::STT_GNU_IFUNC)
 	{
 	  memcpy(symbuf, p, sym_size);
 	  elfcpp::Sym_write<size, big_endian> sw(symbuf);
-	  sw.put_st_other(elfcpp::STV_DEFAULT, sym.get_st_nonvis());
+	  if (sym.get_st_visibility() == elfcpp::STV_PROTECTED)
+	    sw.put_st_other(elfcpp::STV_DEFAULT, sym.get_st_nonvis());
+	  if (sym.get_st_type() == elfcpp::STT_GNU_IFUNC)
+	    sw.put_st_info(sym.get_st_bind(), elfcpp::STT_FUNC);
 	  psym = &sym2;
 	}
 
@@ -1948,6 +1986,9 @@ Symbol_table::do_define_in_output_data(
     return sym;
   else
     {
+      if (binding == elfcpp::STB_LOCAL
+	  || this->version_script_.symbol_is_local(name))
+	this->force_local(oldsym);
       delete sym;
       return oldsym;
     }
@@ -2062,6 +2103,9 @@ Symbol_table::do_define_in_output_segment(
     return sym;
   else
     {
+      if (binding == elfcpp::STB_LOCAL
+	  || this->version_script_.symbol_is_local(name))
+	this->force_local(oldsym);
       delete sym;
       return oldsym;
     }
@@ -2181,6 +2225,9 @@ Symbol_table::do_define_as_constant(
     return sym;
   else
     {
+      if (binding == elfcpp::STB_LOCAL
+	  || this->version_script_.symbol_is_local(name))
+	this->force_local(oldsym);
       delete sym;
       return oldsym;
     }
@@ -2916,6 +2963,13 @@ Symbol_table::sized_write_globals(const Stringpool* sympool,
       typename elfcpp::Elf_types<size>::Elf_Addr dynsym_value = sym_value;
       elfcpp::STB binding = sym->binding();
 
+      // If --weak-unresolved-symbols is set, change binding of unresolved
+      // global symbols to STB_WEAK.
+      if (parameters->options().weak_unresolved_symbols()
+	  && binding == elfcpp::STB_GLOBAL
+	  && sym->is_undefined())
+	binding = elfcpp::STB_WEAK;
+
       // If --no-gnu-unique is set, change STB_GNU_UNIQUE to STB_GLOBAL.
       if (binding == elfcpp::STB_GNU_UNIQUE
 	  && !parameters->options().gnu_unique())
@@ -3082,10 +3136,7 @@ Symbol_table::sized_write_symbol(
   else
     osym.put_st_size(sym->symsize());
   elfcpp::STT type = sym->type();
-  // Turn IFUNC symbols from shared libraries into normal FUNC symbols.
-  if (type == elfcpp::STT_GNU_IFUNC
-      && sym->is_from_dynobj())
-    type = elfcpp::STT_FUNC;
+  gold_assert(type != elfcpp::STT_GNU_IFUNC || !sym->is_from_dynobj());
   // A version script may have overridden the default binding.
   if (sym->is_forced_local())
     osym.put_st_info(elfcpp::elf_st_info(elfcpp::STB_LOCAL, type));

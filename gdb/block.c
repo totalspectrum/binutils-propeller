@@ -140,7 +140,7 @@ find_block_in_blockvector (const struct blockvector *bl, CORE_ADDR pc)
   /* If we have an addrmap mapping code addresses to blocks, then use
      that.  */
   if (BLOCKVECTOR_MAP (bl))
-    return addrmap_find (BLOCKVECTOR_MAP (bl), pc);
+    return (struct block *) addrmap_find (BLOCKVECTOR_MAP (bl), pc);
 
   /* Otherwise, use binary search to find the last block that starts
      before PC.
@@ -246,7 +246,7 @@ call_site_for_pc (struct gdbarch *gdbarch, CORE_ADDR pc)
 		    : MSYMBOL_PRINT_NAME (msym.minsym)));
     }
 
-  return *slot;
+  return (struct call_site *) *slot;
 }
 
 /* Return the blockvector immediately containing the innermost lexical block
@@ -351,8 +351,7 @@ block_initialize_namespace (struct block *block, struct obstack *obstack)
 {
   if (BLOCK_NAMESPACE (block) == NULL)
     {
-      BLOCK_NAMESPACE (block)
-	= obstack_alloc (obstack, sizeof (struct block_namespace_info));
+      BLOCK_NAMESPACE (block) = XOBNEW (obstack, struct block_namespace_info);
       BLOCK_NAMESPACE (block)->scope = NULL;
       BLOCK_NAMESPACE (block)->using_decl = NULL;
     }
@@ -426,6 +425,21 @@ set_block_compunit_symtab (struct block *block, struct compunit_symtab *cu)
   gb = (struct global_block *) block;
   gdb_assert (gb->compunit_symtab == NULL);
   gb->compunit_symtab = cu;
+}
+
+/* See block.h.  */
+
+struct dynamic_prop *
+block_static_link (const struct block *block)
+{
+  struct objfile *objfile = block_objfile (block);
+
+  /* Only objfile-owned blocks that materialize top function scopes can have
+     static links.  */
+  if (objfile == NULL || BLOCK_FUNCTION (block) == NULL)
+    return NULL;
+
+  return (struct dynamic_prop *) objfile_lookup_static_link (objfile, block);
 }
 
 /* Return the compunit of the global block.  */
@@ -739,13 +753,21 @@ block_lookup_symbol (const struct block *block, const char *name,
 
   if (!BLOCK_FUNCTION (block))
     {
+      struct symbol *other = NULL;
+
       ALL_BLOCK_SYMBOLS_WITH_NAME (block, name, iter, sym)
 	{
+	  if (SYMBOL_DOMAIN (sym) == domain)
+	    return sym;
+	  /* This is a bit of a hack, but symbol_matches_domain might ignore
+	     STRUCT vs VAR domain symbols.  So if a matching symbol is found,
+	     make sure there is no "better" matching symbol, i.e., one with
+	     exactly the same domain.  PR 16253.  */
 	  if (symbol_matches_domain (SYMBOL_LANGUAGE (sym),
 				     SYMBOL_DOMAIN (sym), domain))
-	    return sym;
+	    other = sym;
 	}
-      return NULL;
+      return other;
     }
   else
     {
@@ -753,7 +775,10 @@ block_lookup_symbol (const struct block *block, const char *name,
 	 list; this loop makes sure to take anything else other than
 	 parameter symbols first; it only uses parameter symbols as a
 	 last resort.  Note that this only takes up extra computation
-	 time on a match.  */
+	 time on a match.
+	 It's hard to define types in the parameter list (at least in
+	 C/C++) so we don't do the same PR 16253 hack here that is done
+	 for the !BLOCK_FUNCTION case.  */
 
       struct symbol *sym_found = NULL;
 
@@ -779,21 +804,76 @@ struct symbol *
 block_lookup_symbol_primary (const struct block *block, const char *name,
 			     const domain_enum domain)
 {
-  struct symbol *sym;
+  struct symbol *sym, *other;
   struct dict_iterator dict_iter;
 
   /* Verify BLOCK is STATIC_BLOCK or GLOBAL_BLOCK.  */
   gdb_assert (BLOCK_SUPERBLOCK (block) == NULL
 	      || BLOCK_SUPERBLOCK (BLOCK_SUPERBLOCK (block)) == NULL);
 
+  other = NULL;
   for (sym = dict_iter_name_first (block->dict, name, &dict_iter);
        sym != NULL;
        sym = dict_iter_name_next (name, &dict_iter))
     {
+      if (SYMBOL_DOMAIN (sym) == domain)
+	return sym;
+
+      /* This is a bit of a hack, but symbol_matches_domain might ignore
+	 STRUCT vs VAR domain symbols.  So if a matching symbol is found,
+	 make sure there is no "better" matching symbol, i.e., one with
+	 exactly the same domain.  PR 16253.  */
       if (symbol_matches_domain (SYMBOL_LANGUAGE (sym),
 				 SYMBOL_DOMAIN (sym), domain))
-	return sym;
+	other = sym;
     }
 
+  return other;
+}
+
+/* See block.h.  */
+
+struct symbol *
+block_find_symbol (const struct block *block, const char *name,
+		   const domain_enum domain,
+		   block_symbol_matcher_ftype *matcher, void *data)
+{
+  struct block_iterator iter;
+  struct symbol *sym;
+
+  /* Verify BLOCK is STATIC_BLOCK or GLOBAL_BLOCK.  */
+  gdb_assert (BLOCK_SUPERBLOCK (block) == NULL
+	      || BLOCK_SUPERBLOCK (BLOCK_SUPERBLOCK (block)) == NULL);
+
+  ALL_BLOCK_SYMBOLS_WITH_NAME (block, name, iter, sym)
+    {
+      /* MATCHER is deliberately called second here so that it never sees
+	 a non-domain-matching symbol.  */
+      if (symbol_matches_domain (SYMBOL_LANGUAGE (sym),
+				 SYMBOL_DOMAIN (sym), domain)
+	  && matcher (sym, data))
+	return sym;
+    }
   return NULL;
+}
+
+/* See block.h.  */
+
+int
+block_find_non_opaque_type (struct symbol *sym, void *data)
+{
+  return !TYPE_IS_OPAQUE (SYMBOL_TYPE (sym));
+}
+
+/* See block.h.  */
+
+int
+block_find_non_opaque_type_preferred (struct symbol *sym, void *data)
+{
+  struct symbol **best = (struct symbol **) data;
+
+  if (!TYPE_IS_OPAQUE (SYMBOL_TYPE (sym)))
+    return 1;
+  *best = sym;
+  return 0;
 }

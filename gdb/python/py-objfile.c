@@ -23,7 +23,6 @@
 #include "objfiles.h"
 #include "language.h"
 #include "build-id.h"
-#include "elf-bfd.h"
 #include "symtab.h"
 
 typedef struct
@@ -134,7 +133,7 @@ objfpy_get_build_id (PyObject *self, void *closure)
 {
   objfile_object *obj = (objfile_object *) self;
   struct objfile *objfile = obj->objfile;
-  const struct elf_build_id *build_id = NULL;
+  const struct bfd_build_id *build_id = NULL;
 
   OBJFPY_REQUIRE_VALID (obj);
 
@@ -484,7 +483,7 @@ objfpy_build_id_ok (const char *string)
    It is assumed that objfpy_build_id_ok (string) returns TRUE.  */
 
 static int
-objfpy_build_id_matches (const struct elf_build_id *build_id,
+objfpy_build_id_matches (const struct bfd_build_id *build_id,
 			 const char *string)
 {
   size_t i;
@@ -542,7 +541,7 @@ objfpy_lookup_objfile_by_build_id (const char *build_id)
 
   ALL_OBJFILES (objfile)
     {
-      const struct elf_build_id *obfd_build_id;
+      const struct bfd_build_id *obfd_build_id;
 
       if (objfile->obfd == NULL)
 	continue;
@@ -616,7 +615,7 @@ static void
 py_free_objfile (struct objfile *objfile, void *datum)
 {
   struct cleanup *cleanup;
-  objfile_object *object = datum;
+  objfile_object *object = (objfile_object *) datum;
 
   cleanup = ensure_python_env (get_objfile_arch (objfile), current_language);
   object->objfile = NULL;
@@ -634,7 +633,7 @@ objfile_to_objfile_object (struct objfile *objfile)
 {
   objfile_object *object;
 
-  object = objfile_data (objfile, objfpy_objfile_data_key);
+  object = (objfile_object *) objfile_data (objfile, objfpy_objfile_data_key);
   if (!object)
     {
       object = PyObject_New (objfile_object, &objfile_object_type);

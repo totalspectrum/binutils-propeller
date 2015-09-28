@@ -55,7 +55,7 @@ propeller_place_orphan (asection *s, const char *secname, int constraint)
 {
   int is_cog = 0;
 
-  if (!link_info.relocatable && 0 != (s->flags & SEC_ALLOC) )
+  if (!bfd_link_relocatable (&link_info) && 0 != (s->flags & SEC_ALLOC) )
     {
       /* for now we only put stuff after .text, but we may want to
 	 add data overlays some day */

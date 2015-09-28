@@ -437,7 +437,7 @@ DEF_VEC_O (cmdarg_s);
 static int
 captured_main (void *data)
 {
-  struct captured_main_args *context = data;
+  struct captured_main_args *context = (struct captured_main_args *) data;
   int argc = context->argc;
   char **argv = context->argv;
   static int quiet = 0;
@@ -859,8 +859,7 @@ captured_main (void *data)
   /* Try to set up an alternate signal stack for SIGSEGV handlers.  */
   setup_alternate_signal_stack ();
 
-  /* Initialize all files.  Give the interpreter a chance to take
-     control of the console via the deprecated_init_ui_hook ().  */
+  /* Initialize all files.  */
   gdb_init (gdb_program_name);
 
   /* Now that gdb_init has created the initial inferior, we're in

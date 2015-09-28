@@ -1,23 +1,20 @@
-/*
- * This file is part of SIS.
- * 
- * SIS, SPARC instruction simulator V1.6 Copyright (C) 1995 Jiri Gaisler,
- * European Space Agency
- * 
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 3 of the License, or (at your option)
- * any later version.
- * 
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- * 
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
- * 
- */
+/* This file is part of SIS (SPARC instruction simulator)
+
+   Copyright (C) 1995-2015 Free Software Foundation, Inc.
+   Contributed by Jiri Gaisler, European Space Agency
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "config.h"
 #include <signal.h>
@@ -40,7 +37,6 @@ extern struct disassemble_info dinfo;
 extern struct pstate sregs;
 extern struct estate ebase;
 
-extern int	current_target_byte_order;
 extern int      ctrl_c;
 extern int      nfp;
 extern int      ift;
@@ -252,7 +248,11 @@ sim_open (kind, callback, abfd, argv)
     sregs.freq = freq ? freq : 15;
     termsave = fcntl(0, F_GETFL, 0);
     INIT_DISASSEMBLE_INFO(dinfo, stdout,(fprintf_ftype)fprintf);
+#ifdef HOST_LITTLE_ENDIAN
+    dinfo.endian = BFD_ENDIAN_LITTLE;
+#else
     dinfo.endian = BFD_ENDIAN_BIG;
+#endif
     reset_all();
     ebase.simtime = 0;
     init_sim();
@@ -311,14 +311,10 @@ sim_store_register(sd, regno, value, length)
     unsigned char  *value;
     int length;
 {
-    /* FIXME: Review the computation of regval.  */
     int regval;
-    if (current_target_byte_order == BIG_ENDIAN)
-	regval = (value[0] << 24) | (value[1] << 16)
+
+    regval = (value[0] << 24) | (value[1] << 16)
 		 | (value[2] << 8) | value[3];
-    else
-	regval = (value[3] << 24) | (value[2] << 16)
-		 | (value[1] << 8) | value[0];
     set_regi(&sregs, regno, regval);
     return length;
 }
@@ -336,23 +332,25 @@ sim_fetch_register(sd, regno, buf, length)
 }
 
 int
-sim_write(sd, mem, buf, length)
-     SIM_DESC sd;
-    SIM_ADDR             mem;
-    const unsigned char  *buf;
-    int             length;
+sim_write (SIM_DESC sd, SIM_ADDR mem, const unsigned char *buf, int length)
 {
-    return sis_memory_write (mem, buf, length);
+    int i, len;
+
+    for (i = 0; i < length; i++) {
+	sis_memory_write ((mem + i) ^ EBT, &buf[i], 1);
+    }
+    return length;
 }
 
 int
-sim_read(sd, mem, buf, length)
-     SIM_DESC sd;
-     SIM_ADDR mem;
-     unsigned char *buf;
-     int length;
+sim_read (SIM_DESC sd, SIM_ADDR mem, unsigned char *buf, int length)
 {
-    return sis_memory_read (mem, buf, length);
+    int i, len;
+
+    for (i = 0; i < length; i++) {
+	sis_memory_read ((mem + i) ^ EBT, &buf[i], 1);
+    }
+    return length;
 }
 
 void

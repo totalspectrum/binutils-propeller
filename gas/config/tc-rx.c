@@ -942,43 +942,50 @@ rx_field5s2 (expressionS exp)
 void
 rx_op (expressionS exp, int nbytes, int type)
 {
-  int v = 0;
+  offsetT v = 0;
 
   if ((exp.X_op == O_constant || exp.X_op == O_big)
       && type != RXREL_PCREL)
     {
-      if (exp.X_op == O_big && exp.X_add_number <= 0)
+      if (exp.X_op == O_big)
 	{
-	  LITTLENUM_TYPE w[2];
-	  char * ip = rx_bytes.ops + rx_bytes.n_ops;
+	  if (exp.X_add_number == -1)
+	    {
+	      LITTLENUM_TYPE w[2];
+	      char * ip = rx_bytes.ops + rx_bytes.n_ops;
 
-	  gen_to_words (w, F_PRECISION, 8);
+	      gen_to_words (w, F_PRECISION, 8);
 #if RX_OPCODE_BIG_ENDIAN
-	  ip[0] = w[0] >> 8;
-	  ip[1] = w[0];
-	  ip[2] = w[1] >> 8;
-	  ip[3] = w[1];
+	      ip[0] = w[0] >> 8;
+	      ip[1] = w[0];
+	      ip[2] = w[1] >> 8;
+	      ip[3] = w[1];
 #else
-	  ip[3] = w[0] >> 8;
-	  ip[2] = w[0];
-	  ip[1] = w[1] >> 8;
-	  ip[0] = w[1];
+	      ip[3] = w[0] >> 8;
+	      ip[2] = w[0];
+	      ip[1] = w[1] >> 8;
+	      ip[0] = w[1];
 #endif
-	  rx_bytes.n_ops += 4;
+	      rx_bytes.n_ops += 4;
+	      return;
+	    }
+
+	  v = ((generic_bignum[1] & LITTLENUM_MASK) << LITTLENUM_NUMBER_OF_BITS)
+	    |  (generic_bignum[0] & LITTLENUM_MASK);
+
 	}
       else
+	v = exp.X_add_number;
+
+      while (nbytes)
 	{
-	  v = exp.X_add_number;
-	  while (nbytes)
-	    {
 #if RX_OPCODE_BIG_ENDIAN
-	      OP ((v >> (8 * (nbytes - 1))) & 0xff);
+	  OP ((v >> (8 * (nbytes - 1))) & 0xff);
 #else
-	      OP (v & 0xff);
-	      v >>= 8;
+	  OP (v & 0xff);
+	  v >>= 8;
 #endif
-	      nbytes --;
-	    }
+	  nbytes --;
 	}
     }
   else
@@ -1256,8 +1263,8 @@ static unsigned char nop_4[] = { 0x76, 0x10, 0x01, 0x00 };
 static unsigned char nop_5[] = { 0x77, 0x10, 0x01, 0x00, 0x00 };
 				/* MUL #1,R0 - 1 cycle */
 static unsigned char nop_6[] = { 0x74, 0x10, 0x01, 0x00, 0x00, 0x00 };
-				/* BRA.S .+7 - 1 cycle */
-static unsigned char nop_7[] = { 0x0F, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03 };
+				/* MAX 0x80000000,R0 - 1 cycle */
+static unsigned char nop_7[] = { 0xFD, 0x70, 0x40, 0x00, 0x00, 0x00, 0x80 };
 
 static unsigned char *nops[] = { NULL, nop_1, nop_2, nop_3, nop_4, nop_5, nop_6, nop_7 };
 #define BIGGEST_NOP 7
@@ -2433,7 +2440,7 @@ tc_gen_reloc (asection * sec ATTRIBUTE_UNUSED, fixS * fixp)
     }
   else if (sec)
     is_opcode = sec->flags & SEC_CODE;
-      
+
   /* Certain BFD relocations cannot be translated directly into
      a single (non-Red Hat) RX relocation, but instead need
      multiple RX relocations - handle them here.  */

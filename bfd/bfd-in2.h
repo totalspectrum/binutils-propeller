@@ -450,9 +450,8 @@ enum compressed_debug_section_type
 {
   COMPRESS_DEBUG_NONE = 0,
   COMPRESS_DEBUG = 1 << 0,
-  COMPRESS_DEBUG_ZLIB = COMPRESS_DEBUG | 1 << 1,
-  COMPRESS_DEBUG_GNU_ZLIB = COMPRESS_DEBUG | 1 << 2,
-  COMPRESS_DEBUG_GABI_ZLIB = COMPRESS_DEBUG | 1 << 3
+  COMPRESS_DEBUG_GNU_ZLIB = COMPRESS_DEBUG | 1 << 1,
+  COMPRESS_DEBUG_GABI_ZLIB = COMPRESS_DEBUG | 1 << 2
 };
 
 /* This structure is used to keep track of stabs in sections
@@ -1210,10 +1209,10 @@ typedef struct bfd_section
   const char *name;
 
   /* A unique sequence number.  */
-  int id;
+  unsigned int id;
 
   /* Which section in the bfd; 0..n-1 as sections are created in a bfd.  */
-  int index;
+  unsigned int index;
 
   /* The next section in the list belonging to the BFD, or NULL.  */
   struct bfd_section *next;
@@ -1400,10 +1399,17 @@ typedef struct bfd_section
      TMS320C54X only.  */
 #define SEC_TIC54X_BLOCK 0x10000000
 
+  /* This section should be renamed.  This is for ELF linker
+     internal use only.  */
+#define SEC_ELF_RENAME 0x10000000
+
   /* Conditionally link this section; do not link if there are no
      references found to any symbol in the section.  This is for TI
      TMS320C54X only.  */
 #define SEC_TIC54X_CLINK 0x20000000
+
+  /* This section contains vliw code.  This is for Toshiba MeP only.  */
+#define SEC_MEP_VLIW 0x20000000
 
   /* Indicate that section has the no read flag set. This happens
      when memory read flag isn't set. */
@@ -1445,6 +1451,7 @@ typedef struct bfd_section
 #define SEC_INFO_TYPE_EH_FRAME  3
 #define SEC_INFO_TYPE_JUST_SYMS 4
 #define SEC_INFO_TYPE_TARGET    5
+#define SEC_INFO_TYPE_EH_FRAME_ENTRY 6
 
   /* Nonzero if this section uses RELA relocations, rather than REL.  */
   unsigned int use_rela_p:1;
@@ -1811,6 +1818,8 @@ asection *bfd_make_section_with_flags
 
 asection *bfd_make_section (bfd *, const char *name);
 
+int bfd_get_next_section_id (void);
+
 bfd_boolean bfd_set_section_flags
    (bfd *abfd, asection *sec, flagword flags);
 
@@ -1997,6 +2006,10 @@ enum bfd_architecture
 #define bfd_mach_i386_i386_nacl        (bfd_mach_i386_i386 | bfd_mach_i386_nacl)
 #define bfd_mach_x86_64_nacl           (bfd_mach_x86_64 | bfd_mach_i386_nacl)
 #define bfd_mach_x64_32_nacl           (bfd_mach_x64_32 | bfd_mach_i386_nacl)
+  bfd_arch_iamcu,   /* Intel MCU */
+#define bfd_mach_iamcu                 (1 << 8)
+#define bfd_mach_i386_iamcu            (bfd_mach_i386_i386 | bfd_mach_iamcu)
+#define bfd_mach_i386_iamcu_intel_syntax (bfd_mach_i386_iamcu | bfd_mach_i386_intel_syntax)
   bfd_arch_we32k,     /* AT&T WE32xxx */
   bfd_arch_tahoe,     /* CCI/Harris Tahoe */
   bfd_arch_i860,      /* Intel 860 */
@@ -2283,8 +2296,10 @@ enum bfd_architecture
   bfd_arch_aarch64,   /* AArch64  */
 #define bfd_mach_aarch64 0
 #define bfd_mach_aarch64_ilp32 32
-  bfd_arch_nios2,
-#define bfd_mach_nios2 0
+  bfd_arch_nios2,      /* Nios II */
+#define bfd_mach_nios2         0
+#define bfd_mach_nios2r1       1
+#define bfd_mach_nios2r2       2
   bfd_arch_propeller, /* Parallax Propeller */
 #define bfd_mach_prop1    1
 #define bfd_mach_prop2    2
@@ -4612,6 +4627,7 @@ number for the SBIC, SBIS, SBI and CBI instructions  */
   BFD_RELOC_RL78_HI8,
   BFD_RELOC_RL78_LO16,
   BFD_RELOC_RL78_CODE,
+  BFD_RELOC_RL78_SADDR,
 
 /* Renesas RX Relocations.  */
   BFD_RELOC_RX_NEG8,
@@ -5378,6 +5394,19 @@ a matching LO8XG part.  */
   BFD_RELOC_NIOS2_GOT_HA,
   BFD_RELOC_NIOS2_CALL_LO,
   BFD_RELOC_NIOS2_CALL_HA,
+  BFD_RELOC_NIOS2_R2_S12,
+  BFD_RELOC_NIOS2_R2_I10_1_PCREL,
+  BFD_RELOC_NIOS2_R2_T1I7_1_PCREL,
+  BFD_RELOC_NIOS2_R2_T1I7_2,
+  BFD_RELOC_NIOS2_R2_T2I4,
+  BFD_RELOC_NIOS2_R2_T2I4_1,
+  BFD_RELOC_NIOS2_R2_T2I4_2,
+  BFD_RELOC_NIOS2_R2_X1I7_2,
+  BFD_RELOC_NIOS2_R2_X2L5,
+  BFD_RELOC_NIOS2_R2_F1I5_2,
+  BFD_RELOC_NIOS2_R2_L5I4X1,
+  BFD_RELOC_NIOS2_R2_T1X1I6,
+  BFD_RELOC_NIOS2_R2_T1X1I6_2,
 
 /* IQ2000 Relocations.  */
   BFD_RELOC_IQ2000_OFFSET_16,
@@ -5764,6 +5793,16 @@ the GOT entry for this symbol.  Used in conjunction with
 BFD_RELOC_AARCH64_ADR_GOTPAGE.  Valid in ILP32 ABI only.  */
   BFD_RELOC_AARCH64_LD32_GOT_LO12_NC,
 
+/* Unsigned 15 bit byte offset for 64 bit load/store from the page of
+the GOT entry for this symbol.  Valid in LP64 ABI only.  */
+  BFD_RELOC_AARCH64_LD64_GOTOFF_LO15,
+
+/* Scaled 14 bit byte offset to the page base of the global offset table.  */
+  BFD_RELOC_AARCH64_LD32_GOTPAGE_LO14,
+
+/* Scaled 15 bit byte offset to the page base of the global offset table.  */
+  BFD_RELOC_AARCH64_LD64_GOTPAGE_LO15,
+
 /* Get to the page base of the global offset table entry for a symbols
 tls_index structure as part of an adrp instruction using a 21 bit PC
 relative value.  Used in conjunction with
@@ -5795,6 +5834,70 @@ BFD_RELOC_AARCH64_TLSGD_ADR_PAGE21.  */
 
 /* AArch64 TLS INITIAL EXEC relocation.  */
   BFD_RELOC_AARCH64_TLSIE_LD_GOTTPREL_PREL19,
+
+/* bit[23:12] of byte offset to module TLS base address.  */
+  BFD_RELOC_AARCH64_TLSLD_ADD_DTPREL_HI12,
+
+/* Unsigned 12 bit byte offset to module TLS base address.  */
+  BFD_RELOC_AARCH64_TLSLD_ADD_DTPREL_LO12,
+
+/* No overflow check version of BFD_RELOC_AARCH64_TLSLD_ADD_DTPREL_LO12.  */
+  BFD_RELOC_AARCH64_TLSLD_ADD_DTPREL_LO12_NC,
+
+/* Unsigned 12 bit byte offset to global offset table entry for a symbols
+tls_index structure.  Used in conjunction with
+BFD_RELOC_AARCH64_TLSLD_ADR_PAGE21.  */
+  BFD_RELOC_AARCH64_TLSLD_ADD_LO12_NC,
+
+/* GOT entry page address for AArch64 TLS Local Dynamic, used with ADRP
+instruction.  */
+  BFD_RELOC_AARCH64_TLSLD_ADR_PAGE21,
+
+/* GOT entry address for AArch64 TLS Local Dynamic, used with ADR instruction.  */
+  BFD_RELOC_AARCH64_TLSLD_ADR_PREL21,
+
+/* bit[11:1] of byte offset to module TLS base address, encoded in ldst
+instructions.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST16_DTPREL_LO12,
+
+/* Similar as BFD_RELOC_AARCH64_TLSLD_LDST16_DTPREL_LO12, but no overflow check.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST16_DTPREL_LO12_NC,
+
+/* bit[11:2] of byte offset to module TLS base address, encoded in ldst
+instructions.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST32_DTPREL_LO12,
+
+/* Similar as BFD_RELOC_AARCH64_TLSLD_LDST32_DTPREL_LO12, but no overflow check.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST32_DTPREL_LO12_NC,
+
+/* bit[11:3] of byte offset to module TLS base address, encoded in ldst
+instructions.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST64_DTPREL_LO12,
+
+/* Similar as BFD_RELOC_AARCH64_TLSLD_LDST64_DTPREL_LO12, but no overflow check.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST64_DTPREL_LO12_NC,
+
+/* bit[11:0] of byte offset to module TLS base address, encoded in ldst
+instructions.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST8_DTPREL_LO12,
+
+/* Similar as BFD_RELOC_AARCH64_TLSLD_LDST8_DTPREL_LO12, but no overflow check.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST8_DTPREL_LO12_NC,
+
+/* bit[15:0] of byte offset to module TLS base address.  */
+  BFD_RELOC_AARCH64_TLSLD_MOVW_DTPREL_G0,
+
+/* No overflow check version of BFD_RELOC_AARCH64_TLSLD_MOVW_DTPREL_G0  */
+  BFD_RELOC_AARCH64_TLSLD_MOVW_DTPREL_G0_NC,
+
+/* bit[31:16] of byte offset to module TLS base address.  */
+  BFD_RELOC_AARCH64_TLSLD_MOVW_DTPREL_G1,
+
+/* No overflow check version of BFD_RELOC_AARCH64_TLSLD_MOVW_DTPREL_G1  */
+  BFD_RELOC_AARCH64_TLSLD_MOVW_DTPREL_G1_NC,
+
+/* bit[47:32] of byte offset to module TLS base address.  */
+  BFD_RELOC_AARCH64_TLSLD_MOVW_DTPREL_G2,
 
 /* AArch64 TLS LOCAL EXEC relocation.  */
   BFD_RELOC_AARCH64_TLSLE_MOVW_TPREL_G2,
@@ -5894,6 +5997,14 @@ assembler and not (currently) written to any object files.  */
 /* AArch64 unspecified load/store instruction, holding bits 0 to 11 of the
 address.  Used in conjunction with BFD_RELOC_AARCH64_ADR_HI21_PCREL.  */
   BFD_RELOC_AARCH64_LDST_LO12,
+
+/* AArch64 pseudo relocation code for TLS local dynamic mode.  It's to be
+used internally by the AArch64 assembler and not (currently) written to
+any object files.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST_DTPREL_LO12,
+
+/* Similar as BFD_RELOC_AARCH64_TLSLD_LDST_DTPREL_LO12, but no overflow check.  */
+  BFD_RELOC_AARCH64_TLSLD_LDST_DTPREL_LO12_NC,
 
 /* AArch64 pseudo relocation code to be used internally by the AArch64
 assembler and not (currently) written to any object files.  */
@@ -6343,6 +6454,12 @@ enum bfd_plugin_format
     bfd_plugin_no = 2
   };
 
+struct bfd_build_id
+  {
+    bfd_size_type size;
+    bfd_byte data[1];
+  };
+
 struct bfd
 {
   /* The filename the application opened the BFD with.  */
@@ -6504,6 +6621,9 @@ struct bfd
   /* Set if this is the linker output BFD.  */
   unsigned int is_linker_output : 1;
 
+  /* Set if this is the linker input BFD.  */
+  unsigned int is_linker_input : 1;
+
   /* If this is an input for a compiler plug-in library.  */
   ENUM_BITFIELD (bfd_plugin_format) plugin_format : 2;
 
@@ -6624,6 +6744,9 @@ struct bfd
      struct objalloc *, but we use void * to avoid requiring the inclusion
      of objalloc.h.  */
   void *memory;
+
+  /* For input BFDs, the build ID, if the object has one. */
+  const struct bfd_build_id *build_id;
 };
 
 /* See note beside bfd_set_section_userdata.  */
@@ -6841,9 +6964,15 @@ void bfd_update_compression_header
 
 bfd_boolean bfd_check_compression_header
    (bfd *abfd, bfd_byte *contents, asection *sec,
-    bfd_size_type uncompressed_size);
+    bfd_size_type *uncompressed_size);
 
 int bfd_get_compression_header_size (bfd *abfd, asection *sec);
+
+bfd_size_type bfd_convert_section_size
+   (bfd *ibfd, asection *isec, bfd *obfd, bfd_size_type size);
+
+bfd_boolean bfd_convert_section_contents
+   (bfd *ibfd, asection *isec, bfd *obfd, bfd_byte **ptr);
 
 /* Extracted from archive.c.  */
 symindex bfd_get_next_mapent
@@ -6890,6 +7019,7 @@ bfd_boolean generic_core_file_matches_executable_p
 
 enum bfd_flavour
 {
+  /* N.B. Update bfd_flavour_name if you change this.  */
   bfd_target_unknown_flavour,
   bfd_target_aout_flavour,
   bfd_target_coff_flavour,
@@ -7309,6 +7439,8 @@ const bfd_target *bfd_search_for_target
    (int (*search_func) (const bfd_target *, void *),
     void *);
 
+const char *bfd_flavour_name (enum bfd_flavour flavour);
+
 /* Extracted from format.c.  */
 bfd_boolean bfd_check_format (bfd *abfd, bfd_format format);
 
@@ -7359,7 +7491,8 @@ void bfd_cache_section_contents
 
 bfd_boolean bfd_is_section_compressed_with_header
    (bfd *abfd, asection *section,
-    int *compression_header_size_p);
+    int *compression_header_size_p,
+    bfd_size_type *uncompressed_size_p);
 
 bfd_boolean bfd_is_section_compressed
    (bfd *abfd, asection *section);

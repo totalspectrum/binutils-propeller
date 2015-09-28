@@ -44,8 +44,6 @@
 
 #include "record-full.h"
 #include "linux-record.h"
-#include <stdint.h>
-
 #include "features/i386/i386-linux.c"
 #include "features/i386/i386-mmx-linux.c"
 #include "features/i386/i386-mpx-linux.c"
@@ -381,9 +379,9 @@ i386_canonicalize_syscall (int syscall)
   enum { i386_syscall_max = 499 };
 
   if (syscall <= i386_syscall_max)
-    return syscall;
+    return (enum gdb_syscall) syscall;
   else
-    return -1;
+    return gdb_sys_no_syscall;
 }
 
 /* Parse the arguments of current system call instruction and record
@@ -747,7 +745,8 @@ i386_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
   const struct target_desc *tdesc = info.target_desc;
-  struct tdesc_arch_data *tdesc_data = (void *) info.tdep_info;
+  struct tdesc_arch_data *tdesc_data
+    = (struct tdesc_arch_data *) info.tdep_info;
   const struct tdesc_feature *feature;
   int valid_p;
 
@@ -996,8 +995,6 @@ i386_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   set_xml_syscall_file_name (gdbarch, XML_SYSCALL_FILENAME_I386);
   set_gdbarch_get_syscall_number (gdbarch,
                                   i386_linux_get_syscall_number);
-
-  set_gdbarch_get_siginfo_type (gdbarch, linux_get_siginfo_type);
 }
 
 /* Provide a prototype to silence -Wmissing-prototypes.  */
