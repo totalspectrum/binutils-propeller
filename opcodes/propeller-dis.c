@@ -668,7 +668,7 @@ const char *macroname[] = {
   "xmov",
 
   "addsp",
-  "???",
+  "ljmp",
   "fcache"
   "native"
 };
@@ -755,7 +755,7 @@ print_macro (bfd_vma memaddr, struct disassemble_info *info, int which)
       src = xmov_byte & 0xf;
       dst = (xmov_byte >> 4) & 0xf;
       print_opstring (info, "\t\txmov\t%d,%s", dst, src, 0);
-      if (read_byte (memaddr, &xmov_byte, info) != 0) return -1;
+      if (read_byte (memaddr+1, &xmov_byte, info) != 0) return -1;
       src = xmov_byte & 0xf;
       dst = (xmov_byte >> 4) & 0xf;
       print_opstring (info, "\tmov\t%d,%s", dst, src, 0);
@@ -811,6 +811,7 @@ do_compressed_insn (bfd_vma memaddr, struct disassemble_info *info)
   int opcode;
   int opprefix;
   int dst, src;
+  int xmov_dst = 0;
   int xmov_flag = 0;
   int xop;
   int xmov_byte;
@@ -836,7 +837,7 @@ do_compressed_insn (bfd_vma memaddr, struct disassemble_info *info)
     xmov_flag = 1;
     if (read_byte (memaddr, &xmov_byte, info) != 0) return -1;
     src = xmov_byte & 0xf;
-    dst = (xmov_byte >> 4) & 0xf;
+    xmov_dst = (xmov_byte >> 4) & 0xf;
     memaddr++;
     /* fall through */
   case PREFIX_REGREG:
@@ -844,7 +845,7 @@ do_compressed_insn (bfd_vma memaddr, struct disassemble_info *info)
   case PREFIX_REGIMM12:
     FPRINTF (F, "\t\t");
     if (xmov_flag)
-      print_opstring(info, "xmov\t%d, %s\t", dst, src, 0);
+      print_opstring(info, "xmov\t%d, %s\t", xmov_dst, src, 0);
 
     if (opprefix == PREFIX_REGIMM12) {
       if (read_halfword (memaddr, &src, info) != 0) return -1;
