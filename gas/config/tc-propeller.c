@@ -1754,6 +1754,10 @@ md_assemble (char *instruction_string)
             op3.error = _("Missing ','");
             break;
           }
+        if (!lmm)
+          {
+            as_bad (_("instruction only supported in LMM mode"));
+          }
         pc = malloc(3);
         if (pc == NULL)
           as_fatal (_("Virtual memory exhausted"));
@@ -1864,6 +1868,10 @@ md_assemble (char *instruction_string)
 	    }
             insn2_compressed = 1;
             size = 8;
+            if (!lmm)
+              {
+                as_bad (_("instruction only supported in LMM mode"));
+              }
           }
       }
       break;
@@ -1968,6 +1976,10 @@ md_assemble (char *instruction_string)
             size = 8;
             insn2_compressed = 1;  /* insn2 is not an instruction */
             free(arg);
+            if (!lmm)
+              {
+                as_bad (_("fcache only supported in LMM mode"));
+              }
           }
       }
       break;
@@ -2022,6 +2034,10 @@ md_assemble (char *instruction_string)
             free(arg);
 
             size = 8;
+            if (!lmm)
+              {
+                as_bad (_("pushm/popm only supported in LMM mode"));
+              }
           }
       }
       break;
@@ -2266,6 +2282,10 @@ md_assemble (char *instruction_string)
             str = parse_src_n(str, &insn2, 32);
             size = 8;
             free(arg);
+            if (!lmm)
+              {
+                as_bad (_("lcall only supported in LMM mode"));
+              }
           }
       }
       break;
@@ -2330,6 +2350,10 @@ md_assemble (char *instruction_string)
             free(arg);
             
             size = 8;
+            if (!lmm)
+              {
+                as_bad (_("lmvi only supported in LMM mode"));
+              }
           }
       }
       break;
