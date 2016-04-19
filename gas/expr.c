@@ -343,6 +343,10 @@ integer_constant (int radix, expressionS *expressionP)
       maxdig = 2;
       too_many_digits = valuesize + 1;
       break;
+    case 4:
+      maxdig = radix = 4;
+      too_many_digits = (valuesize + 1) / 2 + 1;
+      break;
     case 8:
       maxdig = radix = 8;
       too_many_digits = (valuesize + 2) / 3 + 1;
@@ -789,6 +793,14 @@ operand (expressionS *expressionP, enum expr_mode mode)
 
 #ifdef LITERAL_PREFIXPERCENT_BIN
     case '%':
+#ifdef TC_PROPELLER
+      if (*input_line_pointer == '%')
+        {
+          input_line_pointer++;
+          integer_constant (4, expressionP);
+        }
+      else
+#endif
       integer_constant (2, expressionP);
       break;
 #endif
