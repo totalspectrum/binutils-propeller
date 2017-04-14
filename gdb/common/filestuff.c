@@ -1,5 +1,5 @@
 /* Low-level file-handling.
-   Copyright (C) 2012-2015 Free Software Foundation, Inc.
+   Copyright (C) 2012-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -415,7 +415,7 @@ do_close_cleanup (void *arg)
   close (*fd);
 }
 
-/* See cleanup-utils.h.  */
+/* See filestuff.h.  */
 
 struct cleanup *
 make_cleanup_close (int fd)

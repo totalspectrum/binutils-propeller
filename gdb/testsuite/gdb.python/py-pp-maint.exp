@@ -1,4 +1,4 @@
-# Copyright (C) 2010-2015 Free Software Foundation, Inc.
+# Copyright (C) 2010-2017 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@ load_lib gdb-python.exp
 
 standard_testfile
 
-if {[prepare_for_testing $testfile.exp $testfile $srcfile debug]} {
+if {[prepare_for_testing "failed to prepare" $testfile $srcfile debug]} {
     return -1
 }
 
@@ -33,7 +33,7 @@ if {[prepare_for_testing $testfile.exp $testfile $srcfile debug]} {
 if { [skip_python_tests] } { continue }
 
 if ![runto_main ] then {
-    fail "Can't run to main"
+    fail "can't run to main"
     return -1
 }
 
@@ -43,7 +43,7 @@ gdb_test "continue" ".*Breakpoint.*"
 
 set python_file ${srcdir}/${subdir}/${testfile}.py
 
-gdb_test_no_output "python exec (open ('${python_file}').read ())" ""
+gdb_test_no_output "source ${python_file}" "load python file"
 
 gdb_test "info pretty-printer" \
     {.*function_lookup_test.*pp-test.*struct ss.*}
@@ -119,14 +119,23 @@ gdb_test "print flt" " = x=<42> y=<43>" \
 gdb_test "print ss" " = a=<a=<1> b=<$hex>> b=<a=<2> b=<$hex>>" \
     "print ss re-enabled"
 
-gdb_test "print (enum flag_enum) (FLAG_1)" \
-    " = 0x1 .FLAG_1." \
-    "print FLAG_1"
+gdb_test_exact "print (enum flag_enum) (FOO_1)" \
+    { = 0x1 [FOO_1]}
 
-gdb_test "print (enum flag_enum) (FLAG_1 | FLAG_3)" \
-    " = 0x5 .FLAG_1 | FLAG_3." \
-    "print FLAG_1 | FLAG_3"
+gdb_test_exact "print (enum flag_enum) (BAR_3)" \
+    { = 0x40 [BAR_3]}
 
-gdb_test "print (enum flag_enum) (4 + 8)" \
-    " = 0xc .FLAG_1 | <unknown: 0x8>." \
-    "print FLAG_1 | 8"
+gdb_test_exact "print (enum flag_enum) (BAR_2 | FOO_2)" \
+    { = 0x22 [FOO_2 | BAR_2]}
+
+gdb_test_exact "print (enum flag_enum) (FOO_1 | FOO_2 | FOO_3)" \
+    { = 0x7 [FOO_1 | FOO_2 | FOO_3]}
+
+gdb_test_exact "print (enum flag_enum) (FOO_MASK)" \
+    { = 0x7 [FOO_1 | FOO_2 | FOO_3]}
+
+gdb_test_exact "print (enum flag_enum) (FOO_MASK | (BAR_MASK & ~BAR_2))" \
+    { = 0x57 [FOO_1 | FOO_2 | FOO_3 | BAR_1 | BAR_3]}
+
+gdb_test_exact "print (enum flag_enum) (0x4 + 0x8)" \
+    { = 0xc [FOO_3 | <unknown: 0x8>]}

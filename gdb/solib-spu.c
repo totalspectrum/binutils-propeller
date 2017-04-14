@@ -1,5 +1,5 @@
 /* Cell SPU GNU/Linux support -- shared library handling.
-   Copyright (C) 2009-2015 Free Software Foundation, Inc.
+   Copyright (C) 2009-2017 Free Software Foundation, Inc.
 
    Contributed by Ulrich Weigand <uweigand@de.ibm.com>.
 
@@ -296,7 +296,7 @@ spu_bfd_iovec_pread (bfd *abfd, void *stream, void *buf,
   CORE_ADDR addr = *(CORE_ADDR *)stream;
   int ret;
 
-  ret = target_read_memory (addr + offset, buf, nbytes);
+  ret = target_read_memory (addr + offset, (gdb_byte *) buf, nbytes);
   if (ret != 0)
     {
       bfd_set_error (bfd_error_invalid_operation);
@@ -319,36 +319,32 @@ spu_bfd_iovec_stat (bfd *abfd, void *stream, struct stat *sb)
   return 0;
 }
 
-static bfd *
+static gdb_bfd_ref_ptr
 spu_bfd_fopen (char *name, CORE_ADDR addr)
 {
-  bfd *nbfd;
   CORE_ADDR *open_closure = XNEW (CORE_ADDR);
 
   *open_closure = addr;
 
-  nbfd = gdb_bfd_openr_iovec (name, "elf32-spu",
-			      spu_bfd_iovec_open, open_closure,
-			      spu_bfd_iovec_pread, spu_bfd_iovec_close,
-			      spu_bfd_iovec_stat);
-  if (!nbfd)
+  gdb_bfd_ref_ptr nbfd (gdb_bfd_openr_iovec (name, "elf32-spu",
+					     spu_bfd_iovec_open, open_closure,
+					     spu_bfd_iovec_pread,
+					     spu_bfd_iovec_close,
+					     spu_bfd_iovec_stat));
+  if (nbfd == NULL)
     return NULL;
 
-  if (!bfd_check_format (nbfd, bfd_object))
-    {
-      gdb_bfd_unref (nbfd);
-      return NULL;
-    }
+  if (!bfd_check_format (nbfd.get (), bfd_object))
+    return NULL;
 
   return nbfd;
 }
 
 /* Open shared library BFD.  */
-static bfd *
+static gdb_bfd_ref_ptr
 spu_bfd_open (char *pathname)
 {
   char *original_name = strrchr (pathname, '@');
-  bfd *abfd;
   asection *spu_name;
   unsigned long long addr;
   int fd;
@@ -362,22 +358,23 @@ spu_bfd_open (char *pathname)
     internal_error (__FILE__, __LINE__, "bad object ID");
 
   /* Open BFD representing SPE executable.  */
-  abfd = spu_bfd_fopen (original_name, (CORE_ADDR) addr);
-  if (!abfd)
+  gdb_bfd_ref_ptr abfd (spu_bfd_fopen (original_name, (CORE_ADDR) addr));
+  if (abfd == NULL)
     error (_("Cannot read SPE executable at %s"), original_name);
 
   /* Retrieve SPU name note.  */
-  spu_name = bfd_get_section_by_name (abfd, ".note.spu_name");
+  spu_name = bfd_get_section_by_name (abfd.get (), ".note.spu_name");
   if (spu_name)
     {
-      int sect_size = bfd_section_size (abfd, spu_name);
+      int sect_size = bfd_section_size (abfd.get (), spu_name);
 
       if (sect_size > 20)
 	{
 	  char *buf
 	    = (char *) alloca (sect_size - 20 + strlen (original_name) + 1);
 
-	  bfd_get_section_contents (abfd, spu_name, buf, 20, sect_size - 20);
+	  bfd_get_section_contents (abfd.get (), spu_name, buf, 20,
+				    sect_size - 20);
 	  buf[sect_size - 20] = '\0';
 
 	  strcat (buf, original_name);

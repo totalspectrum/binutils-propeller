@@ -1,4 +1,4 @@
-/* Copyright (C) 2008-2015 Free Software Foundation, Inc.
+/* Copyright (C) 2008-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -111,7 +111,7 @@ windows_get_tlb_type (struct gdbarch *gdbarch)
   static struct type *last_tlb_type = NULL;
   struct type *dword_ptr_type, *dword32_type, *void_ptr_type;
   struct type *peb_ldr_type, *peb_ldr_ptr_type;
-  struct type *peb_type, *peb_ptr_type, *list_type, *list_ptr_type;
+  struct type *peb_type, *peb_ptr_type, *list_type;
   struct type *module_list_ptr_type;
   struct type *tib_type, *seh_type, *tib_ptr_type, *seh_ptr_type;
 
@@ -129,9 +129,6 @@ windows_get_tlb_type (struct gdbarch *gdbarch)
 
   list_type = arch_composite_type (gdbarch, NULL, TYPE_CODE_STRUCT);
   TYPE_NAME (list_type) = xstrdup ("list");
-
-  list_ptr_type = arch_type (gdbarch, TYPE_CODE_PTR,
-			    TYPE_LENGTH (void_ptr_type), NULL);
 
   module_list_ptr_type = void_ptr_type;
 
@@ -361,31 +358,12 @@ display_one_tib (ptid_t ptid)
   return 1;  
 }
 
-/* Display thread information block of a thread specified by ARGS.
-   If ARGS is empty, display thread information block of current_thread
-   if current_thread is non NULL.
-   Otherwise ARGS is parsed and converted to a integer that should
-   be the windows ThreadID (not the internal GDB thread ID).  */
+/* Display thread information block of the current thread.  */
 
 static void
 display_tib (char * args, int from_tty)
 {
-  if (args)
-    {
-      struct thread_info *tp;
-      int gdb_id = value_as_long (parse_and_eval (args));
-
-      tp = find_thread_id (gdb_id);
-
-      if (!tp)
-	error (_("Thread ID %d not known."), gdb_id);
-
-      if (!target_thread_alive (tp->ptid))
-	error (_("Thread ID %d has terminated."), gdb_id);
-
-      display_one_tib (tp->ptid);
-    }
-  else if (!ptid_equal (inferior_ptid, null_ptid))
+  if (!ptid_equal (inferior_ptid, null_ptid))
     display_one_tib (inferior_ptid);
 }
 
@@ -394,7 +372,6 @@ windows_xfer_shared_library (const char* so_name, CORE_ADDR load_addr,
 			     struct gdbarch *gdbarch, struct obstack *obstack)
 {
   char *p;
-  struct bfd * dll;
   CORE_ADDR text_offset;
 
   obstack_grow_str (obstack, "<library name=\"");
@@ -402,12 +379,11 @@ windows_xfer_shared_library (const char* so_name, CORE_ADDR load_addr,
   obstack_grow_str (obstack, p);
   xfree (p);
   obstack_grow_str (obstack, "\"><segment address=\"");
-  dll = gdb_bfd_open (so_name, gnutarget, -1);
+  gdb_bfd_ref_ptr dll (gdb_bfd_open (so_name, gnutarget, -1));
   /* The following calls are OK even if dll is NULL.
      The default value 0x1000 is returned by pe_text_section_offset
      in that case.  */
-  text_offset = pe_text_section_offset (dll);
-  gdb_bfd_unref (dll);
+  text_offset = pe_text_section_offset (dll.get ());
   obstack_grow_str (obstack, paddress (gdbarch, load_addr + text_offset));
   obstack_grow_str (obstack, "\"/></library>");
 }
@@ -490,6 +466,9 @@ init_w32_command_list (void)
 void
 windows_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
+  set_gdbarch_wchar_bit (gdbarch, 16);
+  set_gdbarch_wchar_signed (gdbarch, 0);
+
   /* Canonical paths on this target look like
      `c:\Program Files\Foo App\mydll.dll', for example.  */
   set_gdbarch_has_dos_based_file_system (gdbarch, 1);

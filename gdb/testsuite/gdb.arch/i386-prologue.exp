@@ -1,4 +1,4 @@
-# Copyright (C) 2003-2015 Free Software Foundation, Inc.
+# Copyright (C) 2003-2017 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -28,7 +28,7 @@ if { ![is_x86_like_target] } then {
 
 set testfile "i386-prologue"
 set srcfile ${testfile}.c
-set binfile ${objdir}/${subdir}/${testfile}
+set binfile [standard_output_file ${testfile}]
 
 # some targets have leading underscores on assembly symbols.
 set additional_flags [gdb_target_symbol_prefix_flags]
@@ -36,7 +36,7 @@ set additional_flags [gdb_target_symbol_prefix_flags]
 # Don't use "debug", so that we don't have line information for the assembly
 # fragments.
 if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable [list $additional_flags]] != "" } {
-    untested i386-prologue.exp
+    untested "failed to compile"
     return -1
 }
 

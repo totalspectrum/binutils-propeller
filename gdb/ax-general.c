@@ -1,5 +1,5 @@
 /* Functions for manipulating expressions designed to be executed on the agent
-   Copyright (C) 1998-2015 Free Software Foundation, Inc.
+   Copyright (C) 1998-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -37,51 +37,29 @@ static void generic_ext (struct agent_expr *x, enum agent_op op, int n);
 
 /* Functions for building expressions.  */
 
-/* Allocate a new, empty agent expression.  */
-struct agent_expr *
-new_agent_expr (struct gdbarch *gdbarch, CORE_ADDR scope)
+agent_expr::agent_expr (struct gdbarch *gdbarch, CORE_ADDR scope)
 {
-  struct agent_expr *x = XNEW (struct agent_expr);
-
-  x->len = 0;
-  x->size = 1;			/* Change this to a larger value once
+  this->len = 0;
+  this->size = 1;		/* Change this to a larger value once
 				   reallocation code is tested.  */
-  x->buf = (unsigned char *) xmalloc (x->size);
+  this->buf = (unsigned char *) xmalloc (this->size);
 
-  x->gdbarch = gdbarch;
-  x->scope = scope;
+  this->gdbarch = gdbarch;
+  this->scope = scope;
 
   /* Bit vector for registers used.  */
-  x->reg_mask_len = 1;
-  x->reg_mask = XCNEWVEC (unsigned char, x->reg_mask_len);
+  this->reg_mask_len = 1;
+  this->reg_mask = XCNEWVEC (unsigned char, this->reg_mask_len);
 
-  x->tracing = 0;
-  x->trace_string = 0;
-
-  return x;
+  this->tracing = 0;
+  this->trace_string = 0;
 }
 
-/* Free a agent expression.  */
-void
-free_agent_expr (struct agent_expr *x)
+agent_expr::~agent_expr ()
 {
-  xfree (x->buf);
-  xfree (x->reg_mask);
-  xfree (x);
+  xfree (this->buf);
+  xfree (this->reg_mask);
 }
-
-static void
-do_free_agent_expr_cleanup (void *x)
-{
-  free_agent_expr ((struct agent_expr *) x);
-}
-
-struct cleanup *
-make_cleanup_free_agent_expr (struct agent_expr *x)
-{
-  return make_cleanup (do_free_agent_expr_cleanup, x);
-}
-
 
 /* Make sure that X has room for at least N more bytes.  This doesn't
    affect the length, just the allocated size.  */
@@ -133,13 +111,20 @@ read_const (struct agent_expr *x, int o, int n)
   return accum;
 }
 
+/* See ax.h.  */
+
+void
+ax_raw_byte (struct agent_expr *x, gdb_byte byte)
+{
+  grow_expr (x, 1);
+  x->buf[x->len++] = byte;
+}
 
 /* Append a simple operator OP to EXPR.  */
 void
 ax_simple (struct agent_expr *x, enum agent_op op)
 {
-  grow_expr (x, 1);
-  x->buf[x->len++] = op;
+  ax_raw_byte (x, op);
 }
 
 /* Append a pick operator to EXPR.  DEPTH is the stack item to pick,
@@ -301,6 +286,9 @@ ax_reg (struct agent_expr *x, int reg)
     }
   else
     {
+      /* Get the remote register number.  */
+      reg = gdbarch_remote_register_number (x->gdbarch, reg);
+
       /* Make sure the register number is in range.  */
       if (reg < 0 || reg > 0xffff)
         error (_("GDB bug: ax-general.c (ax_reg): "
@@ -449,7 +437,11 @@ ax_reg_mask (struct agent_expr *ax, int reg)
     }
   else
     {
-      int byte = reg / 8;
+      int byte;
+
+      /* Get the remote register number.  */
+      reg = gdbarch_remote_register_number (ax->gdbarch, reg);
+      byte = reg / 8;
 
       /* Grow the bit mask if necessary.  */
       if (byte >= ax->reg_mask_len)

@@ -1,6 +1,6 @@
 /* Process record and replay target for GDB, the GNU debugger.
 
-   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+   Copyright (C) 2008-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,6 +21,7 @@
 #define _RECORD_H_
 
 #include "target/waitstatus.h" /* For enum target_stop_reason.  */
+#include "common/enum-flags.h"
 
 struct cmd_list_element;
 
@@ -36,6 +37,19 @@ extern struct cmd_list_element *info_record_cmdlist;
 extern const struct frame_unwind record_btrace_frame_unwind;
 extern const struct frame_unwind record_btrace_tailcall_frame_unwind;
 
+/* A list of different recording methods.  */
+enum record_method
+{
+  /* No or unknown record method.  */
+  RECORD_METHOD_NONE,
+
+  /* Record method "full".  */
+  RECORD_METHOD_FULL,
+
+  /* Record method "btrace".  */
+  RECORD_METHOD_BTRACE
+};
+
 /* A list of flags specifying what record target methods should print.  */
 enum record_print_flag
 {
@@ -48,6 +62,7 @@ enum record_print_flag
   /* Indent based on call stack depth (if applicable).  */
   RECORD_PRINT_INDENT_CALLS = (1 << 2)
 };
+DEF_ENUM_FLAGS_TYPE (enum record_print_flag, record_print_flags);
 
 /* Determined whether the target is stopped at a software or hardware
    breakpoint, based on PC and the breakpoint tables.  The breakpoint
@@ -88,5 +103,13 @@ extern struct target_ops *find_record_target (void);
 /* This is to be called by record_stratum targets' open routine before
    it does anything.  */
 extern void record_preopen (void);
+
+/* Start recording with the given METHOD and FORMAT.  NULL means default method
+   or format.  Throw on failure or invalid method / format.  */
+extern void record_start (const char *method, const char *format,
+			  int from_tty);
+
+/* Stop recording.  Throw on failure.  */
+extern void record_stop (int from_tty);
 
 #endif /* _RECORD_H_ */

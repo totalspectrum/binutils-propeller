@@ -1,6 +1,6 @@
 /* Target-dependent code for Analog Devices Blackfin processor, for GDB.
 
-   Copyright (C) 2005-2015 Free Software Foundation, Inc.
+   Copyright (C) 2005-2017 Free Software Foundation, Inc.
 
    Contributed by Analog Devices, Inc.
 
@@ -241,6 +241,8 @@ static const int map_gcc_gdb[] =
   BFIN_LB1_REGNUM
 };
 
+/* Big enough to hold the size of the largest register in bytes.  */
+#define BFIN_MAX_REGISTER_SIZE	4
 
 struct bfin_frame_cache
 {
@@ -500,13 +502,9 @@ bfin_push_dummy_call (struct gdbarch *gdbarch,
 		      CORE_ADDR struct_addr)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
-  gdb_byte buf[4];
   int i;
   long reg_r0, reg_r1, reg_r2;
   int total_len = 0;
-  enum bfin_abi abi = bfin_abi (gdbarch);
-  CORE_ADDR func_addr = find_function_addr (function, NULL);
 
   for (i = nargs - 1; i >= 0; i--)
     {
@@ -531,7 +529,7 @@ bfin_push_dummy_call (struct gdbarch *gdbarch,
       int container_len = (TYPE_LENGTH (value_type) + 3) & ~3;
 
       sp -= container_len;
-      write_memory (sp, value_contents_writeable (args[i]), container_len);
+      write_memory (sp, value_contents (args[i]), container_len);
     }
 
   /* Initialize R0, R1, and R2 to the first 3 words of parameters.  */
@@ -566,34 +564,38 @@ bfin_push_dummy_call (struct gdbarch *gdbarch,
 static int
 bfin_reg_to_regnum (struct gdbarch *gdbarch, int reg)
 {
-  if (reg > ARRAY_SIZE (map_gcc_gdb))
-    return 0;
+  if (reg < 0 || reg >= ARRAY_SIZE (map_gcc_gdb))
+    return -1;
 
   return map_gcc_gdb[reg];
 }
 
-/* This function implements the 'breakpoint_from_pc' gdbarch method.
-   It returns a pointer to a string of bytes that encode a breakpoint
-   instruction, stores the length of the string to *lenptr, and
-   adjusts the program counter (if necessary) to point to the actual
-   memory location where the breakpoint should be inserted.  */
+/* Implement the breakpoint_kind_from_pc gdbarch method.  */
 
-static const unsigned char *
-bfin_breakpoint_from_pc (struct gdbarch *gdbarch,
-			 CORE_ADDR *pcptr, int *lenptr)
+static int
+bfin_breakpoint_kind_from_pc (struct gdbarch *gdbarch, CORE_ADDR *pcptr)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   unsigned short iw;
-  static unsigned char bfin_breakpoint[] = {0xa1, 0x00, 0x00, 0x00};
-  static unsigned char bfin_sim_breakpoint[] = {0x25, 0x00, 0x00, 0x00};
 
   iw = read_memory_unsigned_integer (*pcptr, 2, byte_order);
 
   if ((iw & 0xf000) >= 0xc000)
     /* 32-bit instruction.  */
-    *lenptr = 4;
+    return 4;
   else
-    *lenptr = 2;
+    return 2;
+}
+
+/* Implement the sw_breakpoint_from_kind gdbarch method.  */
+
+static const gdb_byte *
+bfin_sw_breakpoint_from_kind (struct gdbarch *gdbarch, int kind, int *size)
+{
+  static unsigned char bfin_breakpoint[] = {0xa1, 0x00, 0x00, 0x00};
+  static unsigned char bfin_sim_breakpoint[] = {0x25, 0x00, 0x00, 0x00};
+
+  *size = kind;
 
   if (strcmp (target_shortname, "sim") == 0)
     return bfin_sim_breakpoint;
@@ -689,7 +691,7 @@ static enum register_status
 bfin_pseudo_register_read (struct gdbarch *gdbarch, struct regcache *regcache,
 			   int regnum, gdb_byte *buffer)
 {
-  gdb_byte *buf = (gdb_byte *) alloca (MAX_REGISTER_SIZE);
+  gdb_byte buf[BFIN_MAX_REGISTER_SIZE];
   enum register_status status;
 
   if (regnum != BFIN_CC_REGNUM)
@@ -710,7 +712,7 @@ static void
 bfin_pseudo_register_write (struct gdbarch *gdbarch, struct regcache *regcache,
 			    int regnum, const gdb_byte *buffer)
 {
-  gdb_byte *buf = (gdb_byte *) alloca (MAX_REGISTER_SIZE);
+  gdb_byte buf[BFIN_MAX_REGISTER_SIZE];
 
   if (regnum != BFIN_CC_REGNUM)
     internal_error (__FILE__, __LINE__,
@@ -794,14 +796,7 @@ bfin_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
   struct gdbarch_tdep *tdep;
   struct gdbarch *gdbarch;
-  int elf_flags;
   enum bfin_abi abi;
-
-  /* Extract the ELF flags, if available.  */
-  if (info.abfd && bfd_get_flavour (info.abfd) == bfd_target_elf_flavour)
-    elf_flags = elf_elfheader (info.abfd)->e_flags;
-  else
-    elf_flags = 0;
 
   abi = BFIN_ABI_FLAT;
 
@@ -837,7 +832,8 @@ bfin_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_return_value (gdbarch, bfin_return_value);
   set_gdbarch_skip_prologue (gdbarch, bfin_skip_prologue);
   set_gdbarch_inner_than (gdbarch, core_addr_lessthan);
-  set_gdbarch_breakpoint_from_pc (gdbarch, bfin_breakpoint_from_pc);
+  set_gdbarch_breakpoint_kind_from_pc (gdbarch, bfin_breakpoint_kind_from_pc);
+  set_gdbarch_sw_breakpoint_from_kind (gdbarch, bfin_sw_breakpoint_from_kind);
   set_gdbarch_decr_pc_after_break (gdbarch, 2);
   set_gdbarch_frame_args_skip (gdbarch, 8);
   set_gdbarch_unwind_pc (gdbarch, bfin_unwind_pc);

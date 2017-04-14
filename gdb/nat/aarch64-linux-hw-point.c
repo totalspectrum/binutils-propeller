@@ -1,4 +1,4 @@
-/* Copyright (C) 2009-2015 Free Software Foundation, Inc.
+/* Copyright (C) 2009-2017 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GDB.
@@ -18,6 +18,7 @@
 
 #include "common-defs.h"
 #include "break-common.h"
+#include "common-regcache.h"
 #include "nat/linux-nat.h"
 #include "aarch64-linux-hw-point.h"
 
@@ -112,8 +113,23 @@ aarch64_point_encode_ctrl_reg (enum target_hw_bp_type type, int len)
 static int
 aarch64_point_is_aligned (int is_watchpoint, CORE_ADDR addr, int len)
 {
-  unsigned int alignment = is_watchpoint ? AARCH64_HWP_ALIGNMENT
-    : AARCH64_HBP_ALIGNMENT;
+  unsigned int alignment = 0;
+
+  if (is_watchpoint)
+    alignment = AARCH64_HWP_ALIGNMENT;
+  else
+    {
+      struct regcache *regcache
+	= get_thread_regcache_for_ptid (current_lwp_ptid ());
+
+      /* Set alignment to 2 only if the current process is 32-bit,
+	 since thumb instruction can be 2-byte aligned.  Otherwise, set
+	 alignment to AARCH64_HBP_ALIGNMENT.  */
+      if (regcache_register_size (regcache, 0) == 8)
+	alignment = AARCH64_HBP_ALIGNMENT;
+      else
+	alignment = 2;
+    }
 
   if (addr & (alignment - 1))
     return 0;
@@ -395,7 +411,6 @@ aarch64_dr_state_remove_one_point (struct aarch64_debug_reg_state *state,
 
   /* Set up state pointers.  */
   is_watchpoint = (type != hw_execute);
-  gdb_assert (aarch64_point_is_aligned (is_watchpoint, addr, len));
   if (is_watchpoint)
     {
       num_regs = aarch64_num_wp_regs;
@@ -444,13 +459,21 @@ aarch64_handle_breakpoint (enum target_hw_bp_type type, CORE_ADDR addr,
 			   int len, int is_insert,
 			   struct aarch64_debug_reg_state *state)
 {
-  /* The hardware breakpoint on AArch64 should always be 4-byte
-     aligned.  */
-  if (!aarch64_point_is_aligned (0 /* is_watchpoint */ , addr, len))
-    return -1;
-
   if (is_insert)
-    return aarch64_dr_state_insert_one_point (state, type, addr, len);
+    {
+      /* The hardware breakpoint on AArch64 should always be 4-byte
+	 aligned, but on AArch32, it can be 2-byte aligned.  Note that
+	 we only check the alignment on inserting breakpoint because
+	 aarch64_point_is_aligned needs the inferior_ptid inferior's
+	 regcache to decide whether the inferior is 32-bit or 64-bit.
+	 However when GDB follows the parent process and detach breakpoints
+	 from child process, inferior_ptid is the child ptid, but the
+	 child inferior doesn't exist in GDB's view yet.  */
+      if (!aarch64_point_is_aligned (0 /* is_watchpoint */ , addr, len))
+	return -1;
+
+      return aarch64_dr_state_insert_one_point (state, type, addr, len);
+    }
   else
     return aarch64_dr_state_remove_one_point (state, type, addr, len);
 }
@@ -545,8 +568,8 @@ aarch64_linux_set_debug_regs (const struct aarch64_debug_reg_state *state,
   ctrl = watchpoint ? state->dr_ctrl_wp : state->dr_ctrl_bp;
   if (count == 0)
     return;
-  iov.iov_len = (offsetof (struct user_hwdebug_state, dbg_regs[count - 1])
-		 + sizeof (regs.dbg_regs [count - 1]));
+  iov.iov_len = (offsetof (struct user_hwdebug_state, dbg_regs)
+		 + count * sizeof (regs.dbg_regs[0]));
 
   for (i = 0; i < count; i++)
     {
@@ -607,7 +630,9 @@ aarch64_linux_get_debug_reg_capacity (int tid)
 
   /* Get hardware watchpoint register info.  */
   if (ptrace (PTRACE_GETREGSET, tid, NT_ARM_HW_WATCH, &iov) == 0
-      && AARCH64_DEBUG_ARCH (dreg_state.dbg_info) == AARCH64_DEBUG_ARCH_V8)
+      && (AARCH64_DEBUG_ARCH (dreg_state.dbg_info) == AARCH64_DEBUG_ARCH_V8
+	  || AARCH64_DEBUG_ARCH (dreg_state.dbg_info) == AARCH64_DEBUG_ARCH_V8_1
+	  || AARCH64_DEBUG_ARCH (dreg_state.dbg_info) == AARCH64_DEBUG_ARCH_V8_2))
     {
       aarch64_num_wp_regs = AARCH64_DEBUG_NUM_SLOTS (dreg_state.dbg_info);
       if (aarch64_num_wp_regs > AARCH64_HWP_MAX_NUM)
@@ -627,7 +652,9 @@ aarch64_linux_get_debug_reg_capacity (int tid)
 
   /* Get hardware breakpoint register info.  */
   if (ptrace (PTRACE_GETREGSET, tid, NT_ARM_HW_BREAK, &iov) == 0
-      && AARCH64_DEBUG_ARCH (dreg_state.dbg_info) == AARCH64_DEBUG_ARCH_V8)
+      && (AARCH64_DEBUG_ARCH (dreg_state.dbg_info) == AARCH64_DEBUG_ARCH_V8
+	  || AARCH64_DEBUG_ARCH (dreg_state.dbg_info) == AARCH64_DEBUG_ARCH_V8_1
+	  || AARCH64_DEBUG_ARCH (dreg_state.dbg_info) == AARCH64_DEBUG_ARCH_V8_2))
     {
       aarch64_num_bp_regs = AARCH64_DEBUG_NUM_SLOTS (dreg_state.dbg_info);
       if (aarch64_num_bp_regs > AARCH64_HBP_MAX_NUM)

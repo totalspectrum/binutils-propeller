@@ -1,6 +1,6 @@
 /* Objective-C language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 2002-2015 Free Software Foundation, Inc.
+   Copyright (C) 2002-2017 Free Software Foundation, Inc.
 
    Contributed by Apple Computer, Inc.
    Written by Michael Snyder.
@@ -81,7 +81,7 @@ static const struct objfile_data *objc_objfile_data;
    suitably defined.  */
 
 struct symbol *
-lookup_struct_typedef (char *name, const struct block *block, int noerr)
+lookup_struct_typedef (const char *name, const struct block *block, int noerr)
 {
   struct symbol *sym;
 
@@ -106,7 +106,7 @@ lookup_struct_typedef (char *name, const struct block *block, int noerr)
 }
 
 CORE_ADDR 
-lookup_objc_class (struct gdbarch *gdbarch, char *classname)
+lookup_objc_class (struct gdbarch *gdbarch, const char *classname)
 {
   struct type *char_type = builtin_type (gdbarch)->builtin_char;
   struct value * function, *classval;
@@ -135,7 +135,7 @@ lookup_objc_class (struct gdbarch *gdbarch, char *classname)
 }
 
 CORE_ADDR
-lookup_child_selector (struct gdbarch *gdbarch, char *selname)
+lookup_child_selector (struct gdbarch *gdbarch, const char *selname)
 {
   struct type *char_type = builtin_type (gdbarch)->builtin_char;
   struct value * function, *selstring;
@@ -281,6 +281,15 @@ objc_demangle (const char *mangled, int options)
     return NULL;	/* Not an objc mangled name.  */
 }
 
+/* la_sniff_from_mangled_name for ObjC.  */
+
+static int
+objc_sniff_from_mangled_name (const char *mangled, char **demangled)
+{
+  *demangled = objc_demangle (mangled, 0);
+  return *demangled != NULL;
+}
+
 /* Determine if we are currently in the Objective-C dispatch function.
    If so, get the address of the method function that the dispatcher
    would call and use that as the function to step into instead.  Also
@@ -350,6 +359,11 @@ static const struct op_print objc_op_print_tab[] =
     {NULL, OP_NULL, PREC_NULL, 0}
 };
 
+static const char *objc_extensions[] =
+{
+  ".m", NULL
+};
+
 const struct language_defn objc_language_defn = {
   "objective-c",		/* Language name */
   "Objective-C",
@@ -358,9 +372,10 @@ const struct language_defn objc_language_defn = {
   case_sensitive_on,
   array_row_major,
   macro_expansion_c,
+  objc_extensions,
   &exp_descriptor_standard,
   c_parse,
-  c_error,
+  c_yyerror,
   null_post_parser,
   c_printchar,		       /* Print a character constant */
   c_printstr,		       /* Function to print string constant */
@@ -375,6 +390,7 @@ const struct language_defn objc_language_defn = {
   basic_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
   basic_lookup_transparent_type,/* lookup_transparent_type */
   objc_demangle,		/* Language specific symbol demangler */
+  objc_sniff_from_mangled_name,
   NULL,				/* Language specific
 				   class_name_from_physname */
   objc_op_print_tab,		/* Expression operators for printing */
@@ -1177,14 +1193,11 @@ print_object_command (char *args, int from_tty)
 "The 'print-object' command requires an argument (an Objective-C object)");
 
   {
-    struct expression *expr = parse_expression (args);
-    struct cleanup *old_chain = 
-      make_cleanup (free_current_contents, &expr);
+    expression_up expr = parse_expression (args);
     int pc = 0;
 
     object = evaluate_subexp (builtin_type (expr->gdbarch)->builtin_data_ptr,
-			      expr, &pc, EVAL_NORMAL);
-    do_cleanups (old_chain);
+			      expr.get (), &pc, EVAL_NORMAL);
   }
 
   /* Validate the address for sanity.  */
@@ -1220,7 +1233,7 @@ print_object_command (char *args, int from_tty)
  */
 
 struct objc_methcall {
-  char *name;
+  const char *name;
  /* Return instance method to be called.  */
   int (*stop_at) (CORE_ADDR, CORE_ADDR *);
   /* Start of pc range corresponding to method invocation.  */

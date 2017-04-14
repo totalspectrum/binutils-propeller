@@ -120,7 +120,6 @@ print_options (void)
   printf_filtered ("WITH_HOST_BYTE_ORDER     = %s\n", options_byte_order (WITH_HOST_BYTE_ORDER));
   printf_filtered ("WITH_TARGET_BYTE_ORDER   = %s\n", options_byte_order (WITH_TARGET_BYTE_ORDER));
   printf_filtered ("WITH_XOR_ENDIAN          = %d\n", WITH_XOR_ENDIAN);
-  printf_filtered ("WITH_BSWAP               = %d\n", WITH_BSWAP);
   printf_filtered ("WITH_SMP                 = %d\n", WITH_SMP);
   printf_filtered ("WITH_HOST_WORD_BITSIZE   = %d\n", WITH_HOST_WORD_BITSIZE);
   printf_filtered ("WITH_TARGET_WORD_BITSIZE = %d\n", WITH_TARGET_WORD_BITSIZE);
@@ -138,8 +137,6 @@ print_options (void)
   printf_filtered ("WITH_MODEL_ISSUE         = %d\n", WITH_MODEL_ISSUE);
   printf_filtered ("WITH_RESERVED_BITS       = %d\n", WITH_RESERVED_BITS);
   printf_filtered ("WITH_STDIO               = %d\n", WITH_STDIO);
-  printf_filtered ("WITH_REGPARM             = %d\n", WITH_REGPARM);
-  printf_filtered ("WITH_STDCALL             = %d\n", WITH_STDCALL);
   printf_filtered ("DEFAULT_INLINE           = %s\n", options_inline (DEFAULT_INLINE));
   printf_filtered ("SIM_ENDIAN_INLINE        = %s\n", options_inline (SIM_ENDIAN_INLINE));
   printf_filtered ("BITS_INLINE              = %s\n", options_inline (BITS_INLINE));
@@ -219,7 +216,7 @@ print_options (void)
     int max_len = 0;
     int cols;
 
-    for (i = 0; i < sizeof (defines) / sizeof (defines[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE (defines); i++) {
       int len = strlen (defines[i]);
       if (len > max_len)
 	max_len = len;
@@ -230,10 +227,10 @@ print_options (void)
       cols = 1;
 
     printf_filtered ("\n#defines:");
-    for (i = 0; i < sizeof (defines) / sizeof (defines[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE (defines); i++) {
       const char *const prefix = ((i % cols) == 0) ? "\n" : "";
       printf_filtered ("%s  %s%*s", prefix, defines[i],
-		       (((i == (sizeof (defines) / sizeof (defines[0])) - 1)
+		       (((i == ARRAY_SIZE (defines) - 1)
 			 || (((i + 1) % cols) == 0))
 			? 0
 			: max_len + 4 - strlen (defines[i])),

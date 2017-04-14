@@ -1,7 +1,7 @@
 /* Target-dependent code for the IQ2000 architecture, for GDB, the GNU
    Debugger.
 
-   Copyright (C) 2000-2015 Free Software Foundation, Inc.
+   Copyright (C) 2000-2017 Free Software Foundation, Inc.
 
    Contributed by Red Hat.
 
@@ -206,8 +206,6 @@ iq2000_scan_prologue (struct gdbarch *gdbarch,
   struct symtab_and_line sal;
   CORE_ADDR pc;
   CORE_ADDR loop_end;
-  int found_store_lr = 0;
-  int found_decr_sp = 0;
   int srcreg;
   int tgtreg;
   signed short offset;
@@ -250,8 +248,6 @@ iq2000_scan_prologue (struct gdbarch *gdbarch,
 	  if (tgtreg >= 0 && tgtreg < E_NUM_REGS)
 	    cache->saved_regs[tgtreg] = -((signed short) (insn & 0xffff));
 
-	  if (tgtreg == E_LR_REGNUM)
-	    found_store_lr = 1;
 	  continue;
 	}
 
@@ -259,7 +255,6 @@ iq2000_scan_prologue (struct gdbarch *gdbarch,
 	{
 	  /* addi %1, %1, -N == addi %sp, %sp, -N */
 	  /* LEGACY -- from assembly-only port.  */
-	  found_decr_sp = 1;
 	  cache->framesize = -((signed short) (insn & 0xffff));
 	  continue;
 	}
@@ -474,18 +469,23 @@ static const struct frame_base iq2000_frame_base = {
   iq2000_frame_base_address
 };
 
-static const unsigned char *
-iq2000_breakpoint_from_pc (struct gdbarch *gdbarch, CORE_ADDR *pcptr,
-			   int *lenptr)
+static int
+iq2000_breakpoint_kind_from_pc (struct gdbarch *gdbarch, CORE_ADDR *pcptr)
 {
-  static const unsigned char big_breakpoint[] = { 0x00, 0x00, 0x00, 0x0d };
-  static const unsigned char little_breakpoint[] = { 0x0d, 0x00, 0x00, 0x00 };
-
   if ((*pcptr & 3) != 0)
     error (_("breakpoint_from_pc: invalid breakpoint address 0x%lx"),
 	   (long) *pcptr);
 
-  *lenptr = 4;
+  return 4;
+}
+
+static const gdb_byte *
+iq2000_sw_breakpoint_from_kind (struct gdbarch *gdbarch, int kind, int *size)
+{
+  static const unsigned char big_breakpoint[] = { 0x00, 0x00, 0x00, 0x0d };
+  static const unsigned char little_breakpoint[] = { 0x0d, 0x00, 0x00, 0x00 };
+  *size = kind;
+
   return (gdbarch_byte_order (gdbarch)
 	  == BFD_ENDIAN_BIG) ? big_breakpoint : little_breakpoint;
 }
@@ -537,7 +537,7 @@ iq2000_use_struct_convention (struct type *type)
 
 static void
 iq2000_extract_return_value (struct type *type, struct regcache *regcache,
-			     void *valbuf)
+			     gdb_byte *valbuf)
 {
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -564,7 +564,7 @@ iq2000_extract_return_value (struct type *type, struct regcache *regcache,
 	  regcache_cooked_read_unsigned (regcache, regno++, &tmp);
 	  store_unsigned_integer (valbuf, size, byte_order, tmp);
 	  len -= size;
-	  valbuf = ((char *) valbuf) + size;
+	  valbuf += size;
 	}
     }
   else
@@ -831,7 +831,10 @@ iq2000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_double_format        (gdbarch, floatformats_ieee_double);
   set_gdbarch_long_double_format   (gdbarch, floatformats_ieee_double);
   set_gdbarch_return_value	   (gdbarch, iq2000_return_value);
-  set_gdbarch_breakpoint_from_pc   (gdbarch, iq2000_breakpoint_from_pc);
+  set_gdbarch_breakpoint_kind_from_pc (gdbarch,
+				       iq2000_breakpoint_kind_from_pc);
+  set_gdbarch_sw_breakpoint_from_kind (gdbarch,
+				       iq2000_sw_breakpoint_from_kind);
   set_gdbarch_frame_args_skip      (gdbarch, 0);
   set_gdbarch_skip_prologue        (gdbarch, iq2000_skip_prologue);
   set_gdbarch_inner_than           (gdbarch, core_addr_lessthan);

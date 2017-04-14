@@ -1,6 +1,6 @@
 /* This testcase is part of GDB, the GNU debugger.
 
-   Copyright 2011-2015 Free Software Foundation, Inc.
+   Copyright 2011-2017 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,39 +15,20 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifdef SYMBOL_PREFIX
-#define SYMBOL(str)     SYMBOL_PREFIX #str
-#else
-#define SYMBOL(str)     #str
-#endif
+#include "trace-common.h"
+#include <inttypes.h>
 
-int globvar;
+int64_t globvar;
 
 static void
 begin (void)
 {
 }
 
-/* Called from asm.  */
-static void __attribute__((used))
-func (void)
-{
-}
-
 static void
-marker (int anarg)
+marker (int8_t arg8, int16_t arg16, int32_t arg32, int64_t arg64)
 {
-  /* `set_point' is the label at which to set a fast tracepoint.  The
-     insn at the label must be large enough to fit a fast tracepoint
-     jump.  */
-  asm ("    .global " SYMBOL (set_point) "\n"
-       SYMBOL (set_point) ":\n"
-#if (defined __x86_64__ || defined __i386__)
-       "    call " SYMBOL (func) "\n"
-#elif (defined __aarch64__)
-       "    nop\n"
-#endif
-       );
+  FAST_TRACEPOINT_LABEL(set_point);
 }
 
 static void
@@ -61,7 +42,8 @@ main ()
   begin ();
 
   for (globvar = 1; globvar < 11; ++globvar)
-    marker (globvar * 100);
+    marker (globvar, globvar + (1 << 8), globvar + (1 << 16),
+	    globvar + (1LL << 32));
 
   end ();
   return 0;

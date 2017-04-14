@@ -65,6 +65,9 @@
 /* Define to the default OS ABI for this configuration. */
 #undef GDB_OSABI_DEFAULT
 
+/* Define if self-testing features should be enabled */
+#undef GDB_SELF_TEST
+
 /* Define to 1 if you have `alloca', as a function or macro. */
 #undef HAVE_ALLOCA
 
@@ -80,6 +83,9 @@
 
 /* Define to 1 if you have the <curses.h> header file. */
 #undef HAVE_CURSES_H
+
+/* define if the compiler supports basic C++11 syntax */
+#undef HAVE_CXX11
 
 /* Define to 1 if you have the declaration of `ADDR_NO_RANDOMIZE', and to 0 if
    you don't. */
@@ -450,6 +456,12 @@
 /* Define to 1 if your system has struct lwp. */
 #undef HAVE_STRUCT_LWP
 
+/* Define to 1 if `struct ptrace_lwpinfo' is a member of `pl_syscall_code'. */
+#undef HAVE_STRUCT_PTRACE_LWPINFO_PL_SYSCALL_CODE
+
+/* Define to 1 if `struct ptrace_lwpinfo' is a member of `pl_tdname'. */
+#undef HAVE_STRUCT_PTRACE_LWPINFO_PL_TDNAME
+
 /* Define to 1 if your system has struct reg in <machine/reg.h>. */
 #undef HAVE_STRUCT_REG
 
@@ -548,9 +560,6 @@
 
 /* Define if using Solaris thread debugging. */
 #undef HAVE_THREAD_DB_LIB
-
-/* Define if you support the tkill syscall. */
-#undef HAVE_TKILL_SYSCALL
 
 /* Define to 1 if you have the `ttrace' function. */
 #undef HAVE_TTRACE
@@ -761,6 +770,9 @@
    when building for Cygwin. */
 #undef USE_WIN32API
 
+/* Define if the PPC simulator is being linked in. */
+#undef WITH_PPC_SIM
+
 /* Define if --with-python provides a path, either directly or via
    python-config.py --exec-prefix. */
 #undef WITH_PYTHON_PATH
@@ -782,10 +794,6 @@
 
 /* Number of bits in a file offset, on hosts where this is settable. */
 #undef _FILE_OFFSET_BITS
-
-/* Define to 1 so <sys/proc.h> gets a definition of anon_hdl. Works around a
-   <sys/proc.h> problem on IRIX 5. */
-#undef _KMEMUSER
 
 /* Define for large files, on AIX-style hosts. */
 #undef _LARGE_FILES

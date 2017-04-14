@@ -1,6 +1,6 @@
 /* Python interface to symbol tables.
 
-   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+   Copyright (C) 2008-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,6 +24,7 @@
 #include "python-internal.h"
 #include "objfiles.h"
 #include "block.h"
+#include "py-ref.h"
 
 typedef struct stpy_symtab_object {
   PyObject_HEAD
@@ -108,8 +109,7 @@ stpy_get_filename (PyObject *self, void *closure)
   STPY_REQUIRE_VALID (self, symtab);
   filename = symtab_to_filename_for_display (symtab);
 
-  str_obj = PyString_Decode (filename, strlen (filename),
-			     host_charset (), NULL);
+  str_obj = host_string_to_python_string (filename);
   return str_obj;
 }
 
@@ -140,8 +140,7 @@ stpy_get_producer (PyObject *self, void *closure)
     {
       const char *producer = COMPUNIT_PRODUCER (cust);
 
-      return PyString_Decode (producer, strlen (producer),
-			      host_charset (), NULL);
+      return host_string_to_python_string (producer);
     }
 
   Py_RETURN_NONE;
@@ -157,7 +156,7 @@ stpy_fullname (PyObject *self, PyObject *args)
 
   fullname = symtab_to_fullname (symtab);
 
-  return PyString_Decode (fullname, strlen (fullname), host_charset (), NULL);
+  return host_string_to_python_string (fullname);
 }
 
 /* Implementation of gdb.Symtab.is_valid (self) -> Boolean.
@@ -438,20 +437,14 @@ symtab_to_symtab_object (struct symtab *symtab)
 PyObject *
 symtab_and_line_to_sal_object (struct symtab_and_line sal)
 {
-  sal_object *sal_obj;
-  int success = 0;
-
-  sal_obj = PyObject_New (sal_object, &sal_object_type);
-  if (sal_obj)
+  gdbpy_ref<sal_object> sal_obj (PyObject_New (sal_object, &sal_object_type));
+  if (sal_obj != NULL)
     {
-      if (set_sal (sal_obj, sal) < 0)
-	{
-	  Py_DECREF (sal_obj);
-	  return NULL;
-	}
+      if (set_sal (sal_obj.get (), sal) < 0)
+	return NULL;
     }
 
-  return (PyObject *) sal_obj;
+  return (PyObject *) sal_obj.release ();
 }
 
 /* Return struct symtab_and_line reference that is wrapped by this
@@ -551,7 +544,7 @@ gdbpy_initialize_symtabs (void)
 
 
 
-static PyGetSetDef symtab_object_getset[] = {
+static gdb_PyGetSetDef symtab_object_getset[] = {
   { "filename", stpy_get_filename, NULL,
     "The symbol table's source filename.", NULL },
   { "objfile", stpy_get_objfile, NULL, "The symtab's objfile.",
@@ -613,7 +606,7 @@ PyTypeObject symtab_object_type = {
   symtab_object_getset		  /*tp_getset */
 };
 
-static PyGetSetDef sal_object_getset[] = {
+static gdb_PyGetSetDef sal_object_getset[] = {
   { "symtab", salpy_get_symtab, NULL, "Symtab object.", NULL },
   { "pc", salpy_get_pc, NULL, "Return the symtab_and_line's pc.", NULL },
   { "last", salpy_get_last, NULL,

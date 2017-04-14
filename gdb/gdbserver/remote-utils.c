@@ -1,5 +1,5 @@
 /* Remote utility routines for the remote server for GDB.
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "server.h"
-#include "terminal.h"
+#include "gdb_termios.h"
 #include "target.h"
 #include "gdbthread.h"
 #include "tdesc.h"
@@ -217,9 +217,9 @@ handle_accept_event (int err, gdb_client_data client_data)
    NAME is the filename used for communication.  */
 
 void
-remote_prepare (char *name)
+remote_prepare (const char *name)
 {
-  char *port_str;
+  const char *port_str;
 #ifdef USE_WIN32API
   static int winsock_initialized;
 #endif
@@ -284,9 +284,9 @@ remote_prepare (char *name)
    NAME is the filename used for communication.  */
 
 void
-remote_open (char *name)
+remote_open (const char *name)
 {
-  char *port_str;
+  const char *port_str;
 
   port_str = strchr (name, ':');
 #ifdef USE_WIN32API
@@ -401,6 +401,11 @@ void
 remote_close (void)
 {
   delete_file_handler (remote_desc);
+
+#ifndef USE_WIN32API
+  /* Remove SIGIO handler.  */
+  signal (SIGIO, SIG_IGN);
+#endif
 
 #ifdef USE_WIN32API
   closesocket (remote_desc);
@@ -526,7 +531,7 @@ write_ptid (char *buf, ptid_t ptid)
   return buf;
 }
 
-ULONGEST
+static ULONGEST
 hex_or_minus_one (char *buf, char **obuf)
 {
   ULONGEST ret;
@@ -659,18 +664,18 @@ putpkt_binary_1 (char *buf, int cnt, int is_notif)
 	  if (remote_debug)
 	    {
 	      if (is_notif)
-		fprintf (stderr, "putpkt (\"%s\"); [notif]\n", buf2);
+		debug_printf ("putpkt (\"%s\"); [notif]\n", buf2);
 	      else
-		fprintf (stderr, "putpkt (\"%s\"); [noack mode]\n", buf2);
-	      fflush (stderr);
+		debug_printf ("putpkt (\"%s\"); [noack mode]\n", buf2);
+	      debug_flush ();
 	    }
 	  break;
 	}
 
       if (remote_debug)
 	{
-	  fprintf (stderr, "putpkt (\"%s\"); [looking for ack]\n", buf2);
-	  fflush (stderr);
+	  debug_printf ("putpkt (\"%s\"); [looking for ack]\n", buf2);
+	  debug_flush ();
 	}
 
       cc = readchar ();
@@ -683,8 +688,8 @@ putpkt_binary_1 (char *buf, int cnt, int is_notif)
 
       if (remote_debug)
 	{
-	  fprintf (stderr, "[received '%c' (0x%x)]\n", cc, cc);
-	  fflush (stderr);
+	  debug_printf ("[received '%c' (0x%x)]\n", cc, cc);
+	  debug_flush ();
 	}
 
       /* Check for an input interrupt while we're here.  */
@@ -775,19 +780,19 @@ check_remote_input_interrupt_request (void)
   input_interrupt (0);
 }
 
-/* Asynchronous I/O support.  SIGIO must be enabled when waiting, in order to
-   accept Control-C from the client, and must be disabled when talking to
-   the client.  */
+/* Asynchronous I/O support.  SIGIO must be unblocked when waiting,
+   in order to accept Control-C from the client, and must be blocked
+   when talking to the client.  */
 
 static void
-unblock_async_io (void)
+block_unblock_async_io (int block)
 {
 #ifndef USE_WIN32API
   sigset_t sigio_set;
 
   sigemptyset (&sigio_set);
   sigaddset (&sigio_set, SIGIO);
-  sigprocmask (SIG_UNBLOCK, &sigio_set, NULL);
+  sigprocmask (block ? SIG_BLOCK : SIG_UNBLOCK, &sigio_set, NULL);
 #endif
 }
 
@@ -823,9 +828,8 @@ enable_async_io (void)
   if (async_io_enabled)
     return;
 
-#ifndef USE_WIN32API
-  signal (SIGIO, input_interrupt);
-#endif
+  block_unblock_async_io (0);
+
   async_io_enabled = 1;
 #ifdef __QNX__
   nto_comctrl (1);
@@ -839,9 +843,8 @@ disable_async_io (void)
   if (!async_io_enabled)
     return;
 
-#ifndef USE_WIN32API
-  signal (SIGIO, SIG_IGN);
-#endif
+  block_unblock_async_io (1);
+
   async_io_enabled = 0;
 #ifdef __QNX__
   nto_comctrl (0);
@@ -852,12 +855,14 @@ disable_async_io (void)
 void
 initialize_async_io (void)
 {
-  /* Make sure that async I/O starts disabled.  */
+  /* Make sure that async I/O starts blocked.  */
   async_io_enabled = 1;
   disable_async_io ();
 
-  /* Make sure the signal is unblocked.  */
-  unblock_async_io ();
+  /* Install the signal handler.  */
+#ifndef USE_WIN32API
+  signal (SIGIO, input_interrupt);
+#endif
 }
 
 /* Internal buffer used by readchar.
@@ -882,7 +887,10 @@ readchar (void)
       if (readchar_bufcnt <= 0)
 	{
 	  if (readchar_bufcnt == 0)
-	    fprintf (stderr, "readchar: Got EOF\n");
+	    {
+	      if (remote_debug)
+		debug_printf ("readchar: Got EOF\n");
+	    }
 	  else
 	    perror ("readchar");
 
@@ -956,12 +964,21 @@ getpkt (char *buf)
       while (1)
 	{
 	  c = readchar ();
+
+	  /* The '\003' may appear before or after each packet, so
+	     check for an input interrupt.  */
+	  if (c == '\003')
+	    {
+	      (*the_target->request_interrupt) ();
+	      continue;
+	    }
+
 	  if (c == '$')
 	    break;
 	  if (remote_debug)
 	    {
-	      fprintf (stderr, "[getpkt: discarding char '%c']\n", c);
-	      fflush (stderr);
+	      debug_printf ("[getpkt: discarding char '%c']\n", c);
+	      debug_flush ();
 	    }
 
 	  if (c < 0)
@@ -1007,8 +1024,8 @@ getpkt (char *buf)
     {
       if (remote_debug)
 	{
-	  fprintf (stderr, "getpkt (\"%s\");  [sending ack] \n", buf);
-	  fflush (stderr);
+	  debug_printf ("getpkt (\"%s\");  [sending ack] \n", buf);
+	  debug_flush ();
 	}
 
       if (write_prim ("+", 1) != 1)
@@ -1016,17 +1033,33 @@ getpkt (char *buf)
 
       if (remote_debug)
 	{
-	  fprintf (stderr, "[sent ack]\n");
-	  fflush (stderr);
+	  debug_printf ("[sent ack]\n");
+	  debug_flush ();
 	}
     }
   else
     {
       if (remote_debug)
 	{
-	  fprintf (stderr, "getpkt (\"%s\");  [no ack sent] \n", buf);
-	  fflush (stderr);
+	  debug_printf ("getpkt (\"%s\");  [no ack sent] \n", buf);
+	  debug_flush ();
 	}
+    }
+
+  /* The readchar above may have already read a '\003' out of the socket
+     and moved it to the local buffer.  For example, when GDB sends
+     vCont;c immediately followed by interrupt (see
+     gdb.base/interrupt-noterm.exp).  As soon as we see the vCont;c, we'll
+     resume the inferior and wait.  Since we've already moved the '\003'
+     to the local buffer, SIGIO won't help.  In that case, if we don't
+     check for interrupt after the vCont;c packet, the interrupt character
+     would stay in the buffer unattended until after the next (unrelated)
+     stop.  */
+  while (readchar_bufcnt > 0 && *readchar_bufp == '\003')
+    {
+      /* Consume the interrupt character in the buffer.  */
+      readchar ();
+      (*the_target->request_interrupt) ();
     }
 
   return bp - buf;
@@ -1072,39 +1105,6 @@ outreg (struct regcache *regcache, int regno, char *buf)
 }
 
 void
-new_thread_notify (int id)
-{
-  char own_buf[256];
-
-  /* The `n' response is not yet part of the remote protocol.  Do nothing.  */
-  if (1)
-    return;
-
-  if (server_waiting == 0)
-    return;
-
-  sprintf (own_buf, "n%x", id);
-  disable_async_io ();
-  putpkt (own_buf);
-  enable_async_io ();
-}
-
-void
-dead_thread_notify (int id)
-{
-  char own_buf[256];
-
-  /* The `x' response is not yet part of the remote protocol.  Do nothing.  */
-  if (1)
-    return;
-
-  sprintf (own_buf, "x%x", id);
-  disable_async_io ();
-  putpkt (own_buf);
-  enable_async_io ();
-}
-
-void
 prepare_resume_reply (char *buf, ptid_t ptid,
 		      struct target_waitstatus *status)
 {
@@ -1119,6 +1119,9 @@ prepare_resume_reply (char *buf, ptid_t ptid,
     case TARGET_WAITKIND_VFORKED:
     case TARGET_WAITKIND_VFORK_DONE:
     case TARGET_WAITKIND_EXECD:
+    case TARGET_WAITKIND_THREAD_CREATED:
+    case TARGET_WAITKIND_SYSCALL_ENTRY:
+    case TARGET_WAITKIND_SYSCALL_RETURN:
       {
 	struct thread_info *saved_thread;
 	const char **regp;
@@ -1160,6 +1163,23 @@ prepare_resume_reply (char *buf, ptid_t ptid,
 	    xfree (status->value.execd_pathname);
 	    status->value.execd_pathname = NULL;
 	    buf += strlen (buf);
+	  }
+	else if (status->kind == TARGET_WAITKIND_THREAD_CREATED
+		 && report_thread_events)
+	  {
+	    enum gdb_signal signal = GDB_SIGNAL_TRAP;
+
+	    sprintf (buf, "T%02xcreate:;", signal);
+	  }
+	else if (status->kind == TARGET_WAITKIND_SYSCALL_ENTRY
+		 || status->kind == TARGET_WAITKIND_SYSCALL_RETURN)
+	  {
+	    enum gdb_signal signal = GDB_SIGNAL_TRAP;
+	    const char *event = (status->kind == TARGET_WAITKIND_SYSCALL_ENTRY
+				 ? "syscall_entry" : "syscall_return");
+
+	    sprintf (buf, "T%02x%s:%x;", signal, event,
+		     status->value.syscall_number);
 	  }
 	else
 	  sprintf (buf, "T%02x", status->value.sig);
@@ -1275,6 +1295,14 @@ prepare_resume_reply (char *buf, ptid_t ptid,
 		 status->value.sig, ptid_get_pid (ptid));
       else
 	sprintf (buf, "X%02x", status->value.sig);
+      break;
+    case TARGET_WAITKIND_THREAD_EXITED:
+      sprintf (buf, "w%x;", status->value.integer);
+      buf += strlen (buf);
+      buf = write_ptid (buf, ptid);
+      break;
+    case TARGET_WAITKIND_NO_RESUMED:
+      sprintf (buf, "N");
       break;
     default:
       error ("unhandled waitkind");
@@ -1434,7 +1462,7 @@ clear_symbol_cache (struct sym_cache **symcache_p)
 int
 look_up_one_symbol (const char *name, CORE_ADDR *addrp, int may_ask_gdb)
 {
-  char own_buf[266], *p, *q;
+  char *p, *q;
   int len;
   struct sym_cache *sym;
   struct process_info *proc;
@@ -1469,23 +1497,37 @@ look_up_one_symbol (const char *name, CORE_ADDR *addrp, int may_ask_gdb)
   /* We ought to handle pretty much any packet at this point while we
      wait for the qSymbol "response".  That requires re-entering the
      main loop.  For now, this is an adequate approximation; allow
-     GDB to read from memory while it figures out the address of the
-     symbol.  */
-  while (own_buf[0] == 'm')
+     GDB to read from memory and handle 'v' packets (for vFile transfers)
+     while it figures out the address of the symbol.  */
+  while (1)
     {
-      CORE_ADDR mem_addr;
-      unsigned char *mem_buf;
-      unsigned int mem_len;
+      if (own_buf[0] == 'm')
+	{
+	  CORE_ADDR mem_addr;
+	  unsigned char *mem_buf;
+	  unsigned int mem_len;
 
-      decode_m_packet (&own_buf[1], &mem_addr, &mem_len);
-      mem_buf = (unsigned char *) xmalloc (mem_len);
-      if (read_inferior_memory (mem_addr, mem_buf, mem_len) == 0)
-	bin2hex (mem_buf, own_buf, mem_len);
+	  decode_m_packet (&own_buf[1], &mem_addr, &mem_len);
+	  mem_buf = (unsigned char *) xmalloc (mem_len);
+	  if (read_inferior_memory (mem_addr, mem_buf, mem_len) == 0)
+	    bin2hex (mem_buf, own_buf, mem_len);
+	  else
+	    write_enn (own_buf);
+	  free (mem_buf);
+	  if (putpkt (own_buf) < 0)
+	    return -1;
+	}
+      else if (own_buf[0] == 'v')
+	{
+	  int new_len = -1;
+	  handle_v_requests (own_buf, len, &new_len);
+	  if (new_len != -1)
+	    putpkt_binary (own_buf, new_len);
+	  else
+	    putpkt (own_buf);
+	}
       else
-	write_enn (own_buf);
-      free (mem_buf);
-      if (putpkt (own_buf) < 0)
-	return -1;
+	break;
       len = getpkt (own_buf);
       if (len < 0)
 	return -1;
@@ -1533,12 +1575,10 @@ look_up_one_symbol (const char *name, CORE_ADDR *addrp, int may_ask_gdb)
 int
 relocate_instruction (CORE_ADDR *to, CORE_ADDR oldloc)
 {
-  char own_buf[266];
   int len;
   ULONGEST written = 0;
 
   /* Send the request.  */
-  strcpy (own_buf, "qRelocInsn:");
   sprintf (own_buf, "qRelocInsn:%s;%s", paddress (oldloc),
 	   paddress (*to));
   if (putpkt (own_buf) < 0)

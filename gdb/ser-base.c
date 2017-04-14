@@ -1,6 +1,6 @@
 /* Generic serial interface functions.
 
-   Copyright (C) 1992-2015 Free Software Foundation, Inc.
+   Copyright (C) 1992-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -164,7 +164,13 @@ fd_event (int error, void *context)
          pull characters out of the buffer.  See also
          generic_readchar().  */
       int nr;
-      nr = scb->ops->read_prim (scb, BUFSIZ);
+
+      do
+	{
+	  nr = scb->ops->read_prim (scb, BUFSIZ);
+	}
+      while (nr < 0 && errno == EINTR);
+
       if (nr == 0)
 	{
 	  scb->bufcnt = SERIAL_EOF;
@@ -199,6 +205,11 @@ push_event (void *context)
 /* Wait for input on scb, with timeout seconds.  Returns 0 on success,
    otherwise SERIAL_TIMEOUT or SERIAL_ERROR.  */
 
+/* NOTE: Some of the code below is dead.  The only possible values of
+   the TIMEOUT parameter are ONE and ZERO.  OTOH, we should probably
+   get rid of the deprecated_ui_loop_hook call in do_ser_base_readchar
+   instead and support infinite time outs here.  */
+
 static int
 ser_base_wait_for (struct serial *scb, int timeout)
 {
@@ -207,6 +218,7 @@ ser_base_wait_for (struct serial *scb, int timeout)
       int numfds;
       struct timeval tv;
       fd_set readfds, exceptfds;
+      int nfds;
 
       /* NOTE: Some OS's can scramble the READFDS when the select()
          call fails (ex the kernel with Red Hat 5.2).  Initialize all
@@ -220,10 +232,13 @@ ser_base_wait_for (struct serial *scb, int timeout)
       FD_SET (scb->fd, &readfds);
       FD_SET (scb->fd, &exceptfds);
 
+      QUIT;
+
+      nfds = scb->fd + 1;
       if (timeout >= 0)
-	numfds = gdb_select (scb->fd + 1, &readfds, 0, &exceptfds, &tv);
+	numfds = interruptible_select (nfds, &readfds, 0, &exceptfds, &tv);
       else
-	numfds = gdb_select (scb->fd + 1, &readfds, 0, &exceptfds, 0);
+	numfds = interruptible_select (nfds, &readfds, 0, &exceptfds, 0);
 
       if (numfds <= 0)
 	{
@@ -298,10 +313,11 @@ ser_base_read_error_fd (struct serial *scb, int close_fd)
     }
 }
 
-/* Read a character with user-specified timeout.  TIMEOUT is number of seconds
-   to wait, or -1 to wait forever.  Use timeout of 0 to effect a poll.  Returns
-   char if successful.  Returns -2 if timeout expired, EOF if line dropped
-   dead, or -3 for any other error (see errno in that case).  */
+/* Read a character with user-specified timeout.  TIMEOUT is number of
+   seconds to wait, or -1 to wait forever.  Use timeout of 0 to effect
+   a poll.  Returns char if successful.  Returns SERIAL_TIMEOUT if
+   timeout expired, SERIAL_EOF if line dropped dead, or SERIAL_ERROR
+   for any other error (see errno in that case).  */
 
 static int
 do_ser_base_readchar (struct serial *scb, int timeout)
@@ -358,7 +374,11 @@ do_ser_base_readchar (struct serial *scb, int timeout)
   if (status < 0)
     return status;
 
-  status = scb->ops->read_prim (scb, BUFSIZ);
+  do
+    {
+      status = scb->ops->read_prim (scb, BUFSIZ);
+    }
+  while (status < 0 && errno == EINTR);
 
   if (status <= 0)
     {
@@ -445,10 +465,16 @@ ser_base_write (struct serial *scb, const void *buf, size_t count)
 
   while (count > 0)
     {
+      QUIT;
+
       cc = scb->ops->write_prim (scb, str, count);
 
       if (cc < 0)
-	return 1;
+	{
+	  if (errno == EINTR)
+	    continue;
+	  return 1;
+	}
       count -= cc;
       str += cc;
     }

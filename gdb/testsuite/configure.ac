@@ -1,7 +1,7 @@
 #                                                       -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 
-# Copyright 2002-2015 Free Software Foundation, Inc.
+# Copyright 2002-2017 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,17 +24,6 @@ AC_CANONICAL_HOST
 AC_CANONICAL_TARGET
 
 ACX_NONCANONICAL_TARGET
-
-# Check for the 'make' the user wants to use.
-AC_CHECK_PROGS(MAKE, make)
-MAKE_IS_GNU=
-case "`$MAKE --version 2>&1 | sed 1q`" in
-  *GNU*)
-    MAKE_IS_GNU=yes
-    ;;
-esac
-AM_CONDITIONAL(GMAKE, test "$MAKE_IS_GNU" = yes)
-AC_PROG_MAKE_SET
 
 # Enable gdbtk.
 AC_ARG_ENABLE(gdbtk,
@@ -77,8 +66,6 @@ else
       fi ;;
     darwin* | rhapsody*)
       RPATH_ENVVAR=DYLD_LIBRARY_PATH ;;
-    hpux*)
-      RPATH_ENVVAR=SHLIB_PATH ;;
   esac
 fi
 AC_SUBST(RPATH_ENVVAR)
@@ -104,15 +91,6 @@ GDB_AC_TRANSFORM(readelf, READELF_TRANSFORM_NAME)
 GDB_AC_TRANSFORM(as, GAS_TRANSFORM_NAME)
 GDB_AC_TRANSFORM(nm, NM_TRANSFORM_NAME)
 AC_CONFIG_FILES([lib/pdtrace], [chmod +x lib/pdtrace])
+AC_CONFIG_FILES([Makefile])
 
-AC_OUTPUT([Makefile \
-  gdb.ada/Makefile \
-  gdb.arch/Makefile gdb.asm/Makefile gdb.base/Makefile gdb.btrace/Makefile \
-  gdb.cell/Makefile gdb.compile/Makefile gdb.cp/Makefile gdb.disasm/Makefile \
-  gdb.dwarf2/Makefile gdb.dlang/Makefile gdb.fortran/Makefile gdb.gdb/Makefile \
-  gdb.go/Makefile gdb.server/Makefile gdb.java/Makefile \
-  gdb.guile/Makefile gdb.linespec/Makefile \
-  gdb.mi/Makefile gdb.modula2/Makefile gdb.multi/Makefile \
-  gdb.objc/Makefile gdb.opencl/Makefile gdb.opt/Makefile gdb.pascal/Makefile \
-  gdb.perf/Makefile gdb.python/Makefile gdb.reverse/Makefile gdb.stabs/Makefile \
-  gdb.threads/Makefile gdb.trace/Makefile gdb.xml/Makefile])
+AC_OUTPUT

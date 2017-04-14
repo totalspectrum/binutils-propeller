@@ -1,6 +1,6 @@
 /* Target-dependent header for the MIPS architecture, for GDB, the GNU Debugger.
 
-   Copyright (C) 2002-2015 Free Software Foundation, Inc.
+   Copyright (C) 2002-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -144,9 +144,6 @@ enum
   MIPS_LAST_EMBED_REGNUM = 89	/* Last one.  */
 };
 
-/* Defined in mips-tdep.c and used in remote-mips.c.  */
-extern void deprecated_mips_set_processor_regs_hack (void);
-
 /* Instruction sizes and other useful constants.  */
 enum
 {
@@ -157,7 +154,7 @@ enum
 };
 
 /* Single step based on where the current instruction will take us.  */
-extern int mips_software_single_step (struct frame_info *frame);
+extern VEC (CORE_ADDR) *mips_software_single_step (struct regcache *regcache);
 
 /* Strip the ISA (compression) bit off from ADDR.  */
 extern CORE_ADDR mips_unmake_compact_addr (CORE_ADDR addr);

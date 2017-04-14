@@ -1,4 +1,4 @@
-#   Copyright (C) 2010-2015 Free Software Foundation, Inc.
+#   Copyright (C) 2010-2017 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -162,6 +162,7 @@ if ![string match "" $got] then {
     }
 }
 
+setup_xfail "nds32*-*-*"
 set testname "objdump compress debug sections"
 set got [remote_exec host "$OBJDUMP -W ${compressedfile}.o" "" "/dev/null" "objdump.out"]
 if { [lindex $got 0] != 0 || ![string match "" [lindex $got 1]] } then {
@@ -174,6 +175,7 @@ if { [regexp_diff objdump.out $srcdir/$subdir/dw2-1.W] } then {
     pass "$testname"
 }
 
+setup_xfail "nds32*-*-*"
 set testname "objdump compress debug sections 3"
 set got [remote_exec host "$OBJDUMP -W ${compressedfile3}.o" "" "/dev/null" "objdump.out"]
 if { [lindex $got 0] != 0 || ![string match "" [lindex $got 1]] } then {
@@ -544,6 +546,7 @@ if ![string match "" $got] then {
     }
 }
 
+setup_xfail "nds32*-*-*"
 set testname "objcopy compress debug sections in archive with zlib-gabi"
 set got [binutils_run $OBJCOPY "--compress-debug-sections=zlib-gabi ${copyfile}gabi.a ${compressedcopyfile}gabi.a"]
 if ![string match "" $got] then {
@@ -564,6 +567,7 @@ if ![string match "" $got] then {
     }
 }
 
+setup_xfail "nds32*-*-*"
 set testname "objdump compress debug sections 3 with zlib-gabi"
 set got [remote_exec host "$OBJDUMP -W ${compressedfile3}gabi.o" "" "/dev/null" "objdump.out"]
 if { [lindex $got 0] != 0 || ![string match "" [lindex $got 1]] } then {
@@ -667,4 +671,97 @@ if { ([istarget "x86_64-*-elf*"]
 
     set testname "Convert x32 object to x86-64 (3)"
     convert_test "$testname" "--nocompress-debug-sections --x32" "-O elf64-x86-64 --compress-debug-sections=zlib-gnu"
- }
+}
+
+proc test_gnu_debuglink {} {
+    global srcdir
+    global subdir
+    global env
+    global CC_FOR_TARGET
+    global STRIP
+    global OBJCOPY
+    global OBJDUMP
+
+    set test "gnu-debuglink"
+    if {![info exists CC_FOR_TARGET]} {
+	set CC_FOR_TARGET $env(CC)
+    }
+    if { $CC_FOR_TARGET == "" } {
+	unsupported $test
+	return
+    }
+
+    if { [target_compile $srcdir/$subdir/testprog.c tmpdir/testprog exectuable debug] != "" } {
+	fail "$test (build)"
+	return
+    }
+    set got [remote_exec host "$OBJDUMP -S tmpdir/testprog" "" "/dev/null" "tmpdir/testprog.dump"]
+    if { [lindex $got 0] != 0 || ![string match "" [lindex $got 1]] } then {
+	fail "$test (objcopy dump)"
+	return
+    }
+    if { [binutils_run $STRIP "--strip-debug --remove-section=.comment --remove-section=.note tmpdir/testprog -o tmpdir/testprog.strip"] != "" } {
+	fail "$test (strip)"
+	return
+    }
+    if { [binutils_run $OBJCOPY "--only-keep-debug --decompress-debug-sections tmpdir/testprog tmpdir/testprog.decompress"] != "" } {
+	fail "$test (objcopy decompress)"
+	return
+    }
+    if { [binutils_run $OBJCOPY "--only-keep-debug --compress-debug-sections tmpdir/testprog tmpdir/testprog.compress"] != "" } {
+	fail "$test (objcopy compress)"
+	return
+    }
+    if { [binutils_run $OBJCOPY "--add-gnu-debuglink=tmpdir/testprog.decompress tmpdir/testprog.strip tmpdir/testprog"] != "" } {
+	fail "$test (objcopy link decompress)"
+	return
+    }
+    set got [remote_exec host "$OBJDUMP -S tmpdir/testprog" "" "/dev/null" "tmpdir/testprog.decompress.dump"]
+    if { [lindex $got 0] != 0 || ![string match "" [lindex $got 1]] } then {
+	fail "$test (objcopy dump decompress)"
+	return
+    }
+    if { [binutils_run $OBJCOPY "--add-gnu-debuglink=tmpdir/testprog.compress tmpdir/testprog.strip tmpdir/testprog"] != "" } {
+	fail "$test (objcopy link compress)"
+	return
+    }
+    set got [remote_exec host "$OBJDUMP -S tmpdir/testprog" "" "/dev/null" "tmpdir/testprog.compress.dump"]
+    if { [lindex $got 0] != 0 || ![string match "" [lindex $got 1]] } then {
+	fail "$test (objcopy dump compress)"
+	return
+    }
+
+    set src1 tmpdir/testprog.dump
+    set src2 tmpdir/testprog.compress.dump
+    send_log "cmp ${src1} ${src2}\n"
+    verbose "cmp ${src1} ${src2}"
+    set status [remote_exec build cmp "${src1} ${src2}"]
+    set exec_output [lindex $status 1]
+    set exec_output [prune_warnings $exec_output]
+    if ![string match "" $exec_output] then {
+	send_log "$exec_output\n"
+	verbose "$exec_output" 1
+	fail "$test (objdump 1)"
+    } else {
+	pass "$test (objdump 1)"
+    }
+
+    set src1 tmpdir/testprog.decompress.dump
+    set src2 tmpdir/testprog.compress.dump
+    send_log "cmp ${src1} ${src2}\n"
+    verbose "cmp ${src1} ${src2}"
+    set status [remote_exec build cmp "${src1} ${src2}"]
+    set exec_output [lindex $status 1]
+    set exec_output [prune_warnings $exec_output]
+    if ![string match "" $exec_output] then {
+	send_log "$exec_output\n"
+	verbose "$exec_output" 1
+	fail "$test (objdump 2)"
+    } else {
+	pass "$test (objdump 2)"
+    }
+}
+
+if {[isnative] && [is_elf_format]} then {
+    test_gnu_debuglink
+}

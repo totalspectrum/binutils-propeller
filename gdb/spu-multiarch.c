@@ -1,5 +1,5 @@
 /* Cell SPU GNU/Linux multi-architecture debugging support.
-   Copyright (C) 2009-2015 Free Software Foundation, Inc.
+   Copyright (C) 2009-2017 Free Software Foundation, Inc.
 
    Contributed by Ulrich Weigand <uweigand@de.ibm.com>.
 
@@ -107,7 +107,7 @@ spu_gdbarch (int spufs_fd)
   info.bfd_arch_info = bfd_lookup_arch (bfd_arch_spu, bfd_mach_spu);
   info.byte_order = BFD_ENDIAN_BIG;
   info.osabi = GDB_OSABI_LINUX;
-  info.tdep_info = (struct gdbarch_tdep_info *) &spufs_fd;
+  info.tdep_info = &spufs_fd;
   return gdbarch_find_by_info (info);
 }
 
@@ -148,6 +148,11 @@ spu_fetch_registers (struct target_ops *ops,
   struct target_ops *ops_beneath = find_target_beneath (ops);
   int spufs_fd;
   CORE_ADDR spufs_addr;
+
+  /* Since we use functions that rely on inferior_ptid, we need to set and
+     restore it.  */
+  scoped_restore save_ptid
+    = make_scoped_restore (&inferior_ptid, regcache_get_ptid (regcache));
 
   /* This version applies only if we're currently in spu_run.  */
   if (gdbarch_bfd_arch_info (gdbarch)->arch != bfd_arch_spu)
@@ -202,6 +207,11 @@ spu_store_registers (struct target_ops *ops,
   struct target_ops *ops_beneath = find_target_beneath (ops);
   int spufs_fd;
   CORE_ADDR spufs_addr;
+
+  /* Since we use functions that rely on inferior_ptid, we need to set and
+     restore it.  */
+  scoped_restore save_ptid
+    = make_scoped_restore (&inferior_ptid, regcache_get_ptid (regcache));
 
   /* This version applies only if we're currently in spu_run.  */
   if (gdbarch_bfd_arch_info (gdbarch)->arch != bfd_arch_spu)

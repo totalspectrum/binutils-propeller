@@ -1,6 +1,6 @@
 /* Shared general utility routines for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -100,6 +100,12 @@ xfree (void *ptr)
     free (ptr);		/* ARI: free */
 }
 
+void
+xmalloc_failed (size_t size)
+{
+  malloc_failure (size);
+}
+
 /* Like asprintf/vasprintf but get an internal_error if the call
    fails. */
 
@@ -142,6 +148,29 @@ xsnprintf (char *str, size_t size, const char *format, ...)
   va_end (args);
 
   return ret;
+}
+
+/* See documentation in common-utils.h.  */
+
+std::string
+string_printf (const char* fmt, ...)
+{
+  va_list vp;
+  int size;
+
+  va_start (vp, fmt);
+  size = vsnprintf (NULL, 0, fmt, vp);
+  va_end (vp);
+
+  std::string str (size, '\0');
+
+  /* C++11 and later guarantee std::string uses contiguous memory and
+     always includes the terminating '\0'.  */
+  va_start (vp, fmt);
+  vsprintf (&str[0], fmt, vp);
+  va_end (vp);
+
+  return str;
 }
 
 char *
@@ -253,7 +282,7 @@ strtoulst (const char *num, const char **trailer, int base)
     return result;
 }
 
-/* See documentation in cli-utils.h.  */
+/* See documentation in common-utils.h.  */
 
 char *
 skip_spaces (char *chp)
@@ -277,7 +306,7 @@ skip_spaces_const (const char *chp)
   return chp;
 }
 
-/* See documentation in cli-utils.h.  */
+/* See documentation in common-utils.h.  */
 
 const char *
 skip_to_space_const (const char *chp)
@@ -287,4 +316,15 @@ skip_to_space_const (const char *chp)
   while (*chp && !isspace (*chp))
     chp++;
   return chp;
+}
+
+/* See common/common-utils.h.  */
+
+void
+free_vector_argv (std::vector<char *> &v)
+{
+  for (char *el : v)
+    xfree (el);
+
+  v.clear ();
 }

@@ -1,5 +1,5 @@
 /* ppc-dis.c -- Disassemble PowerPC instructions
-   Copyright (C) 1994-2015 Free Software Foundation, Inc.
+   Copyright (C) 1994-2017 Free Software Foundation, Inc.
    Written by Ian Lance Taylor, Cygnus Support
 
    This file is part of the GNU opcodes library.
@@ -26,6 +26,7 @@
 #include "elf/ppc.h"
 #include "opintl.h"
 #include "opcode/ppc.h"
+#include "libiberty.h"
 
 /* This file provides several disassembler functions, all of which use
    the disassembler interface defined in dis-asm.h.  Several functions
@@ -45,15 +46,26 @@ struct dis_private
   (((struct dis_private *) ((INFO)->private_data))->dialect)
 
 struct ppc_mopt {
+  /* Option string, without -m or -M prefix.  */
   const char *opt;
+  /* CPU option flags.  */
   ppc_cpu_t cpu;
+  /* Flags that should stay on, even when combined with another cpu
+     option.  This should only be used for generic options like
+     "-many" or "-maltivec" where it is reasonable to add some
+     capability to another cpu selection.  The added flags are sticky
+     so that, for example, "-many -me500" and "-me500 -many" result in
+     the same assembler or disassembler behaviour.  Do not use
+     "sticky" for specific cpus, as this will prevent that cpu's flags
+     from overriding the defaults set in powerpc_init_dialect or a
+     prior -m option.  */
   ppc_cpu_t sticky;
 };
 
 struct ppc_mopt ppc_opts[] = {
-  { "403",     (PPC_OPCODE_PPC | PPC_OPCODE_403),
+  { "403",     PPC_OPCODE_PPC | PPC_OPCODE_403,
     0 },
-  { "405",     (PPC_OPCODE_PPC | PPC_OPCODE_403 | PPC_OPCODE_405),
+  { "405",     PPC_OPCODE_PPC | PPC_OPCODE_403 | PPC_OPCODE_405,
     0 },
   { "440",     (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE | PPC_OPCODE_440
 		| PPC_OPCODE_ISEL | PPC_OPCODE_RFMCI),
@@ -61,51 +73,56 @@ struct ppc_mopt ppc_opts[] = {
   { "464",     (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE | PPC_OPCODE_440
 		| PPC_OPCODE_ISEL | PPC_OPCODE_RFMCI),
     0 },
-  { "476",     (PPC_OPCODE_PPC | PPC_OPCODE_ISEL | PPC_OPCODE_440
-		| PPC_OPCODE_476 | PPC_OPCODE_POWER4 | PPC_OPCODE_POWER5),
+  { "476",     (PPC_OPCODE_PPC | PPC_OPCODE_ISEL | PPC_OPCODE_476
+		| PPC_OPCODE_POWER4 | PPC_OPCODE_POWER5),
     0 },
-  { "601",     (PPC_OPCODE_PPC | PPC_OPCODE_601),
+  { "601",     PPC_OPCODE_PPC | PPC_OPCODE_601,
     0 },
-  { "603",     (PPC_OPCODE_PPC),
+  { "603",     PPC_OPCODE_PPC,
     0 },
-  { "604",     (PPC_OPCODE_PPC),
+  { "604",     PPC_OPCODE_PPC,
     0 },
-  { "620",     (PPC_OPCODE_PPC | PPC_OPCODE_64),
+  { "620",     PPC_OPCODE_PPC | PPC_OPCODE_64,
     0 },
-  { "7400",    (PPC_OPCODE_PPC | PPC_OPCODE_ALTIVEC),
+  { "7400",    PPC_OPCODE_PPC | PPC_OPCODE_ALTIVEC,
     0 },
-  { "7410",    (PPC_OPCODE_PPC | PPC_OPCODE_ALTIVEC),
+  { "7410",    PPC_OPCODE_PPC | PPC_OPCODE_ALTIVEC,
     0 },
-  { "7450",    (PPC_OPCODE_PPC | PPC_OPCODE_7450 | PPC_OPCODE_ALTIVEC),
+  { "7450",    PPC_OPCODE_PPC | PPC_OPCODE_7450 | PPC_OPCODE_ALTIVEC,
     0 },
-  { "7455",    (PPC_OPCODE_PPC | PPC_OPCODE_ALTIVEC),
+  { "7455",    PPC_OPCODE_PPC | PPC_OPCODE_ALTIVEC,
     0 },
-  { "750cl",   (PPC_OPCODE_PPC | PPC_OPCODE_750 | PPC_OPCODE_PPCPS)
+  { "750cl",   PPC_OPCODE_PPC | PPC_OPCODE_750 | PPC_OPCODE_PPCPS
     , 0 },
-  { "821",     (PPC_OPCODE_PPC | PPC_OPCODE_860),
+  { "821",     PPC_OPCODE_PPC | PPC_OPCODE_860,
     0 },
-  { "850",     (PPC_OPCODE_PPC | PPC_OPCODE_860),
+  { "850",     PPC_OPCODE_PPC | PPC_OPCODE_860,
     0 },
-  { "860",     (PPC_OPCODE_PPC | PPC_OPCODE_860),
+  { "860",     PPC_OPCODE_PPC | PPC_OPCODE_860,
     0 },
   { "a2",      (PPC_OPCODE_PPC | PPC_OPCODE_ISEL | PPC_OPCODE_POWER4
 		| PPC_OPCODE_POWER5 | PPC_OPCODE_CACHELCK | PPC_OPCODE_64
 		| PPC_OPCODE_A2),
     0 },
-  { "altivec", (PPC_OPCODE_PPC),
-    PPC_OPCODE_ALTIVEC | PPC_OPCODE_ALTIVEC2 },
-  { "any",     0,
+  { "altivec", PPC_OPCODE_PPC,
+    PPC_OPCODE_ALTIVEC },
+  { "any",     PPC_OPCODE_PPC,
     PPC_OPCODE_ANY },
-  { "booke",   (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE),
+  { "booke",   PPC_OPCODE_PPC | PPC_OPCODE_BOOKE,
     0 },
-  { "booke32", (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE),
+  { "booke32", PPC_OPCODE_PPC | PPC_OPCODE_BOOKE,
     0 },
   { "cell",    (PPC_OPCODE_PPC | PPC_OPCODE_64 | PPC_OPCODE_POWER4
 		| PPC_OPCODE_CELL | PPC_OPCODE_ALTIVEC),
     0 },
-  { "com",     (PPC_OPCODE_COMMON),
+  { "com",     PPC_OPCODE_COMMON,
     0 },
-  { "e300",    (PPC_OPCODE_PPC | PPC_OPCODE_E300),
+  { "e200z4",  (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE| PPC_OPCODE_SPE
+		| PPC_OPCODE_ISEL | PPC_OPCODE_EFS | PPC_OPCODE_BRLOCK
+		| PPC_OPCODE_PMR | PPC_OPCODE_CACHELCK | PPC_OPCODE_RFMCI
+		| PPC_OPCODE_E500 | PPC_OPCODE_VLE | PPC_OPCODE_E200Z4),
+    0 },
+  { "e300",    PPC_OPCODE_PPC | PPC_OPCODE_E300,
     0 },
   { "e500",    (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE | PPC_OPCODE_SPE
 		| PPC_OPCODE_ISEL | PPC_OPCODE_EFS | PPC_OPCODE_BRLOCK
@@ -124,13 +141,12 @@ struct ppc_mopt ppc_opts[] = {
   { "e5500",    (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE | PPC_OPCODE_ISEL
 		| PPC_OPCODE_PMR | PPC_OPCODE_CACHELCK | PPC_OPCODE_RFMCI
 		| PPC_OPCODE_E500MC | PPC_OPCODE_64 | PPC_OPCODE_POWER4
-		| PPC_OPCODE_POWER5 | PPC_OPCODE_POWER6
-		| PPC_OPCODE_POWER7),
+		| PPC_OPCODE_POWER5 | PPC_OPCODE_POWER6 | PPC_OPCODE_POWER7),
     0 },
   { "e6500",   (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE | PPC_OPCODE_ISEL
 		| PPC_OPCODE_PMR | PPC_OPCODE_CACHELCK | PPC_OPCODE_RFMCI
 		| PPC_OPCODE_E500MC | PPC_OPCODE_64 | PPC_OPCODE_ALTIVEC
-		| PPC_OPCODE_ALTIVEC2 | PPC_OPCODE_E6500 | PPC_OPCODE_POWER4
+		| PPC_OPCODE_E6500 | PPC_OPCODE_TMR | PPC_OPCODE_POWER4
 		| PPC_OPCODE_POWER5 | PPC_OPCODE_POWER6 | PPC_OPCODE_POWER7),
     0 },
   { "e500x2",  (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE | PPC_OPCODE_SPE
@@ -138,9 +154,9 @@ struct ppc_mopt ppc_opts[] = {
 		| PPC_OPCODE_PMR | PPC_OPCODE_CACHELCK | PPC_OPCODE_RFMCI
 		| PPC_OPCODE_E500),
     0 },
-  { "efs",     (PPC_OPCODE_PPC | PPC_OPCODE_EFS),
+  { "efs",     PPC_OPCODE_PPC | PPC_OPCODE_EFS,
     0 },
-  { "power4",  (PPC_OPCODE_PPC | PPC_OPCODE_64 | PPC_OPCODE_POWER4),
+  { "power4",  PPC_OPCODE_PPC | PPC_OPCODE_64 | PPC_OPCODE_POWER4,
     0 },
   { "power5",  (PPC_OPCODE_PPC | PPC_OPCODE_64 | PPC_OPCODE_POWER4
 		| PPC_OPCODE_POWER5),
@@ -154,24 +170,33 @@ struct ppc_mopt ppc_opts[] = {
     0 },
   { "power8",  (PPC_OPCODE_PPC | PPC_OPCODE_ISEL | PPC_OPCODE_64
 		| PPC_OPCODE_POWER4 | PPC_OPCODE_POWER5 | PPC_OPCODE_POWER6
-		| PPC_OPCODE_POWER7 | PPC_OPCODE_POWER8 | PPC_OPCODE_HTM
-		| PPC_OPCODE_ALTIVEC | PPC_OPCODE_ALTIVEC2 | PPC_OPCODE_VSX),
+		| PPC_OPCODE_POWER7 | PPC_OPCODE_POWER8
+		| PPC_OPCODE_ALTIVEC | PPC_OPCODE_VSX),
     0 },
-  { "ppc",     (PPC_OPCODE_PPC),
+  { "power9",  (PPC_OPCODE_PPC | PPC_OPCODE_ISEL | PPC_OPCODE_64
+		| PPC_OPCODE_POWER4 | PPC_OPCODE_POWER5 | PPC_OPCODE_POWER6
+		| PPC_OPCODE_POWER7 | PPC_OPCODE_POWER8 | PPC_OPCODE_POWER9
+		| PPC_OPCODE_ALTIVEC | PPC_OPCODE_VSX),
     0 },
-  { "ppc32",   (PPC_OPCODE_PPC),
+  { "ppc",     PPC_OPCODE_PPC,
     0 },
-  { "ppc64",   (PPC_OPCODE_PPC | PPC_OPCODE_64),
+  { "ppc32",   PPC_OPCODE_PPC,
     0 },
-  { "ppc64bridge", (PPC_OPCODE_PPC | PPC_OPCODE_64_BRIDGE),
+  { "32",      PPC_OPCODE_PPC,
     0 },
-  { "ppcps",   (PPC_OPCODE_PPC | PPC_OPCODE_PPCPS),
+  { "ppc64",   PPC_OPCODE_PPC | PPC_OPCODE_64,
     0 },
-  { "pwr",     (PPC_OPCODE_POWER),
+  { "64",      PPC_OPCODE_PPC | PPC_OPCODE_64,
     0 },
-  { "pwr2",    (PPC_OPCODE_POWER | PPC_OPCODE_POWER2),
+  { "ppc64bridge", PPC_OPCODE_PPC | PPC_OPCODE_64_BRIDGE,
     0 },
-  { "pwr4",    (PPC_OPCODE_PPC | PPC_OPCODE_64 | PPC_OPCODE_POWER4),
+  { "ppcps",   PPC_OPCODE_PPC | PPC_OPCODE_PPCPS,
+    0 },
+  { "pwr",     PPC_OPCODE_POWER,
+    0 },
+  { "pwr2",    PPC_OPCODE_POWER | PPC_OPCODE_POWER2,
+    0 },
+  { "pwr4",    PPC_OPCODE_PPC | PPC_OPCODE_64 | PPC_OPCODE_POWER4,
     0 },
   { "pwr5",    (PPC_OPCODE_PPC | PPC_OPCODE_64 | PPC_OPCODE_POWER4
 		| PPC_OPCODE_POWER5),
@@ -188,22 +213,30 @@ struct ppc_mopt ppc_opts[] = {
     0 },
   { "pwr8",    (PPC_OPCODE_PPC | PPC_OPCODE_ISEL | PPC_OPCODE_64
 		| PPC_OPCODE_POWER4 | PPC_OPCODE_POWER5 | PPC_OPCODE_POWER6
-		| PPC_OPCODE_POWER7 | PPC_OPCODE_POWER8 | PPC_OPCODE_HTM
-		| PPC_OPCODE_ALTIVEC | PPC_OPCODE_ALTIVEC2 | PPC_OPCODE_VSX),
+		| PPC_OPCODE_POWER7 | PPC_OPCODE_POWER8
+		| PPC_OPCODE_ALTIVEC | PPC_OPCODE_VSX),
     0 },
-  { "pwrx",    (PPC_OPCODE_POWER | PPC_OPCODE_POWER2),
+  { "pwr9",    (PPC_OPCODE_PPC | PPC_OPCODE_ISEL | PPC_OPCODE_64
+		| PPC_OPCODE_POWER4 | PPC_OPCODE_POWER5 | PPC_OPCODE_POWER6
+		| PPC_OPCODE_POWER7 | PPC_OPCODE_POWER8 | PPC_OPCODE_POWER9
+		| PPC_OPCODE_ALTIVEC | PPC_OPCODE_VSX),
     0 },
-  { "spe",     (PPC_OPCODE_PPC | PPC_OPCODE_EFS),
+  { "pwrx",    PPC_OPCODE_POWER | PPC_OPCODE_POWER2,
+    0 },
+  { "raw",     PPC_OPCODE_PPC,
+    PPC_OPCODE_RAW },
+  { "spe",     PPC_OPCODE_PPC | PPC_OPCODE_EFS,
     PPC_OPCODE_SPE },
   { "titan",   (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE | PPC_OPCODE_PMR
 		| PPC_OPCODE_RFMCI | PPC_OPCODE_TITAN),
     0 },
-  { "vle",     (PPC_OPCODE_PPC | PPC_OPCODE_ISEL | PPC_OPCODE_VLE),
+  { "vle",     (PPC_OPCODE_PPC | PPC_OPCODE_BOOKE| PPC_OPCODE_SPE
+		| PPC_OPCODE_ISEL | PPC_OPCODE_EFS | PPC_OPCODE_BRLOCK
+		| PPC_OPCODE_PMR | PPC_OPCODE_CACHELCK | PPC_OPCODE_RFMCI
+		| PPC_OPCODE_E500),
     PPC_OPCODE_VLE },
-  { "vsx",     (PPC_OPCODE_PPC),
+  { "vsx",     PPC_OPCODE_PPC,
     PPC_OPCODE_VSX },
-  { "htm",     (PPC_OPCODE_PPC),
-    PPC_OPCODE_HTM },
 };
 
 /* Switch between Booke and VLE dialects for interlinked dumps.  */
@@ -216,7 +249,7 @@ get_powerpc_dialect (struct disassemble_info *info)
 
   /* Disassemble according to the section headers flags for VLE-mode.  */
   if (dialect & PPC_OPCODE_VLE
-      && info->section->owner != NULL
+      && info->section != NULL && info->section->owner != NULL
       && bfd_get_flavour (info->section->owner) == bfd_target_elf_flavour
       && elf_object_id (info->section->owner) == PPC32_ELF_DATA
       && (elf_section_flags (info->section) & SHF_PPC_VLE) != 0)
@@ -232,8 +265,8 @@ ppc_parse_cpu (ppc_cpu_t ppc_cpu, ppc_cpu_t *sticky, const char *arg)
 {
   unsigned int i;
 
-  for (i = 0; i < sizeof (ppc_opts) / sizeof (ppc_opts[0]); i++)
-    if (strcmp (ppc_opts[i].opt, arg) == 0)
+  for (i = 0; i < ARRAY_SIZE (ppc_opts); i++)
+    if (disassembler_options_cmp (ppc_opts[i].opt, arg) == 0)
       {
 	if (ppc_opts[i].sticky)
 	  {
@@ -244,7 +277,7 @@ ppc_parse_cpu (ppc_cpu_t ppc_cpu, ppc_cpu_t *sticky, const char *arg)
 	ppc_cpu = ppc_opts[i].cpu;
 	break;
       }
-  if (i >= sizeof (ppc_opts) / sizeof (ppc_opts[0]))
+  if (i >= ARRAY_SIZE (ppc_opts))
     return 0;
 
   ppc_cpu |= *sticky;
@@ -258,7 +291,6 @@ powerpc_init_dialect (struct disassemble_info *info)
 {
   ppc_cpu_t dialect = 0;
   ppc_cpu_t sticky = 0;
-  char *arg;
   struct dis_private *priv = calloc (sizeof (*priv), 1);
 
   if (priv == NULL)
@@ -303,30 +335,23 @@ powerpc_init_dialect (struct disassemble_info *info)
       dialect = ppc_parse_cpu (dialect, &sticky, "vle");
       break;
     default:
-      dialect = ppc_parse_cpu (dialect, &sticky, "power8") | PPC_OPCODE_ANY;
+      dialect = ppc_parse_cpu (dialect, &sticky, "power9") | PPC_OPCODE_ANY;
+      break;
     }
 
-  arg = info->disassembler_options;
-  while (arg != NULL)
+  const char *opt;
+  FOR_EACH_DISASSEMBLER_OPTION (opt, info->disassembler_options)
     {
       ppc_cpu_t new_cpu = 0;
-      char *end = strchr (arg, ',');
 
-      if (end != NULL)
-	*end = 0;
-
-      if ((new_cpu = ppc_parse_cpu (dialect, &sticky, arg)) != 0)
-	dialect = new_cpu;
-      else if (strcmp (arg, "32") == 0)
+      if (disassembler_options_cmp (opt, "32") == 0)
 	dialect &= ~(ppc_cpu_t) PPC_OPCODE_64;
-      else if (strcmp (arg, "64") == 0)
+      else if (disassembler_options_cmp (opt, "64") == 0)
 	dialect |= PPC_OPCODE_64;
+      else if ((new_cpu = ppc_parse_cpu (dialect, &sticky, opt)) != 0)
+	dialect = new_cpu;
       else
-	fprintf (stderr, _("warning: ignoring unknown -M%s option\n"), arg);
-
-      if (end != NULL)
-	*end++ = ',';
-      arg = end;
+	fprintf (stderr, _("warning: ignoring unknown -M%s option\n"), opt);
     }
 
   info->private_data = priv;
@@ -466,14 +491,12 @@ skip_optional_operands (const unsigned char *opindex,
   return 1;
 }
 
-/* Find a match for INSN in the opcode table, given machine DIALECT.
-   A DIALECT of -1 is special, matching all machine opcode variations.  */
+/* Find a match for INSN in the opcode table, given machine DIALECT.  */
 
 static const struct powerpc_opcode *
 lookup_powerpc (unsigned long insn, ppc_cpu_t dialect)
 {
-  const struct powerpc_opcode *opcode;
-  const struct powerpc_opcode *opcode_end;
+  const struct powerpc_opcode *opcode, *opcode_end, *last;
   unsigned long op;
 
   /* Get the major opcode of the instruction.  */
@@ -481,6 +504,7 @@ lookup_powerpc (unsigned long insn, ppc_cpu_t dialect)
 
   /* Find the first match in the opcode table for this major opcode.  */
   opcode_end = powerpc_opcodes + powerpc_opcd_indices[op + 1];
+  last = NULL;
   for (opcode = powerpc_opcodes + powerpc_opcd_indices[op];
        opcode < opcode_end;
        ++opcode)
@@ -490,7 +514,7 @@ lookup_powerpc (unsigned long insn, ppc_cpu_t dialect)
       int invalid;
 
       if ((insn & opcode->mask) != opcode->opcode
-	  || (dialect != (ppc_cpu_t) -1
+	  || ((dialect & PPC_OPCODE_ANY) == 0
 	      && ((opcode->flags & dialect) == 0
 		  || (opcode->deprecated & dialect) != 0)))
 	continue;
@@ -506,10 +530,16 @@ lookup_powerpc (unsigned long insn, ppc_cpu_t dialect)
       if (invalid)
 	continue;
 
-      return opcode;
+      if ((dialect & PPC_OPCODE_RAW) == 0)
+	return opcode;
+
+      /* The raw machine insn is one that is not a specialization.  */
+      if (last == NULL
+	  || (last->mask & ~opcode->mask) != 0)
+	last = opcode;
     }
 
-  return NULL;
+  return last;
 }
 
 /* Find a match for INSN in the VLE opcode table.  */
@@ -617,9 +647,9 @@ print_insn_powerpc (bfd_vma memaddr,
 	insn_is_short = PPC_OP_SE_VLE(opcode->mask);
     }
   if (opcode == NULL)
-    opcode = lookup_powerpc (insn, dialect);
+    opcode = lookup_powerpc (insn, dialect & ~PPC_OPCODE_ANY);
   if (opcode == NULL && (dialect & PPC_OPCODE_ANY) != 0)
-    opcode = lookup_powerpc (insn, (ppc_cpu_t) -1);
+    opcode = lookup_powerpc (insn, dialect);
 
   if (opcode != NULL)
     {
@@ -747,6 +777,26 @@ print_insn_powerpc (bfd_vma memaddr,
   return 4;
 }
 
+const disasm_options_t *
+disassembler_options_powerpc (void)
+{
+  static disasm_options_t *opts = NULL;
+
+  if (opts == NULL)
+    {
+      size_t i, num_options = ARRAY_SIZE (ppc_opts);
+      opts = XNEW (disasm_options_t);
+      opts->name = XNEWVEC (const char *, num_options + 1);
+      for (i = 0; i < num_options; i++)
+	opts->name[i] = ppc_opts[i].opt;
+      /* The array we return must be NULL terminated.  */
+      opts->name[i] = NULL;
+      opts->description = NULL;
+    }
+
+  return opts;
+}
+
 void
 print_ppc_disassembler_options (FILE *stream)
 {
@@ -756,7 +806,7 @@ print_ppc_disassembler_options (FILE *stream)
 The following PPC specific disassembler options are supported for use with\n\
 the -M switch:\n"));
 
-  for (col = 0, i = 0; i < sizeof (ppc_opts) / sizeof (ppc_opts[0]); i++)
+  for (col = 0, i = 0; i < ARRAY_SIZE (ppc_opts); i++)
     {
       col += fprintf (stream, " %s,", ppc_opts[i].opt);
       if (col > 66)
@@ -765,5 +815,5 @@ the -M switch:\n"));
 	  col = 0;
 	}
     }
-  fprintf (stream, " 32, 64\n");
+  fprintf (stream, "\n");
 }

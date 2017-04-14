@@ -1,6 +1,6 @@
 /* GNU/Linux native-dependent code for debugging multiple forks.
 
-   Copyright (C) 2005-2015 Free Software Foundation, Inc.
+   Copyright (C) 2005-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -63,6 +63,21 @@ forks_exist_p (void)
   return (fork_list != NULL);
 }
 
+/* Return the last fork in the list.  */
+
+static struct fork_info *
+find_last_fork (void)
+{
+  struct fork_info *last;
+
+  if (fork_list == NULL)
+    return NULL;
+
+  for (last = fork_list; last->next != NULL; last = last->next)
+    ;
+  return last;
+}
+
 /* Add a fork to the internal fork list.  */
 
 struct fork_info *
@@ -83,8 +98,16 @@ add_fork (pid_t pid)
   fp = XCNEW (struct fork_info);
   fp->ptid = ptid_build (pid, pid, 0);
   fp->num = ++highest_fork_num;
-  fp->next = fork_list;
-  fork_list = fp;
+
+  if (fork_list == NULL)
+    fork_list = fp;
+  else
+    {
+      struct fork_info *last = find_last_fork ();
+
+      last->next = fp;
+    }
+
   return fp;
 }
 
@@ -353,12 +376,13 @@ linux_fork_killall (void)
 void
 linux_fork_mourn_inferior (void)
 {
+  struct fork_info *last;
+  int status;
+
   /* Wait just one more time to collect the inferior's exit status.
      Do not check whether this succeeds though, since we may be
      dealing with a process that we attached to.  Such a process will
      only report its exit status to its original parent.  */
-  int status;
-
   waitpid (ptid_get_pid (inferior_ptid), &status, 0);
 
   /* OK, presumably inferior_ptid is the one who has exited.
@@ -371,7 +395,8 @@ linux_fork_mourn_inferior (void)
      inferior_ptid yet.  */
   gdb_assert (fork_list);
 
-  fork_load_infrun_state (fork_list);
+  last = find_last_fork ();
+  fork_load_infrun_state (last);
   printf_filtered (_("[Switching to %s]\n"),
 		   target_pid_to_str (inferior_ptid));
 
@@ -655,7 +680,6 @@ checkpoint_command (char *args, int from_tty)
   struct value *fork_fn = NULL, *ret;
   struct fork_info *fp;
   pid_t retpid;
-  struct cleanup *old_chain;
 
   if (!target_has_execution) 
     error (_("The program is not being run."));
@@ -679,11 +703,13 @@ checkpoint_command (char *args, int from_tty)
   ret = value_from_longest (builtin_type (gdbarch)->builtin_int, 0);
 
   /* Tell linux-nat.c that we're checkpointing this inferior.  */
-  old_chain = make_cleanup_restore_integer (&checkpointing_pid);
-  checkpointing_pid = ptid_get_pid (inferior_ptid);
+  {
+    scoped_restore save_pid
+      = make_scoped_restore (&checkpointing_pid, ptid_get_pid (inferior_ptid));
 
-  ret = call_function_by_hand (fork_fn, 0, &ret);
-  do_cleanups (old_chain);
+    ret = call_function_by_hand (fork_fn, 0, &ret);
+  }
+
   if (!ret)	/* Probably can't happen.  */
     error (_("checkpoint: call_function_by_hand returned null."));
 

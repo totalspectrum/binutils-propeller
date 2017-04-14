@@ -1,6 +1,6 @@
 /* Perform non-arithmetic operations on values, for GDB.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -51,7 +51,7 @@ static struct value *search_struct_field (const char *, struct value *,
 
 static struct value *search_struct_method (const char *, struct value **,
 					   struct value **,
-					   int, int *, struct type *);
+					   LONGEST, int *, struct type *);
 
 static int find_oload_champ_namespace (struct value **, int,
 				       const char *, const char *,
@@ -96,9 +96,9 @@ static CORE_ADDR allocate_space_in_inferior (int);
 static struct value *cast_into_complex (struct type *, struct value *);
 
 static void find_method_list (struct value **, const char *,
-			      int, struct type *, struct fn_field **, int *,
+			      LONGEST, struct type *, struct fn_field **, int *,
 			      VEC (xmethod_worker_ptr) **,
-			      struct type **, int *);
+			      struct type **, LONGEST *);
 
 void _initialize_valops (void);
 
@@ -256,7 +256,8 @@ value_cast_structs (struct type *type, struct value *v2)
   if (TYPE_NAME (t2) != NULL)
     {
       /* Try downcasting using the run-time type of the value.  */
-      int full, top, using_enc;
+      int full, using_enc;
+      LONGEST top;
       struct type *real_type;
 
       real_type = value_rtti_type (v2, &full, &top, &using_enc);
@@ -317,7 +318,7 @@ value_cast_pointers (struct type *type, struct value *arg2,
     {
       struct value *v2;
 
-      if (TYPE_CODE (type2) == TYPE_CODE_REF)
+      if (TYPE_IS_REFERENCE (type2))
 	v2 = coerce_ref (arg2);
       else
 	v2 = value_ind (arg2);
@@ -360,24 +361,20 @@ value_cast (struct type *type, struct value *arg2)
   if (value_type (arg2) == type)
     return arg2;
 
-  code1 = TYPE_CODE (check_typedef (type));
-
   /* Check if we are casting struct reference to struct reference.  */
-  if (code1 == TYPE_CODE_REF)
+  if (TYPE_IS_REFERENCE (check_typedef (type)))
     {
       /* We dereference type; then we recurse and finally
          we generate value of the given reference.  Nothing wrong with 
 	 that.  */
       struct type *t1 = check_typedef (type);
       struct type *dereftype = check_typedef (TYPE_TARGET_TYPE (t1));
-      struct value *val =  value_cast (dereftype, arg2);
+      struct value *val = value_cast (dereftype, arg2);
 
-      return value_ref (val); 
+      return value_ref (val, TYPE_CODE (t1));
     }
 
-  code2 = TYPE_CODE (check_typedef (value_type (arg2)));
-
-  if (code2 == TYPE_CODE_REF)
+  if (TYPE_IS_REFERENCE (check_typedef (value_type (arg2))))
     /* We deref the value and then do the cast.  */
     return value_cast (type, coerce_ref (arg2)); 
 
@@ -388,7 +385,7 @@ value_cast (struct type *type, struct value *arg2)
 
   /* You can't cast to a reference type.  See value_cast_pointers
      instead.  */
-  gdb_assert (code1 != TYPE_CODE_REF);
+  gdb_assert (!TYPE_IS_REFERENCE (type));
 
   /* A cast to an undetermined-length array_type, such as 
      (TYPE [])OBJECT, is treated like a cast to (TYPE [N])OBJECT,
@@ -591,8 +588,8 @@ value_reinterpret_cast (struct type *type, struct value *arg)
   dest_type = type;
 
   /* If we are casting to a reference type, transform
-     reinterpret_cast<T&>(V) to *reinterpret_cast<T*>(&V).  */
-  if (TYPE_CODE (real_type) == TYPE_CODE_REF)
+     reinterpret_cast<T&[&]>(V) to *reinterpret_cast<T*>(&V).  */
+  if (TYPE_IS_REFERENCE (real_type))
     {
       is_ref = 1;
       arg = value_addr (arg);
@@ -622,7 +619,8 @@ value_reinterpret_cast (struct type *type, struct value *arg)
     error (_("Invalid reinterpret_cast"));
 
   if (is_ref)
-    result = value_cast (type, value_ref (value_ind (result)));
+    result = value_cast (type, value_ref (value_ind (result),
+                                          TYPE_CODE (type)));
 
   return result;
 }
@@ -635,7 +633,7 @@ value_reinterpret_cast (struct type *type, struct value *arg)
 static int
 dynamic_cast_check_1 (struct type *desired_type,
 		      const gdb_byte *valaddr,
-		      int embedded_offset,
+		      LONGEST embedded_offset,
 		      CORE_ADDR address,
 		      struct value *val,
 		      struct type *search_type,
@@ -647,8 +645,9 @@ dynamic_cast_check_1 (struct type *desired_type,
 
   for (i = 0; i < TYPE_N_BASECLASSES (search_type) && result_count < 2; ++i)
     {
-      int offset = baseclass_offset (search_type, i, valaddr, embedded_offset,
-				     address, val);
+      LONGEST offset = baseclass_offset (search_type, i, valaddr,
+					 embedded_offset,
+					 address, val);
 
       if (class_types_same_p (desired_type, TYPE_BASECLASS (search_type, i)))
 	{
@@ -682,7 +681,7 @@ dynamic_cast_check_1 (struct type *desired_type,
 static int
 dynamic_cast_check_2 (struct type *desired_type,
 		      const gdb_byte *valaddr,
-		      int embedded_offset,
+		      LONGEST embedded_offset,
 		      CORE_ADDR address,
 		      struct value *val,
 		      struct type *search_type,
@@ -692,7 +691,7 @@ dynamic_cast_check_2 (struct type *desired_type,
 
   for (i = 0; i < TYPE_N_BASECLASSES (search_type) && result_count < 2; ++i)
     {
-      int offset;
+      LONGEST offset;
 
       if (! BASETYPE_VIA_PUBLIC (search_type, i))
 	continue;
@@ -723,16 +722,17 @@ dynamic_cast_check_2 (struct type *desired_type,
 struct value *
 value_dynamic_cast (struct type *type, struct value *arg)
 {
-  int full, top, using_enc;
+  int full, using_enc;
+  LONGEST top;
   struct type *resolved_type = check_typedef (type);
   struct type *arg_type = check_typedef (value_type (arg));
   struct type *class_type, *rtti_type;
   struct value *result, *tem, *original_arg = arg;
   CORE_ADDR addr;
-  int is_ref = TYPE_CODE (resolved_type) == TYPE_CODE_REF;
+  int is_ref = TYPE_IS_REFERENCE (resolved_type);
 
   if (TYPE_CODE (resolved_type) != TYPE_CODE_PTR
-      && TYPE_CODE (resolved_type) != TYPE_CODE_REF)
+      && !TYPE_IS_REFERENCE (resolved_type))
     error (_("Argument to dynamic_cast must be a pointer or reference type"));
   if (TYPE_CODE (TYPE_TARGET_TYPE (resolved_type)) != TYPE_CODE_VOID
       && TYPE_CODE (TYPE_TARGET_TYPE (resolved_type)) != TYPE_CODE_STRUCT)
@@ -816,7 +816,9 @@ value_dynamic_cast (struct type *type, struct value *arg)
 				arg_type,
 				&result) == 1)
 	return value_cast (type,
-			   is_ref ? value_ref (result) : value_addr (result));
+			   is_ref
+			   ? value_ref (result, TYPE_CODE (resolved_type))
+			   : value_addr (result));
     }
 
   /* The second dynamic check specified in 5.2.7.  */
@@ -828,7 +830,9 @@ value_dynamic_cast (struct type *type, struct value *arg)
 			       value_address (tem), tem,
 			       rtti_type, &result) == 1)
     return value_cast (type,
-		       is_ref ? value_ref (result) : value_addr (result));
+		       is_ref
+		       ? value_ref (result, TYPE_CODE (resolved_type))
+		       : value_addr (result));
 
   if (TYPE_CODE (resolved_type) == TYPE_CODE_PTR)
     return value_zero (type, not_lval);
@@ -954,13 +958,16 @@ value_at_lazy (struct type *type, CORE_ADDR addr)
 }
 
 void
-read_value_memory (struct value *val, int embedded_offset,
+read_value_memory (struct value *val, LONGEST embedded_offset,
 		   int stack, CORE_ADDR memaddr,
 		   gdb_byte *buffer, size_t length)
 {
   ULONGEST xfered_total = 0;
   struct gdbarch *arch = get_value_arch (val);
   int unit_size = gdbarch_addressable_memory_unit_size (arch);
+  enum target_object object;
+
+  object = stack ? TARGET_OBJECT_STACK_MEMORY : TARGET_OBJECT_MEMORY;
 
   while (xfered_total < length)
     {
@@ -968,7 +975,7 @@ read_value_memory (struct value *val, int embedded_offset,
       ULONGEST xfered_partial;
 
       status = target_xfer_partial (current_target.beneath,
-				    TARGET_OBJECT_MEMORY, NULL,
+				    object, NULL,
 				    buffer + xfered_total * unit_size, NULL,
 				    memaddr + xfered_total,
 				    length - xfered_total,
@@ -1031,7 +1038,7 @@ value_assign (struct value *toval, struct value *fromval)
 
     case lval_internalvar_component:
       {
-	int offset = value_offset (toval);
+	LONGEST offset = value_offset (toval);
 
 	/* Are we dealing with a bitfield?
 
@@ -1106,8 +1113,15 @@ value_assign (struct value *toval, struct value *fromval)
 	struct gdbarch *gdbarch;
 	int value_reg;
 
-	/* Figure out which frame this is in currently.  */
+	/* Figure out which frame this is in currently.
+	
+	   We use VALUE_FRAME_ID for obtaining the value's frame id instead of
+	   VALUE_NEXT_FRAME_ID due to requiring a frame which may be passed to
+	   put_frame_register_bytes() below.  That function will (eventually)
+	   perform the necessary unwind operation by first obtaining the next
+	   frame.  */
 	frame = frame_find_by_id (VALUE_FRAME_ID (toval));
+
 	value_reg = VALUE_REGNUM (toval);
 
 	if (!frame)
@@ -1118,7 +1132,7 @@ value_assign (struct value *toval, struct value *fromval)
 	if (value_bitsize (toval))
 	  {
 	    struct value *parent = value_parent (toval);
-	    int offset = value_offset (parent) + value_offset (toval);
+	    LONGEST offset = value_offset (parent) + value_offset (toval);
 	    int changed_len;
 	    gdb_byte buffer[sizeof (LONGEST)];
 	    int optim, unavail;
@@ -1327,7 +1341,7 @@ address_of_variable (struct symbol *var, const struct block *b)
 	struct frame_info *frame;
 	const char *regname;
 
-	frame = frame_find_by_id (VALUE_FRAME_ID (val));
+	frame = frame_find_by_id (VALUE_NEXT_FRAME_ID (val));
 	gdb_assert (frame);
 
 	regname = gdbarch_register_name (get_frame_arch (frame),
@@ -1460,15 +1474,30 @@ value_addr (struct value *arg1)
   struct value *arg2;
   struct type *type = check_typedef (value_type (arg1));
 
-  if (TYPE_CODE (type) == TYPE_CODE_REF)
+  if (TYPE_IS_REFERENCE (type))
     {
-      /* Copy the value, but change the type from (T&) to (T*).  We
-         keep the same location information, which is efficient, and
-         allows &(&X) to get the location containing the reference.  */
-      arg2 = value_copy (arg1);
-      deprecated_set_value_type (arg2, 
-				 lookup_pointer_type (TYPE_TARGET_TYPE (type)));
-      return arg2;
+      if (value_bits_synthetic_pointer (arg1, value_embedded_offset (arg1),
+	  TARGET_CHAR_BIT * TYPE_LENGTH (type)))
+	arg1 = coerce_ref (arg1);
+      else
+	{
+	  /* Copy the value, but change the type from (T&) to (T*).  We
+	     keep the same location information, which is efficient, and
+	     allows &(&X) to get the location containing the reference.
+	     Do the same to its enclosing type for consistency.  */
+	  struct type *type_ptr
+	    = lookup_pointer_type (TYPE_TARGET_TYPE (type));
+	  struct type *enclosing_type
+	    = check_typedef (value_enclosing_type (arg1));
+	  struct type *enclosing_type_ptr
+	    = lookup_pointer_type (TYPE_TARGET_TYPE (enclosing_type));
+
+	  arg2 = value_copy (arg1);
+	  deprecated_set_value_type (arg2, type_ptr);
+	  set_value_enclosing_type (arg2, enclosing_type_ptr);
+
+	  return arg2;
+	}
     }
   if (TYPE_CODE (type) == TYPE_CODE_FUNC)
     return value_coerce_function (arg1);
@@ -1499,16 +1528,20 @@ value_addr (struct value *arg1)
    contents.  */
 
 struct value *
-value_ref (struct value *arg1)
+value_ref (struct value *arg1, enum type_code refcode)
 {
   struct value *arg2;
   struct type *type = check_typedef (value_type (arg1));
 
-  if (TYPE_CODE (type) == TYPE_CODE_REF)
+  gdb_assert (refcode == TYPE_CODE_REF || refcode == TYPE_CODE_RVALUE_REF);
+
+  if ((TYPE_CODE (type) == TYPE_CODE_REF
+       || TYPE_CODE (type) == TYPE_CODE_RVALUE_REF)
+      && TYPE_CODE (type) == refcode)
     return arg1;
 
   arg2 = value_addr (arg1);
-  deprecated_set_value_type (arg2, lookup_reference_type (type));
+  deprecated_set_value_type (arg2, lookup_reference_type (type, refcode));
   return arg2;
 }
 
@@ -1582,7 +1615,7 @@ value_array (int lowbound, int highbound, struct value **elemvec)
 {
   int nelem;
   int idx;
-  unsigned int typelength;
+  ULONGEST typelength;
   struct value *val;
   struct type *arraytype;
 
@@ -1626,7 +1659,7 @@ value_array (int lowbound, int highbound, struct value **elemvec)
 }
 
 struct value *
-value_cstring (char *ptr, ssize_t len, struct type *char_type)
+value_cstring (const char *ptr, ssize_t len, struct type *char_type)
 {
   struct value *val;
   int lowbound = current_language->string_lower_bound;
@@ -1649,7 +1682,7 @@ value_cstring (char *ptr, ssize_t len, struct type *char_type)
    string may contain embedded null bytes.  */
 
 struct value *
-value_string (char *ptr, ssize_t len, struct type *char_type)
+value_string (const char *ptr, ssize_t len, struct type *char_type)
 {
   struct value *val;
   int lowbound = current_language->string_lower_bound;
@@ -1707,7 +1740,7 @@ typecmp (int staticp, int varargs, int nargs,
       tt1 = check_typedef (t1[i].type);
       tt2 = check_typedef (value_type (t2[i]));
 
-      if (TYPE_CODE (tt1) == TYPE_CODE_REF
+      if (TYPE_IS_REFERENCE (tt1)
 	  /* We should be doing hairy argument matching, as below.  */
 	  && (TYPE_CODE (check_typedef (TYPE_TARGET_TYPE (tt1)))
 	      == TYPE_CODE (tt2)))
@@ -1715,7 +1748,7 @@ typecmp (int staticp, int varargs, int nargs,
 	  if (TYPE_CODE (tt2) == TYPE_CODE_ARRAY)
 	    t2[i] = value_coerce_array (t2[i]);
 	  else
-	    t2[i] = value_ref (t2[i]);
+	    t2[i] = value_ref (t2[i], TYPE_CODE (tt1));
 	  continue;
 	}
 
@@ -1725,14 +1758,13 @@ typecmp (int staticp, int varargs, int nargs,
 	 char *>, and properly access map["hello"], because the
 	 argument to [] will be a reference to a pointer to a char,
 	 and the argument will be a pointer to a char.  */
-      while (TYPE_CODE(tt1) == TYPE_CODE_REF
-	     || TYPE_CODE (tt1) == TYPE_CODE_PTR)
+      while (TYPE_IS_REFERENCE (tt1) || TYPE_CODE (tt1) == TYPE_CODE_PTR)
 	{
 	  tt1 = check_typedef( TYPE_TARGET_TYPE(tt1) );
 	}
       while (TYPE_CODE(tt2) == TYPE_CODE_ARRAY
 	     || TYPE_CODE(tt2) == TYPE_CODE_PTR
-	     || TYPE_CODE(tt2) == TYPE_CODE_REF)
+	     || TYPE_IS_REFERENCE (tt2))
 	{
 	  tt2 = check_typedef (TYPE_TARGET_TYPE(tt2));
 	}
@@ -1758,7 +1790,7 @@ typecmp (int staticp, int varargs, int nargs,
 
 static void
 update_search_result (struct value **result_ptr, struct value *v,
-		      int *last_boffset, int boffset,
+		      LONGEST *last_boffset, LONGEST boffset,
 		      const char *name, struct type *type)
 {
   if (v != NULL)
@@ -1782,10 +1814,10 @@ update_search_result (struct value **result_ptr, struct value *v,
    lookup is ambiguous.  */
 
 static void
-do_search_struct_field (const char *name, struct value *arg1, int offset,
+do_search_struct_field (const char *name, struct value *arg1, LONGEST offset,
 			struct type *type, int looking_for_baseclass,
 			struct value **result_ptr,
-			int *last_boffset,
+			LONGEST *last_boffset,
 			struct type *outermost_type)
 {
   int i;
@@ -1832,7 +1864,7 @@ do_search_struct_field (const char *name, struct value *arg1, int offset,
 		   <variant field>.  */
 
 		struct value *v = NULL;
-		int new_offset = offset;
+		LONGEST new_offset = offset;
 
 		/* This is pretty gross.  In G++, the offset in an
 		   anonymous union is relative to the beginning of the
@@ -1871,7 +1903,7 @@ do_search_struct_field (const char *name, struct value *arg1, int offset,
 			     && (strcmp_iw (name, 
 					    TYPE_BASECLASS_NAME (type, 
 								 i)) == 0));
-      int boffset = value_embedded_offset (arg1) + offset;
+      LONGEST boffset = value_embedded_offset (arg1) + offset;
 
       if (BASETYPE_VIA_VIRTUAL (type, i))
 	{
@@ -1947,7 +1979,7 @@ search_struct_field (const char *name, struct value *arg1,
 		     struct type *type, int looking_for_baseclass)
 {
   struct value *result = NULL;
-  int boffset = 0;
+  LONGEST boffset = 0;
 
   do_search_struct_field (name, arg1, 0, type, looking_for_baseclass,
 			  &result, &boffset, type);
@@ -1964,7 +1996,7 @@ search_struct_field (const char *name, struct value *arg1,
 
 static struct value *
 search_struct_method (const char *name, struct value **arg1p,
-		      struct value **args, int offset,
+		      struct value **args, LONGEST offset,
 		      int *static_memfuncp, struct type *type)
 {
   int i;
@@ -2028,8 +2060,8 @@ search_struct_method (const char *name, struct value **arg1p,
 
   for (i = TYPE_N_BASECLASSES (type) - 1; i >= 0; i--)
     {
-      int base_offset;
-      int this_offset;
+      LONGEST base_offset;
+      LONGEST this_offset;
 
       if (BASETYPE_VIA_VIRTUAL (type, i))
 	{
@@ -2124,7 +2156,7 @@ value_struct_elt (struct value **argp, struct value **args,
 
   /* Follow pointers until we get to a non-pointer.  */
 
-  while (TYPE_CODE (t) == TYPE_CODE_PTR || TYPE_CODE (t) == TYPE_CODE_REF)
+  while (TYPE_CODE (t) == TYPE_CODE_PTR || TYPE_IS_REFERENCE (t))
     {
       *argp = value_ind (*argp);
       /* Don't coerce fn pointer to fn and then back again!  */
@@ -2205,15 +2237,13 @@ value_struct_elt_bitpos (struct value **argp, int bitpos, struct type *ftype,
 			 const char *err)
 {
   struct type *t;
-  struct value *v;
   int i;
-  int nbases;
 
   *argp = coerce_array (*argp);
 
   t = check_typedef (value_type (*argp));
 
-  while (TYPE_CODE (t) == TYPE_CODE_PTR || TYPE_CODE (t) == TYPE_CODE_REF)
+  while (TYPE_CODE (t) == TYPE_CODE_PTR || TYPE_IS_REFERENCE (t))
     {
       *argp = value_ind (*argp);
       if (TYPE_CODE (check_typedef (value_type (*argp))) != TYPE_CODE_FUNC)
@@ -2264,10 +2294,10 @@ value_struct_elt_bitpos (struct value **argp, int bitpos, struct type *ftype,
 
 static void
 find_method_list (struct value **argp, const char *method,
-		  int offset, struct type *type,
+		  LONGEST offset, struct type *type,
 		  struct fn_field **fn_list, int *num_fns,
 		  VEC (xmethod_worker_ptr) **xm_worker_vec,
-		  struct type **basetype, int *boffset)
+		  struct type **basetype, LONGEST *boffset)
 {
   int i;
   struct fn_field *f = NULL;
@@ -2324,7 +2354,7 @@ find_method_list (struct value **argp, const char *method,
      extension methods.  */
   for (i = TYPE_N_BASECLASSES (type) - 1; i >= 0; i--)
     {
-      int base_offset;
+      LONGEST base_offset;
 
       if (BASETYPE_VIA_VIRTUAL (type, i))
 	{
@@ -2364,17 +2394,17 @@ find_method_list (struct value **argp, const char *method,
 
 static void
 value_find_oload_method_list (struct value **argp, const char *method,
-                              int offset, struct fn_field **fn_list,
+                              LONGEST offset, struct fn_field **fn_list,
                               int *num_fns,
                               VEC (xmethod_worker_ptr) **xm_worker_vec,
-			      struct type **basetype, int *boffset)
+			      struct type **basetype, LONGEST *boffset)
 {
   struct type *t;
 
   t = check_typedef (value_type (*argp));
 
   /* Code snarfed from value_struct_elt.  */
-  while (TYPE_CODE (t) == TYPE_CODE_PTR || TYPE_CODE (t) == TYPE_CODE_REF)
+  while (TYPE_CODE (t) == TYPE_CODE_PTR || TYPE_IS_REFERENCE (t))
     {
       *argp = value_ind (*argp);
       /* Don't coerce fn pointer to fn and then back again!  */
@@ -2460,7 +2490,6 @@ find_overload_match (struct value **args, int nargs,
   int method_oload_champ = -1;
   int src_method_oload_champ = -1;
   int ext_method_oload_champ = -1;
-  int src_and_ext_equal = 0;
 
   /* The measure for the current best match.  */
   struct badness_vector *method_badness = NULL;
@@ -2478,7 +2507,7 @@ find_overload_match (struct value **args, int nargs,
   /* Number of overloaded instances being considered.  */
   int num_fns = 0;
   struct type *basetype = NULL;
-  int boffset;
+  LONGEST boffset;
 
   struct cleanup *all_cleanups = make_cleanup (null_cleanup, NULL);
 
@@ -2559,7 +2588,6 @@ find_overload_match (struct value **args, int nargs,
 	  switch (compare_badness (ext_method_badness, src_method_badness))
 	    {
 	      case 0: /* Src method and xmethod are equally good.  */
-		src_and_ext_equal = 1;
 		/* If src method and xmethod are equally good, then
 		   xmethod should be the winner.  Hence, fall through to the
 		   case where a xmethod is better than the source
@@ -2785,7 +2813,7 @@ find_overload_match (struct value **args, int nargs,
 
       if (TYPE_CODE (temp_type) != TYPE_CODE_PTR
 	  && (TYPE_CODE (objtype) == TYPE_CODE_PTR
-	      || TYPE_CODE (objtype) == TYPE_CODE_REF))
+	      || TYPE_IS_REFERENCE (objtype)))
 	{
 	  temp = value_addr (temp);
 	}
@@ -2984,7 +3012,6 @@ find_oload_champ (struct value **args, int nargs,
 {
   int ix;
   int fn_count;
-  int xm_worker_vec_n = VEC_length (xmethod_worker_ptr, xm_worker_vec);
   /* A measure of how good an overloaded instance is.  */
   struct badness_vector *bv;
   /* Index of best overloaded function.  */
@@ -3575,14 +3602,14 @@ value_maybe_namespace_elt (const struct type *curtype,
 
 struct type *
 value_rtti_indirect_type (struct value *v, int *full, 
-			  int *top, int *using_enc)
+			  LONGEST *top, int *using_enc)
 {
   struct value *target = NULL;
   struct type *type, *real_type, *target_type;
 
   type = value_type (v);
   type = check_typedef (type);
-  if (TYPE_CODE (type) == TYPE_CODE_REF)
+  if (TYPE_IS_REFERENCE (type))
     target = coerce_ref (v);
   else if (TYPE_CODE (type) == TYPE_CODE_PTR)
     {
@@ -3615,8 +3642,8 @@ value_rtti_indirect_type (struct value *v, int *full,
       target_type = value_type (target);
       real_type = make_cv_type (TYPE_CONST (target_type),
 				TYPE_VOLATILE (target_type), real_type, NULL);
-      if (TYPE_CODE (type) == TYPE_CODE_REF)
-        real_type = lookup_reference_type (real_type);
+      if (TYPE_IS_REFERENCE (type))
+        real_type = lookup_reference_type (real_type, TYPE_CODE (type));
       else if (TYPE_CODE (type) == TYPE_CODE_PTR)
         real_type = lookup_pointer_type (real_type);
       else
@@ -3648,7 +3675,7 @@ value_full_object (struct value *argp,
 {
   struct type *real_type;
   int full = 0;
-  int top = -1;
+  LONGEST top = -1;
   int using_enc = 0;
   struct value *new_val;
 
@@ -3804,7 +3831,6 @@ value_slice (struct value *array, int lowbound, int length)
       }
 
     set_value_component_location (slice, array);
-    VALUE_FRAME_ID (slice) = VALUE_FRAME_ID (array);
     set_value_offset (slice, value_offset (array) + offset);
   }
 

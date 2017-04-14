@@ -1,6 +1,6 @@
 // object.cc -- support for an object file for linking in gold
 
-// Copyright (C) 2006-2015 Free Software Foundation, Inc.
+// Copyright (C) 2006-2017 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -427,7 +427,8 @@ Sized_relobj<size, big_endian>::do_for_all_local_got_entries(
   unsigned int nsyms = this->local_symbol_count();
   for (unsigned int i = 0; i < nsyms; i++)
     {
-      Local_got_offsets::const_iterator p = this->local_got_offsets_.find(i);
+      Local_got_entry_key key(i, 0);
+      Local_got_offsets::const_iterator p = this->local_got_offsets_.find(key);
       if (p != this->local_got_offsets_.end())
 	{
 	  const Got_offset_list* got_offsets = p->second;
@@ -478,7 +479,8 @@ Sized_relobj_file<size, big_endian>::Sized_relobj_file(
     discarded_eh_frame_shndx_(-1U),
     is_deferred_layout_(false),
     deferred_layout_(),
-    deferred_layout_relocs_()
+    deferred_layout_relocs_(),
+    output_views_(NULL)
 {
   this->e_type_ = ehdr.get_e_type();
 }
@@ -814,9 +816,9 @@ Sized_relobj_file<size, big_endian>::do_find_special_sections(
   return (this->has_eh_frame_
 	  || (!parameters->options().relocatable()
 	      && parameters->options().gdb_index()
-	      && (memmem(names, sd->section_names_size, "debug_info", 12) == 0
-		  || memmem(names, sd->section_names_size, "debug_types",
-			    13) == 0)));
+	      && (memmem(names, sd->section_names_size, "debug_info", 11) == 0
+		  || memmem(names, sd->section_names_size,
+			    "debug_types", 12) == 0)));
 }
 
 // Read the sections and symbols from an object file.
@@ -2223,8 +2225,9 @@ Sized_relobj_file<size, big_endian>::do_count_local_symbols(Stringpool* pool,
 
       // Decide whether this symbol should go into the output file.
 
-      if ((shndx < shnum && out_sections[shndx] == NULL)
-	  || shndx == this->discarded_eh_frame_shndx_)
+      if (is_ordinary
+	  && ((shndx < shnum && out_sections[shndx] == NULL)
+	      || shndx == this->discarded_eh_frame_shndx_))
 	{
 	  lv.set_no_output_symtab_entry();
 	  gold_assert(!lv.needs_output_dynsym_entry());
@@ -2674,6 +2677,7 @@ Sized_relobj_file<size, big_endian>::write_local_symbols(
       elfcpp::Sym<size, big_endian> isym(psyms);
 
       Symbol_value<size>& lv(this->local_values_[i]);
+      typename elfcpp::Elf_types<size>::Elf_Addr sym_value = lv.value(this, 0);
 
       bool is_ordinary;
       unsigned int st_shndx = this->adjust_sym_shndx(i, isym.get_st_shndx(),
@@ -2683,6 +2687,9 @@ Sized_relobj_file<size, big_endian>::write_local_symbols(
 	  gold_assert(st_shndx < out_sections.size());
 	  if (out_sections[st_shndx] == NULL)
 	    continue;
+	  // In relocatable object files symbol values are section relative.
+	  if (parameters->options().relocatable())
+	    sym_value -= out_sections[st_shndx]->address();
 	  st_shndx = out_sections[st_shndx]->out_shndx();
 	  if (st_shndx >= elfcpp::SHN_LORESERVE)
 	    {
@@ -2702,7 +2709,7 @@ Sized_relobj_file<size, big_endian>::write_local_symbols(
 	  gold_assert(isym.get_st_name() < strtab_size);
 	  const char* name = pnames + isym.get_st_name();
 	  osym.put_st_name(sympool->get_offset(name));
-	  osym.put_st_value(this->local_values_[i].value(this, 0));
+	  osym.put_st_value(sym_value);
 	  osym.put_st_size(isym.get_st_size());
 	  osym.put_st_info(isym.get_st_info());
 	  osym.put_st_other(isym.get_st_other());
@@ -2720,7 +2727,7 @@ Sized_relobj_file<size, big_endian>::write_local_symbols(
 	  gold_assert(isym.get_st_name() < strtab_size);
 	  const char* name = pnames + isym.get_st_name();
 	  osym.put_st_name(dynpool->get_offset(name));
-	  osym.put_st_value(this->local_values_[i].value(this, 0));
+	  osym.put_st_value(sym_value);
 	  osym.put_st_size(isym.get_st_size());
 	  osym.put_st_info(isym.get_st_info());
 	  osym.put_st_other(isym.get_st_other());
@@ -3448,6 +3455,38 @@ template
 void
 Xindex::read_symtab_xindex<64, true>(Object*, unsigned int,
 				     const unsigned char*);
+#endif
+
+#ifdef HAVE_TARGET_32_LITTLE
+template
+Compressed_section_map*
+build_compressed_section_map<32, false>(const unsigned char*, unsigned int,
+					const char*, section_size_type, 
+					Object*, bool);
+#endif
+
+#ifdef HAVE_TARGET_32_BIG
+template
+Compressed_section_map*
+build_compressed_section_map<32, true>(const unsigned char*, unsigned int,
+					const char*, section_size_type, 
+					Object*, bool);
+#endif
+
+#ifdef HAVE_TARGET_64_LITTLE
+template
+Compressed_section_map*
+build_compressed_section_map<64, false>(const unsigned char*, unsigned int,
+					const char*, section_size_type, 
+					Object*, bool);
+#endif
+
+#ifdef HAVE_TARGET_64_BIG
+template
+Compressed_section_map*
+build_compressed_section_map<64, true>(const unsigned char*, unsigned int,
+					const char*, section_size_type, 
+					Object*, bool);
 #endif
 
 } // End namespace gold.

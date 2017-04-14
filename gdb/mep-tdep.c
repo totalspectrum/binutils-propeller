@@ -1,6 +1,6 @@
 /* Target-dependent code for the Toshiba MeP for GDB, the GNU debugger.
 
-   Copyright (C) 2001-2015 Free Software Foundation, Inc.
+   Copyright (C) 2001-2017 Free Software Foundation, Inc.
 
    Contributed by Red Hat, Inc.
 
@@ -305,7 +305,7 @@ register_set_keyword_table (const CGEN_HW_ENTRY *hw)
 /* Given a keyword table KEYWORD and a register number REGNUM, return
    the name of the register, or "" if KEYWORD contains no register
    whose number is REGNUM.  */
-static char *
+static const char *
 register_name_from_keyword (CGEN_KEYWORD *keyword_table, int regnum)
 {
   const CGEN_KEYWORD_ENTRY *entry
@@ -784,7 +784,9 @@ static int
 mep_debug_reg_to_regnum (struct gdbarch *gdbarch, int debug_reg)
 {
   /* The debug info uses the raw register numbers.  */
-  return mep_raw_to_pseudo[debug_reg];
+  if (debug_reg >= 0 && debug_reg < ARRAY_SIZE (mep_raw_to_pseudo))
+    return mep_raw_to_pseudo[debug_reg];
+  return -1;
 }
 
 
@@ -848,7 +850,7 @@ current_me_module (void)
       ULONGEST regval;
       regcache_cooked_read_unsigned (get_current_regcache (),
 				     MEP_MODULE_REGNUM, &regval);
-      return regval;
+      return (CONFIG_ATTR) regval;
     }
   else
     return gdbarch_tdep (target_gdbarch ())->me_module;
@@ -1126,7 +1128,7 @@ static enum register_status
 mep_pseudo_cr32_read (struct gdbarch *gdbarch,
                       struct regcache *regcache,
                       int cookednum,
-                      void *buf)
+                      gdb_byte *buf)
 {
   enum register_status status;
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -1152,7 +1154,7 @@ static enum register_status
 mep_pseudo_cr64_read (struct gdbarch *gdbarch,
                       struct regcache *regcache,
                       int cookednum,
-                      void *buf)
+                      gdb_byte *buf)
 {
   return regcache_raw_read (regcache, mep_pseudo_to_raw[cookednum], buf);
 }
@@ -1182,7 +1184,7 @@ static void
 mep_pseudo_csr_write (struct gdbarch *gdbarch,
                       struct regcache *regcache,
                       int cookednum,
-                      const void *buf)
+                      const gdb_byte *buf)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int size = register_size (gdbarch, cookednum);
@@ -1213,7 +1215,7 @@ static void
 mep_pseudo_cr32_write (struct gdbarch *gdbarch,
                        struct regcache *regcache,
                        int cookednum,
-                       const void *buf)
+                       const gdb_byte *buf)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   /* Expand the 32-bit value into a 64-bit value, and write that to
@@ -1234,7 +1236,7 @@ static void
 mep_pseudo_cr64_write (struct gdbarch *gdbarch,
                      struct regcache *regcache,
                      int cookednum,
-                     const void *buf)
+                     const gdb_byte *buf)
 {
   regcache_raw_write (regcache, mep_pseudo_to_raw[cookednum], buf);
 }
@@ -1264,13 +1266,12 @@ mep_pseudo_register_write (struct gdbarch *gdbarch,
 
 /* Disassembly.  */
 
-/* The mep disassembler needs to know about the section in order to
-   work correctly.  */
 static int
 mep_gdb_print_insn (bfd_vma pc, disassemble_info * info)
 {
   struct obj_section * s = find_pc_section (pc);
 
+  info->arch = bfd_arch_mep;
   if (s)
     {
       /* The libopcodes disassembly code uses the section to find the
@@ -1278,12 +1279,9 @@ mep_gdb_print_insn (bfd_vma pc, disassemble_info * info)
          the me_module index, and the me_module index to select the
          right instructions to print.  */
       info->section = s->the_bfd_section;
-      info->arch = bfd_arch_mep;
-	
-      return print_insn_mep (pc, info);
     }
-  
-  return 0;
+
+  return print_insn_mep (pc, info);
 }
 
 
@@ -1916,15 +1914,9 @@ mep_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 
 
 /* Breakpoints.  */
+constexpr gdb_byte mep_break_insn[] = { 0x70, 0x32 };
 
-static const unsigned char *
-mep_breakpoint_from_pc (struct gdbarch *gdbarch, CORE_ADDR * pcptr, int *lenptr)
-{
-  static unsigned char breakpoint[] = { 0x70, 0x32 };
-  *lenptr = sizeof (breakpoint);
-  return breakpoint;
-}
-
+typedef BP_MANIPULATION (mep_break_insn) mep_breakpoint;
 
 
 /* Frames and frame unwinding.  */
@@ -2396,7 +2388,10 @@ mep_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
       /* The way to get the me_module code depends on the object file
          format.  At the moment, we only know how to handle ELF.  */
       if (bfd_get_flavour (info.abfd) == bfd_target_elf_flavour)
-        me_module = elf_elfheader (info.abfd)->e_flags & EF_MEP_INDEX_MASK;
+	{
+	  int flag = elf_elfheader (info.abfd)->e_flags & EF_MEP_INDEX_MASK;
+	  me_module = (CONFIG_ATTR) flag;
+	}
       else
         me_module = CONFIG_NONE;
     }
@@ -2485,7 +2480,8 @@ mep_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_print_insn (gdbarch, mep_gdb_print_insn); 
 
   /* Breakpoints.  */
-  set_gdbarch_breakpoint_from_pc (gdbarch, mep_breakpoint_from_pc);
+  set_gdbarch_breakpoint_kind_from_pc (gdbarch, mep_breakpoint::kind_from_pc);
+  set_gdbarch_sw_breakpoint_from_kind (gdbarch, mep_breakpoint::bp_from_kind);
   set_gdbarch_decr_pc_after_break (gdbarch, 0);
   set_gdbarch_skip_prologue (gdbarch, mep_skip_prologue);
 

@@ -1,5 +1,5 @@
 /* tc-d30v.c -- Assembler code for the Mitsubishi D30V
-   Copyright (C) 1997-2015 Free Software Foundation, Inc.
+   Copyright (C) 1997-2017 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -121,7 +121,7 @@ size_t md_longopts_size = sizeof (md_longopts);
 static struct hash_control *d30v_hash;
 
 /* Do a binary search of the pre_defined_registers array to see if
-   NAME is a valid regiter name.  Return the register number from the
+   NAME is a valid register name.  Return the register number from the
    array on success, or -1 on failure.  */
 
 static int
@@ -239,13 +239,13 @@ md_show_usage (FILE *stream)
   fprintf (stream, _("\nD30V options:\n\
 -O                      Make adjacent short instructions parallel if possible.\n\
 -n                      Warn about all NOPs inserted by the assembler.\n\
--N			Warn about NOPs inserted after word multiplies.\n\
--c                      Warn about symbols whoes names match register names.\n\
+-N                      Warn about NOPs inserted after word multiplies.\n\
+-c                      Warn about symbols whose names match register names.\n\
 -C                      Opposite of -C.  -c is the default.\n"));
 }
 
 int
-md_parse_option (int c, char *arg ATTRIBUTE_UNUSED)
+md_parse_option (int c, const char *arg ATTRIBUTE_UNUSED)
 {
   switch (c)
     {
@@ -285,7 +285,7 @@ md_undefined_symbol (char *name ATTRIBUTE_UNUSED)
   return 0;
 }
 
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
   return ieee_md_atof (type, litP, sizeP, TRUE);
@@ -303,7 +303,7 @@ valueT
 md_section_align (asection *seg, valueT addr)
 {
   int align = bfd_get_section_alignment (stdoutput, seg);
-  return ((addr + (1 << align) - 1) & (-1 << align));
+  return ((addr + (1 << align) - 1) & -(1 << align));
 }
 
 void
@@ -998,7 +998,7 @@ write_2_short (struct d30v_insn *opcode1,
 	}
       else if (prev_left_kills_right_p)
 	{
-	  /* The left instruction kils the right slot, so we
+	  /* The left instruction kills the right slot, so we
 	     must leave it empty.  */
 	  write_1_short (opcode1, insn1, fx->next, FALSE);
 	  return 1;
@@ -1158,7 +1158,7 @@ find_format (struct d30v_opcode *opcode,
 	    {
 	      int flags = d30v_operand_table[fm->operands[j]].flags;
 	      int bits = d30v_operand_table[fm->operands[j]].bits;
-	      int X_op = myops[j].X_op;
+	      operatorT X_op = myops[j].X_op;
 	      int num = myops[j].X_add_number;
 
 	      if (flags & OPERAND_SPECIAL)
@@ -1760,8 +1760,8 @@ arelent *
 tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 {
   arelent *reloc;
-  reloc = xmalloc (sizeof (arelent));
-  reloc->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+  reloc = XNEW (arelent);
+  reloc->sym_ptr_ptr = XNEW (asymbol *);
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
   reloc->howto = bfd_reloc_type_lookup (stdoutput, fixp->fx_r_type);
@@ -1840,7 +1840,7 @@ d30v_start_line (void)
 }
 
 static void
-check_size (long value, int bits, char *file, int line)
+check_size (long value, int bits, const char *file, int line)
 {
   int tmp, max;
 

@@ -1,11 +1,11 @@
-# Copyright (C) 2014-2015 Free Software Foundation, Inc.
+# Copyright (C) 2014-2017 Free Software Foundation, Inc.
 # 
 # Copying and distribution of this file, with or without modification,
 # are permitted in any medium without royalty provided the copyright
 # notice and this notice are preserved.
 
 cat <<EOF
-/* Copyright (C) 2014-2015 Free Software Foundation, Inc.
+/* Copyright (C) 2014-2017 Free Software Foundation, Inc.
 
    Copying and distribution of this script, with or without modification,
    are permitted in any medium without royalty provided the copyright
@@ -19,6 +19,7 @@ __DATA_REGION_LENGTH__ = DEFINED(__DATA_REGION_LENGTH__) ? __DATA_REGION_LENGTH_
 __FUSE_REGION_LENGTH__ = DEFINED(__FUSE_REGION_LENGTH__) ? __FUSE_REGION_LENGTH__ : 2;
 __LOCK_REGION_LENGTH__ = DEFINED(__LOCK_REGION_LENGTH__) ? __LOCK_REGION_LENGTH__ : 2;
 __SIGNATURE_REGION_LENGTH__ = DEFINED(__SIGNATURE_REGION_LENGTH__) ? __SIGNATURE_REGION_LENGTH__ : 4;
+__RODATA_PM_OFFSET__ = DEFINED(__RODATA_PM_OFFSET__) ? __RODATA_PM_OFFSET__ : 0x4000;
 
 MEMORY
 {
@@ -96,7 +97,7 @@ SECTIONS
   .rela.plt    ${RELOCATING-0} : { *(.rela.plt)	}
 
   /* Internal text space or external memory.  */
-  .text ${RELOCATING-0} : ${RELOCATING+ AT (0x0)}
+  .text ${RELOCATING-0} : 
   {
     *(.vectors)
     KEEP(*(.vectors))
@@ -112,6 +113,10 @@ SECTIONS
     *(.trampolines)
     ${RELOCATING+ *(.trampolines*)}
     ${CONSTRUCTING+ __trampolines_end = . ; }
+
+    /* avr-libc expects these data to reside in lower 64K. */
+    ${RELOCATING+ *libprintf_flt.a:*(.progmem.data)}
+    ${RELOCATING+ *libc.a:*(.progmem.data)}
 
     ${RELOCATING+ *(.progmem*)}
 
@@ -184,13 +189,18 @@ SECTIONS
     ${RELOCATING+ _etext = . ; }
   } ${RELOCATING+ > text}
 
+  .rodata ${RELOCATING+ ADDR(.text) + SIZEOF (.text) + __RODATA_PM_OFFSET__ } ${RELOCATING-0} :
+  {
+    *(.rodata)
+    ${RELOCATING+ *(.rodata*)}
+    *(.gnu.linkonce.r*)
+  } ${RELOCATING+AT> text}
+
   .data        ${RELOCATING-0} :
   {
     ${RELOCATING+ PROVIDE (__data_start = .) ; }
     *(.data)
     ${RELOCATING+ *(.data*)}
-    *(.rodata)  /* We need to include .rodata here if gcc is used */
-    ${RELOCATING+ *(.rodata*)} /* with -fdata-sections.  */
     *(.gnu.linkonce.d*)
     ${RELOCATING+. = ALIGN(2);}
     ${RELOCATING+ _edata = . ; }
@@ -210,7 +220,7 @@ SECTIONS
   ${RELOCATING+ __data_load_end = __data_load_start + SIZEOF(.data); }
 
   /* Global data not cleared after reset.  */
-  .noinit ${RELOCATING-0}:
+  .noinit ${RELOCATING+ ADDR(.bss) + SIZEOF (.bss)} ${RELOCATING-0} : ${RELOCATING+ AT (ADDR (.noinit))}
   {
     ${RELOCATING+ PROVIDE (__noinit_start = .) ; }
     *(.noinit*)

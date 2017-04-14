@@ -1,4 +1,4 @@
-# Copyright 2004-2015 Free Software Foundation, Inc.
+# Copyright 2004-2017 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -41,6 +41,27 @@ proc gdb_find_gnatmake {} {
     return $GM
 }   
 
+proc gdb_find_gdc {} {
+    global tool_root_dir
+    print "Tool Root: $tool_root_dir"
+
+    if {![is_remote host]} {
+	set file [lookfor_file $tool_root_dir gdc]
+	if { $file == "" } {
+	    set file [lookfor_file $tool_root_dir gcc/gdc]
+	}
+	if { $file != "" } {
+	    set CC "$file -B[file dirname $file]/"
+	} else {
+	    set CC [transform gdc]
+	}
+    } else {
+	set CC [transform gdc]
+    }
+    print "CC: $CC"
+    return $CC
+}
+
 proc gdb_find_gfortran {} {
     global tool_root_dir
 
@@ -82,6 +103,22 @@ proc gdb_find_go {} {
 
 proc gdb_find_go_linker {} {
     return [find_go]
+}
+
+proc gdb_find_rustc {} {
+    global tool_root_dir
+    if {![is_remote host]} {
+	set rustc [lookfor_file $tool_root_dir rustc]
+	if {$rustc == ""} {
+	    set rustc rustc
+	}
+    } else {
+	set rustc ""
+    }
+    if {$rustc != ""} {
+	append rustc " --color never"
+    }
+    return $rustc
 }
 
 proc gdb_find_ldd {} {
@@ -185,6 +222,18 @@ proc gdb_default_target_compile {source destfile type options} {
 	    }
 	}
 
+	if { $i == "d" } {
+	    set compiler_type "d"
+	    if {[board_info $dest exists dflags]} {
+		append add_flags " [target_info dflags]"
+	    }
+	    if {[board_info $dest exists dcompiler]} {
+		set compiler [target_info dcompiler]
+	    } else {
+		set compiler [find_gdc]
+	    }
+	}
+
 	if { $i == "f77" } {
 	    set compiler_type "f77"
 	    if {[board_info $dest exists f77flags]} {
@@ -226,6 +275,18 @@ proc gdb_default_target_compile {source destfile type options} {
 	    }
 	    if {[board_info $dest exists golinker_opts_order]} {
 		set linker_opts_order [target_info golinker_opts_order]
+	    }
+	}
+
+	if { $i == "rust" } {
+	    set compiler_type "rust"
+	    if {[board_info $dest exists rustflags]} {
+		append add_flags " [target_info rustflags]"
+	    }
+	    if {[board_info $dest exists rustflags]} {
+		set compiler [target_info rustflags]
+	    } else {
+		set compiler [find_rustc]
 	    }
 	}
 
@@ -285,11 +346,13 @@ proc gdb_default_target_compile {source destfile type options} {
 
     global CC_FOR_TARGET
     global CXX_FOR_TARGET
+    global D_FOR_TARGET
     global F77_FOR_TARGET
     global F90_FOR_TARGET
     global GNATMAKE_FOR_TARGET
     global GO_FOR_TARGET
     global GO_LD_FOR_TARGET
+    global RUSTC_FOR_TARGET
 
     if {[info exists GNATMAKE_FOR_TARGET]} {
 	if { $compiler_type == "ada" } {
@@ -306,6 +369,12 @@ proc gdb_default_target_compile {source destfile type options} {
     if {[info exists CXX_FOR_TARGET]} {
 	if { $compiler_type == "c++" } {
 	    set compiler $CXX_FOR_TARGET
+	}
+    }
+
+    if {[info exists D_FOR_TARGET]} {
+	if { $compiler_type == "d" } {
+	    set compiler $D_FOR_TARGET
 	}
     }
 
@@ -330,6 +399,12 @@ proc gdb_default_target_compile {source destfile type options} {
 	}
     }
 
+    if {[info exists RUSTC_FOR_TARGET]} {
+	if {$compiler_type == "rust"} {
+	    set compiler $RUSTC_FOR_TARGET
+	}
+    }
+
     if { $type == "executable" && $linker != "" } {
 	set compiler $linker
     }
@@ -348,7 +423,11 @@ proc gdb_default_target_compile {source destfile type options} {
     }
 
     if {$type == "object"} {
-	append add_flags " -c"
+	if {$compiler_type == "rust"} {
+	    append add_flags "--emit obj"
+	} else {
+	    append add_flags " -c"
+	}
     }
 
     if { $type == "preprocess" } {
@@ -380,9 +459,6 @@ proc gdb_default_target_compile {source destfile type options} {
 		} elseif {[regexp ".*(osf|irix5|linux).*" $target_triplet]} {
 		    # OSF/1 or IRIX 5
 		    append add_flags " -Wl,-rpath,$tool_root_dir/libstdc++"
-		} elseif {[regexp ".*hppa.*" $target_triplet]} {
-		    # HP-UX
-		    append add_flags " -Wl,-a,shared_archive"
 		}
 	    }
 	}
@@ -563,6 +639,16 @@ if {[info procs find_go_linker] == ""} {
     set use_gdb_compile 1
 }
 
+if {[info procs find_gdc] == ""} {
+    rename gdb_find_gdc find_gdc
+    set use_gdb_compile 1
+}
+
+if {[info procs find_rustc] == ""} {
+    rename gdb_find_rustc find_rustc
+    set use_gdb_compile 1
+}
+
 if {$use_gdb_compile} {
     catch {rename default_target_compile {}}
     rename gdb_default_target_compile default_target_compile
@@ -580,3 +666,8 @@ if {[info procs lreverse] == ""} {
 	return $retval
     }
 }
+
+# Various ccache versions provide incorrect debug info such as ignoring
+# different current directory, breaking GDB testsuite.
+set env(CCACHE_DISABLE) 1
+unset -nocomplain env(CCACHE_NODISABLE)

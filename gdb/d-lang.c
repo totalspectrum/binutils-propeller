@@ -1,6 +1,6 @@
 /* D language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 2005-2015 Free Software Foundation, Inc.
+   Copyright (C) 2005-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -53,6 +53,15 @@ char *
 d_demangle (const char *symbol, int options)
 {
   return gdb_demangle (symbol, options | DMGL_DLANG);
+}
+
+/* la_sniff_from_mangled_name implementation for D.  */
+
+static int
+d_sniff_from_mangled_name (const char *mangled, char **demangled)
+{
+  *demangled = d_demangle (mangled, 0);
+  return *demangled != NULL;
 }
 
 /* Table mapping opcodes into strings for printing operators
@@ -190,6 +199,11 @@ d_language_arch_info (struct gdbarch *gdbarch,
   lai->bool_type_default = builtin->builtin_bool;
 }
 
+static const char *d_extensions[] =
+{
+  ".d", NULL
+};
+
 static const struct language_defn d_language_defn =
 {
   "d",
@@ -199,9 +213,10 @@ static const struct language_defn d_language_defn =
   case_sensitive_on,
   array_row_major,
   macro_expansion_no,
+  d_extensions,
   &exp_descriptor_c,
   d_parse,
-  d_error,
+  d_yyerror,
   null_post_parser,
   c_printchar,			/* Print a character constant.  */
   c_printstr,			/* Function to print string constant.  */
@@ -217,6 +232,7 @@ static const struct language_defn d_language_defn =
   d_lookup_symbol_nonlocal,
   basic_lookup_transparent_type,
   d_demangle,			/* Language specific symbol demangler.  */
+  d_sniff_from_mangled_name,
   NULL,				/* Language specific
 				   class_name_from_physname.  */
   d_op_print_tab,		/* Expression operators for printing.  */
@@ -271,13 +287,13 @@ build_d_types (struct gdbarch *gdbarch)
     = arch_integer_type (gdbarch, 128, 1, "ucent");
   builtin_d_type->builtin_float
     = arch_float_type (gdbarch, gdbarch_float_bit (gdbarch),
-		       "float", NULL);
+		       "float", gdbarch_float_format (gdbarch));
   builtin_d_type->builtin_double
     = arch_float_type (gdbarch, gdbarch_double_bit (gdbarch),
-		       "double", NULL);
+		       "double", gdbarch_double_format (gdbarch));
   builtin_d_type->builtin_real
     = arch_float_type (gdbarch, gdbarch_long_double_bit (gdbarch),
-		       "real", NULL);
+		       "real", gdbarch_long_double_format (gdbarch));
 
   TYPE_INSTANCE_FLAGS (builtin_d_type->builtin_byte)
     |= TYPE_INSTANCE_FLAG_NOTTEXT;
@@ -287,13 +303,13 @@ build_d_types (struct gdbarch *gdbarch)
   /* Imaginary and complex types.  */
   builtin_d_type->builtin_ifloat
     = arch_float_type (gdbarch, gdbarch_float_bit (gdbarch),
-		       "ifloat", NULL);
+		       "ifloat", gdbarch_float_format (gdbarch));
   builtin_d_type->builtin_idouble
     = arch_float_type (gdbarch, gdbarch_double_bit (gdbarch),
-		       "idouble", NULL);
+		       "idouble", gdbarch_double_format (gdbarch));
   builtin_d_type->builtin_ireal
     = arch_float_type (gdbarch, gdbarch_long_double_bit (gdbarch),
-		       "ireal", NULL);
+		       "ireal", gdbarch_long_double_format (gdbarch));
   builtin_d_type->builtin_cfloat
     = arch_complex_type (gdbarch, "cfloat",
 			 builtin_d_type->builtin_float);

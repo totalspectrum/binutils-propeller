@@ -1,6 +1,6 @@
 /* Target-dependent code for Atmel AVR, for GDB.
 
-   Copyright (C) 1996-2015 Free Software Foundation, Inc.
+   Copyright (C) 1996-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -36,6 +36,7 @@
 #include "regcache.h"
 #include "dis-asm.h"
 #include "objfiles.h"
+#include <algorithm>
 
 /* AVR Background:
 
@@ -111,6 +112,7 @@ enum
 
   AVR_ARG1_REGNUM = 24,         /* Single byte argument */
   AVR_ARGN_REGNUM = 25,         /* Multi byte argments */
+  AVR_LAST_ARG_REGNUM = 8,      /* Last argument register */
 
   AVR_RET1_REGNUM = 24,         /* Single byte return value */
   AVR_RETN_REGNUM = 25,         /* Multi byte return value */
@@ -881,7 +883,7 @@ avr_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 
   post_prologue_pc = skip_prologue_using_sal (gdbarch, func_addr);
   if (post_prologue_pc != 0)
-    return max (pc, post_prologue_pc);
+    return std::max (pc, post_prologue_pc);
 
   {
     CORE_ADDR prologue_end = pc;
@@ -911,14 +913,9 @@ avr_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
    it as a NOP.  Thus, it should be ok.  Since the avr is currently a remote
    only target, this shouldn't be a problem (I hope).  TRoth/2003-05-14  */
 
-static const unsigned char *
-avr_breakpoint_from_pc (struct gdbarch *gdbarch,
-			CORE_ADDR *pcptr, int *lenptr)
-{
-    static const unsigned char avr_break_insn [] = { 0x98, 0x95 };
-    *lenptr = sizeof (avr_break_insn);
-    return avr_break_insn;
-}
+constexpr gdb_byte avr_break_insn [] = { 0x98, 0x95 };
+
+typedef BP_MANIPULATION (avr_break_insn) avr_breakpoint;
 
 /* Determine, for architecture GDBARCH, how a return value of TYPE
    should be returned.  If it is supposed to be returned in registers,
@@ -1106,8 +1103,6 @@ static struct value *
 avr_frame_prev_register (struct frame_info *this_frame,
 			 void **this_prologue_cache, int regnum)
 {
-  struct gdbarch *gdbarch = get_frame_arch (this_frame);
-  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   struct avr_unwind_cache *info
     = avr_frame_unwind_cache (this_frame, this_prologue_cache);
 
@@ -1198,7 +1193,7 @@ struct stack_item
 {
   int len;
   struct stack_item *prev;
-  void *data;
+  gdb_byte *data;
 };
 
 static struct stack_item *
@@ -1206,7 +1201,7 @@ push_stack_item (struct stack_item *prev, const bfd_byte *contents, int len)
 {
   struct stack_item *si;
   si = XNEW (struct stack_item);
-  si->data = xmalloc (len);
+  si->data = (gdb_byte *) xmalloc (len);
   si->len = len;
   si->prev = prev;
   memcpy (si->data, contents, len);
@@ -1269,7 +1264,6 @@ avr_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
                      int nargs, struct value **args, CORE_ADDR sp,
                      int struct_return, CORE_ADDR struct_addr)
 {
-  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int i;
   gdb_byte buf[3];
   int call_length = gdbarch_tdep (gdbarch)->call_length;
@@ -1298,23 +1292,24 @@ avr_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       const bfd_byte *contents = value_contents (arg);
       int len = TYPE_LENGTH (type);
 
-      /* Calculate the potential last register needed.  */
-      last_regnum = regnum - (len + (len & 1));
+      /* Calculate the potential last register needed.
+         E.g. For length 2, registers regnum and regnum-1 (say 25 and 24)
+         shall be used. So, last needed register will be regnum-1(24).  */
+      last_regnum = regnum - (len + (len & 1)) + 1;
 
       /* If there are registers available, use them.  Once we start putting
          stuff on the stack, all subsequent args go on stack.  */
-      if ((si == NULL) && (last_regnum >= 8))
+      if ((si == NULL) && (last_regnum >= AVR_LAST_ARG_REGNUM))
         {
-          ULONGEST val;
-
           /* Skip a register for odd length args.  */
           if (len & 1)
             regnum--;
 
-          val = extract_unsigned_integer (contents, len, byte_order);
+          /* Write MSB of argument into register and subsequent bytes in
+             decreasing register numbers.  */
           for (j = 0; j < len; j++)
             regcache_cooked_write_unsigned
-              (regcache, regnum--, val >> (8 * (len - j - 1)));
+              (regcache, regnum--, contents[len - j - 1]);
         }
       /* No registers available, push the args onto the stack.  */
       else
@@ -1364,9 +1359,6 @@ avr_dwarf_reg_to_regnum (struct gdbarch *gdbarch, int reg)
     return reg;
   if (reg == 32)
     return AVR_SP_REGNUM;
-
-  warning (_("Unmapped DWARF Register #%d encountered."), reg);
-
   return -1;
 }
 
@@ -1470,9 +1462,8 @@ avr_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
      be defined.  */
   tdep->void_type = arch_type (gdbarch, TYPE_CODE_VOID, 1, "void");
   tdep->func_void_type = make_function_type (tdep->void_type, NULL);
-  tdep->pc_type = arch_type (gdbarch, TYPE_CODE_PTR, 4, NULL);
-  TYPE_TARGET_TYPE (tdep->pc_type) = tdep->func_void_type;
-  TYPE_UNSIGNED (tdep->pc_type) = 1;
+  tdep->pc_type = arch_pointer_type (gdbarch, 4 * TARGET_CHAR_BIT, NULL,
+				     tdep->func_void_type);
 
   set_gdbarch_short_bit (gdbarch, 2 * TARGET_CHAR_BIT);
   set_gdbarch_int_bit (gdbarch, 2 * TARGET_CHAR_BIT);
@@ -1480,6 +1471,9 @@ avr_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_long_long_bit (gdbarch, 8 * TARGET_CHAR_BIT);
   set_gdbarch_ptr_bit (gdbarch, 2 * TARGET_CHAR_BIT);
   set_gdbarch_addr_bit (gdbarch, 32);
+
+  set_gdbarch_wchar_bit (gdbarch, 2 * TARGET_CHAR_BIT);
+  set_gdbarch_wchar_signed (gdbarch, 1);
 
   set_gdbarch_float_bit (gdbarch, 4 * TARGET_CHAR_BIT);
   set_gdbarch_double_bit (gdbarch, 4 * TARGET_CHAR_BIT);
@@ -1518,7 +1512,8 @@ avr_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_skip_prologue (gdbarch, avr_skip_prologue);
   set_gdbarch_inner_than (gdbarch, core_addr_lessthan);
 
-  set_gdbarch_breakpoint_from_pc (gdbarch, avr_breakpoint_from_pc);
+  set_gdbarch_breakpoint_kind_from_pc (gdbarch, avr_breakpoint::kind_from_pc);
+  set_gdbarch_sw_breakpoint_from_kind (gdbarch, avr_breakpoint::bp_from_kind);
 
   frame_unwind_append_unwinder (gdbarch, &avr_frame_unwind);
   frame_base_set_default (gdbarch, &avr_frame_base);
@@ -1635,7 +1630,6 @@ _initialize_avr_tdep (void)
   /* FIXME: TRoth/2002-02-18: This should probably be changed to 'info avr
      io_registers' to signify it is not available on other platforms.  */
 
-  add_cmd ("io_registers", class_info, avr_io_reg_read_command,
-	   _("query remote avr target for io space register values"),
-	   &infolist);
+  add_info ("io_registers", avr_io_reg_read_command,
+	    _("query remote avr target for io space register values"));
 }

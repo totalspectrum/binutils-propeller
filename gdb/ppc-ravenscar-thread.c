@@ -1,6 +1,6 @@
 /* Ravenscar PowerPC target support.
 
-   Copyright (C) 2011-2015 Free Software Foundation, Inc.
+   Copyright (C) 2011-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -148,7 +148,6 @@ ppc_ravenscar_generic_fetch_registers
    struct regcache *regcache, int regnum)
 {
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
-  const int sp_regnum = gdbarch_sp_regnum (gdbarch);
   const int num_regs = gdbarch_num_regs (gdbarch);
   int current_regnum;
   CORE_ADDR current_address;

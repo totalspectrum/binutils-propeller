@@ -1,6 +1,6 @@
 /* Interface between gdb and its extension languages.
 
-   Copyright (C) 2014-2015 Free Software Foundation, Inc.
+   Copyright (C) 2014-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,6 +22,7 @@
 
 #include "defs.h"
 #include <signal.h>
+#include "target.h"
 #include "auto-load.h"
 #include "breakpoint.h"
 #include "event-top.h"
@@ -477,11 +478,11 @@ free_ext_lang_type_printers (struct ext_lang_type_printers *printers)
   xfree (printers);
 }
 
-/* Try to pretty-print a value of type TYPE located at VALADDR
-   + EMBEDDED_OFFSET, which came from the inferior at address ADDRESS
-   + EMBEDDED_OFFSET, onto stdio stream STREAM according to OPTIONS.
-   VAL is the whole object that came from ADDRESS.  VALADDR must point to
-   the head of VAL's contents buffer.
+/* Try to pretty-print a value of type TYPE located at VAL's contents
+   buffer + EMBEDDED_OFFSET, which came from the inferior at address
+   ADDRESS + EMBEDDED_OFFSET, onto stdio stream STREAM according to
+   OPTIONS.
+   VAL is the whole object that came from ADDRESS.
    Returns non-zero if the value was successfully pretty-printed.
 
    Extension languages are tried in the order specified by
@@ -495,10 +496,10 @@ free_ext_lang_type_printers (struct ext_lang_type_printers *printers)
    errors that trigger an exception in the extension language.  */
 
 int
-apply_ext_lang_val_pretty_printer (struct type *type, const gdb_byte *valaddr,
-				   int embedded_offset, CORE_ADDR address,
+apply_ext_lang_val_pretty_printer (struct type *type,
+				   LONGEST embedded_offset, CORE_ADDR address,
 				   struct ui_file *stream, int recurse,
-				   const struct value *val,
+				   struct value *val,
 				   const struct value_print_options *options,
 				   const struct language_defn *language)
 {
@@ -511,7 +512,7 @@ apply_ext_lang_val_pretty_printer (struct type *type, const gdb_byte *valaddr,
 
       if (extlang->ops->apply_val_pretty_printer == NULL)
 	continue;
-      rc = extlang->ops->apply_val_pretty_printer (extlang, type, valaddr,
+      rc = extlang->ops->apply_val_pretty_printer (extlang, type,
 						   embedded_offset, address,
 						   stream, recurse, val,
 						   options, language);
@@ -746,19 +747,24 @@ set_active_ext_lang (const struct extension_language_defn *now_active)
     = XCNEW (struct active_ext_lang_state);
 
   previous->ext_lang = active_ext_lang;
+  previous->sigint_handler.handler_saved = 0;
   active_ext_lang = now_active;
 
-  /* If the newly active extension language uses cooperative SIGINT handling
-     then ensure GDB's SIGINT handler is installed.  */
-  if (now_active->language == EXT_LANG_GDB
-      || now_active->ops->check_quit_flag != NULL)
-    install_gdb_sigint_handler (&previous->sigint_handler);
+  if (target_terminal_is_ours ())
+    {
+      /* If the newly active extension language uses cooperative SIGINT
+	 handling then ensure GDB's SIGINT handler is installed.  */
+      if (now_active->language == EXT_LANG_GDB
+	  || now_active->ops->check_quit_flag != NULL)
+	install_gdb_sigint_handler (&previous->sigint_handler);
 
-  /* If there's a SIGINT recorded in the cooperative extension languages,
-     move it to the new language, or save it in GDB's global flag if the newly
-     active extension language doesn't use cooperative SIGINT handling.  */
-  if (check_quit_flag ())
-    set_quit_flag ();
+      /* If there's a SIGINT recorded in the cooperative extension languages,
+	 move it to the new language, or save it in GDB's global flag if the
+	 newly active extension language doesn't use cooperative SIGINT
+	 handling.  */
+      if (check_quit_flag ())
+	set_quit_flag ();
+    }
 
   return previous;
 }
@@ -768,40 +774,22 @@ set_active_ext_lang (const struct extension_language_defn *now_active)
 void
 restore_active_ext_lang (struct active_ext_lang_state *previous)
 {
-  const struct extension_language_defn *current = active_ext_lang;
-
   active_ext_lang = previous->ext_lang;
 
-  /* Restore the previous SIGINT handler if one was saved.  */
-  if (previous->sigint_handler.handler_saved)
-    install_sigint_handler (&previous->sigint_handler);
-
-  /* If there's a SIGINT recorded in the cooperative extension languages,
-     move it to the new language, or save it in GDB's global flag if the newly
-     active extension language doesn't use cooperative SIGINT handling.  */
-  if (check_quit_flag ())
-    set_quit_flag ();
-
-  xfree (previous);
-}
-
-/* Clear the quit flag.
-   The flag is cleared in all extension languages,
-   not just the currently active one.  */
-
-void
-clear_quit_flag (void)
-{
-  int i;
-  const struct extension_language_defn *extlang;
-
-  ALL_ENABLED_EXTENSION_LANGUAGES (i, extlang)
+  if (target_terminal_is_ours ())
     {
-      if (extlang->ops->clear_quit_flag != NULL)
-	extlang->ops->clear_quit_flag (extlang);
-    }
+      /* Restore the previous SIGINT handler if one was saved.  */
+      if (previous->sigint_handler.handler_saved)
+	install_sigint_handler (&previous->sigint_handler);
 
-  quit_flag = 0;
+      /* If there's a SIGINT recorded in the cooperative extension languages,
+	 move it to the new language, or save it in GDB's global flag if the
+	 newly active extension language doesn't use cooperative SIGINT
+	 handling.  */
+      if (check_quit_flag ())
+	set_quit_flag ();
+    }
+  xfree (previous);
 }
 
 /* Set the quit flag.
@@ -819,7 +807,16 @@ set_quit_flag (void)
       && active_ext_lang->ops->set_quit_flag != NULL)
     active_ext_lang->ops->set_quit_flag (active_ext_lang);
   else
-    quit_flag = 1;
+    {
+      quit_flag = 1;
+
+      /* Now wake up the event loop, or any interruptible_select.  Do
+	 this after setting the flag, because signals on Windows
+	 actually run on a separate thread, and thus otherwise the
+	 main code could be woken up and find quit_flag still
+	 clear.  */
+      quit_serial_event_set ();
+    }
 }
 
 /* Return true if the quit flag has been set, false otherwise.
@@ -843,6 +840,10 @@ check_quit_flag (void)
   /* This is written in a particular way to avoid races.  */
   if (quit_flag)
     {
+      /* No longer need to wake up the event loop or any
+	 interruptible_select.  The caller handles the quit
+	 request.  */
+      quit_serial_event_clear ();
       quit_flag = 0;
       result = 1;
     }

@@ -1,6 +1,6 @@
 /* Native-dependent code for GNU/Linux on MIPS processors.
 
-   Copyright (C) 2001-2015 Free Software Foundation, Inc.
+   Copyright (C) 2001-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -34,6 +34,7 @@
 #include <sgidefs.h>
 #include "nat/gdb_ptrace.h"
 #include <asm/ptrace.h>
+#include "inf-ptrace.h"
 
 #include "nat/mips-linux-watch.h"
 
@@ -152,7 +153,7 @@ mips64_linux_register_addr (struct gdbarch *gdbarch, int regno, int store)
 /* Fetch the thread-local storage pointer for libthread_db.  */
 
 ps_err_e
-ps_get_thread_area (const struct ps_prochandle *ph,
+ps_get_thread_area (struct ps_prochandle *ph,
                     lwpid_t lwpid, int idx, void **base)
 {
   if (ptrace (PTRACE_GET_THREAD_AREA, lwpid, NULL, base) != 0)
@@ -244,9 +245,7 @@ mips64_linux_regsets_fetch_registers (struct target_ops *ops,
   else
     is_dsp = 0;
 
-  tid = ptid_get_lwp (inferior_ptid);
-  if (tid == 0)
-    tid = ptid_get_pid (inferior_ptid);
+  tid = get_ptrace_pid (regcache_get_ptid (regcache));
 
   if (regno == -1 || (!is_fp && !is_dsp))
     {
@@ -332,9 +331,7 @@ mips64_linux_regsets_store_registers (struct target_ops *ops,
   else
     is_dsp = 0;
 
-  tid = ptid_get_lwp (inferior_ptid);
-  if (tid == 0)
-    tid = ptid_get_pid (inferior_ptid);
+  tid = get_ptrace_pid (regcache_get_ptid (regcache));
 
   if (regno == -1 || (!is_fp && !is_dsp))
     {

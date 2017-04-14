@@ -1,7 +1,7 @@
 /* Functions specific to running gdb native on IA-64 running
    GNU/Linux.
 
-   Copyright (C) 1999-2015 Free Software Foundation, Inc.
+   Copyright (C) 1999-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -40,6 +40,8 @@
 
 /* Prototypes for supply_gregset etc.  */
 #include "gregset.h"
+
+#include "inf-ptrace.h"
 
 /* These must match the order of the register names.
 
@@ -696,7 +698,8 @@ ia64_linux_fetch_register (struct regcache *regcache, int regnum)
   CORE_ADDR addr;
   size_t size;
   PTRACE_TYPE_RET *buf;
-  int pid, i;
+  pid_t pid;
+  int i;
 
   /* r0 cannot be fetched but is always zero.  */
   if (regnum == IA64_GR0_REGNUM)
@@ -735,18 +738,14 @@ ia64_linux_fetch_register (struct regcache *regcache, int regnum)
       return;
     }
 
-  /* Cater for systems like GNU/Linux, that implement threads as
-     separate processes.  */
-  pid = ptid_get_lwp (inferior_ptid);
-  if (pid == 0)
-    pid = ptid_get_pid (inferior_ptid);
+  pid = get_ptrace_pid (regcache_get_ptid (regcache));
 
   /* This isn't really an address, but ptrace thinks of it as one.  */
   addr = ia64_register_addr (gdbarch, regnum);
   size = register_size (gdbarch, regnum);
 
   gdb_assert ((size % sizeof (PTRACE_TYPE_RET)) == 0);
-  buf = alloca (size);
+  buf = (PTRACE_TYPE_RET *) alloca (size);
 
   /* Read the register contents from the inferior a chunk at a time.  */
   for (i = 0; i < size / sizeof (PTRACE_TYPE_RET); i++)
@@ -788,23 +787,20 @@ ia64_linux_store_register (const struct regcache *regcache, int regnum)
   CORE_ADDR addr;
   size_t size;
   PTRACE_TYPE_RET *buf;
-  int pid, i;
+  pid_t pid;
+  int i;
 
   if (ia64_cannot_store_register (gdbarch, regnum))
     return;
 
-  /* Cater for systems like GNU/Linux, that implement threads as
-     separate processes.  */
-  pid = ptid_get_lwp (inferior_ptid);
-  if (pid == 0)
-    pid = ptid_get_pid (inferior_ptid);
+  pid = get_ptrace_pid (regcache_get_ptid (regcache));
 
   /* This isn't really an address, but ptrace thinks of it as one.  */
   addr = ia64_register_addr (gdbarch, regnum);
   size = register_size (gdbarch, regnum);
 
   gdb_assert ((size % sizeof (PTRACE_TYPE_RET)) == 0);
-  buf = alloca (size);
+  buf = (PTRACE_TYPE_RET *) alloca (size);
 
   /* Write the register contents into the inferior a chunk at a time.  */
   regcache_raw_collect (regcache, regnum, buf);
@@ -865,7 +861,7 @@ ia64_linux_xfer_partial (struct target_ops *ops,
       if (offset >= gate_table_size)
 	return TARGET_XFER_EOF;
 
-      tmp_buf = alloca (gate_table_size);
+      tmp_buf = (gdb_byte *) alloca (gate_table_size);
       res = syscall (__NR_getunwind, tmp_buf, gate_table_size);
       if (res < 0)
 	return TARGET_XFER_E_IO;

@@ -1,6 +1,6 @@
 /* Character set conversion support for GDB.
 
-   Copyright (C) 2001-2015 Free Software Foundation, Inc.
+   Copyright (C) 2001-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -77,9 +77,13 @@
    arrange for there to be a single available character set.  */
 
 #undef GDB_DEFAULT_HOST_CHARSET
-#define GDB_DEFAULT_HOST_CHARSET "ISO-8859-1"
-#define GDB_DEFAULT_TARGET_CHARSET "ISO-8859-1"
-#define GDB_DEFAULT_TARGET_WIDE_CHARSET "ISO-8859-1"
+#ifdef USE_WIN32API
+# define GDB_DEFAULT_HOST_CHARSET "CP1252"
+#else
+# define GDB_DEFAULT_HOST_CHARSET "ISO-8859-1"
+#endif
+#define GDB_DEFAULT_TARGET_CHARSET GDB_DEFAULT_HOST_CHARSET 
+#define GDB_DEFAULT_TARGET_WIDE_CHARSET "UTF-32"
 #undef DEFAULT_CHARSET_NAMES
 #define DEFAULT_CHARSET_NAMES GDB_DEFAULT_HOST_CHARSET ,
 
@@ -95,20 +99,27 @@
 #undef ICONV_CONST
 #define ICONV_CONST const
 
+/* We allow conversions from UTF-32, wchar_t, and the host charset.
+   We allow conversions to wchar_t and the host charset.
+   Return 1 if we are converting from UTF-32BE, 2 if from UTF32-LE,
+   0 otherwise.  This is used as a flag in calls to iconv.  */
+
 static iconv_t
 phony_iconv_open (const char *to, const char *from)
 {
-  /* We allow conversions from UTF-32BE, wchar_t, and the host charset.
-     We allow conversions to wchar_t and the host charset.  */
-  if (strcmp (from, "UTF-32BE") && strcmp (from, "wchar_t")
-      && strcmp (from, GDB_DEFAULT_HOST_CHARSET))
-    return -1;
   if (strcmp (to, "wchar_t") && strcmp (to, GDB_DEFAULT_HOST_CHARSET))
     return -1;
 
-  /* Return 1 if we are converting from UTF-32BE, 0 otherwise.  This is
-     used as a flag in calls to iconv.  */
-  return !strcmp (from, "UTF-32BE");
+  if (!strcmp (from, "UTF-32BE") || !strcmp (from, "UTF-32"))
+    return 1;
+
+  if (!strcmp (from, "UTF-32LE"))
+    return 2;
+
+  if (strcmp (from, "wchar_t") && strcmp (from, GDB_DEFAULT_HOST_CHARSET))
+    return -1;
+
+  return 0;
 }
 
 static int
@@ -123,31 +134,33 @@ phony_iconv (iconv_t utf_flag, const char **inbuf, size_t *inbytesleft,
 {
   if (utf_flag)
     {
+      enum bfd_endian endian
+	= utf_flag == 1 ? BFD_ENDIAN_BIG : BFD_ENDIAN_LITTLE;
       while (*inbytesleft >= 4)
 	{
-	  size_t j;
-	  unsigned long c = 0;
-
-	  for (j = 0; j < 4; ++j)
-	    {
-	      c <<= 8;
-	      c += (*inbuf)[j] & 0xff;
-	    }
+	  unsigned long c
+	    = extract_unsigned_integer ((const gdb_byte *)*inbuf, 4, endian);
 
 	  if (c >= 256)
 	    {
 	      errno = EILSEQ;
 	      return -1;
 	    }
+	  if (*outbytesleft < 1)
+	    {
+	      errno = E2BIG;
+	      return -1;
+	    }
 	  **outbuf = c & 0xff;
 	  ++*outbuf;
 	  --*outbytesleft;
 
-	  ++*inbuf;
+	  *inbuf += 4;
 	  *inbytesleft -= 4;
 	}
-      if (*inbytesleft < 4)
+      if (*inbytesleft)
 	{
+	  /* Partial sequence on input.  */
 	  errno = EINVAL;
 	  return -1;
 	}
@@ -165,12 +178,11 @@ phony_iconv (iconv_t utf_flag, const char **inbuf, size_t *inbytesleft,
       *outbuf += amt;
       *inbytesleft -= amt;
       *outbytesleft -= amt;
-    }
-
-  if (*inbytesleft)
-    {
-      errno = E2BIG;
-      return -1;
+      if (*inbytesleft)
+	{
+	  errno = E2BIG;
+	  return -1;
+	}
     }
 
   /* The number of non-reversible conversions -- but they were all
@@ -290,6 +302,11 @@ set_be_le_names (struct gdbarch *gdbarch)
     return;
   be_le_arch = gdbarch;
 
+#ifdef PHONY_ICONV
+  /* Match the wide charset names recognized by phony_iconv_open.  */
+  target_wide_charset_le_name = "UTF-32LE";
+  target_wide_charset_be_name = "UTF-32BE";
+#else
   target_wide_charset_le_name = NULL;
   target_wide_charset_be_name = NULL;
 
@@ -313,6 +330,7 @@ set_be_le_names (struct gdbarch *gdbarch)
 	    target_wide_charset_le_name = charset_enum[i];
 	}
     }
+# endif  /* PHONY_ICONV */
 }
 
 /* 'Set charset', 'set host-charset', 'set target-charset', 'set
@@ -463,14 +481,32 @@ host_hex_value (char c)
 
 /* Public character management functions.  */
 
-/* A cleanup function which is run to close an iconv descriptor.  */
-
-static void
-cleanup_iconv (void *p)
+class iconv_wrapper
 {
-  iconv_t *descp = (iconv_t *) p;
-  iconv_close (*descp);
-}
+public:
+
+  iconv_wrapper (const char *to, const char *from)
+  {
+    m_desc = iconv_open (to, from);
+    if (m_desc == (iconv_t) -1)
+      perror_with_name (_("Converting character sets"));
+  }
+
+  ~iconv_wrapper ()
+  {
+    iconv_close (m_desc);
+  }
+
+  size_t convert (ICONV_CONST char **inp, size_t *inleft, char **outp,
+		  size_t *outleft)
+  {
+    return iconv (m_desc, inp, inleft, outp, outleft);
+  }
+
+private:
+
+  iconv_t m_desc;
+};
 
 void
 convert_between_encodings (const char *from, const char *to,
@@ -478,8 +514,6 @@ convert_between_encodings (const char *from, const char *to,
 			   int width, struct obstack *output,
 			   enum transliterations translit)
 {
-  iconv_t desc;
-  struct cleanup *cleanups;
   size_t inleft;
   ICONV_CONST char *inp;
   unsigned int space_request;
@@ -491,10 +525,7 @@ convert_between_encodings (const char *from, const char *to,
       return;
     }
 
-  desc = iconv_open (to, from);
-  if (desc == (iconv_t) -1)
-    perror_with_name (_("Converting character sets"));
-  cleanups = make_cleanup (cleanup_iconv, &desc);
+  iconv_wrapper desc (to, from);
 
   inleft = num_bytes;
   inp = (ICONV_CONST char *) bytes;
@@ -513,7 +544,7 @@ convert_between_encodings (const char *from, const char *to,
       outp = (char *) obstack_base (output) + old_size;
       outleft = space_request;
 
-      r = iconv (desc, &inp, &inleft, &outp, &outleft);
+      r = desc.convert (&inp, &inleft, &outp, &outleft);
 
       /* Now make sure that the object on the obstack only includes
 	 bytes we have converted.  */
@@ -565,77 +596,34 @@ convert_between_encodings (const char *from, const char *to,
 	    }
 	}
     }
-
-  do_cleanups (cleanups);
 }
 
 
 
-/* An iterator that returns host wchar_t's from a target string.  */
-struct wchar_iterator
-{
-  /* The underlying iconv descriptor.  */
-  iconv_t desc;
-
-  /* The input string.  This is updated as convert characters.  */
-  const gdb_byte *input;
-  /* The number of bytes remaining in the input.  */
-  size_t bytes;
-
-  /* The width of an input character.  */
-  size_t width;
-
-  /* The output buffer and its size.  */
-  gdb_wchar_t *out;
-  size_t out_size;
-};
-
 /* Create a new iterator.  */
-struct wchar_iterator *
-make_wchar_iterator (const gdb_byte *input, size_t bytes, 
-		     const char *charset, size_t width)
+wchar_iterator::wchar_iterator (const gdb_byte *input, size_t bytes, 
+				const char *charset, size_t width)
+: m_input (input),
+  m_bytes (bytes),
+  m_width (width),
+  m_out (1)
 {
-  struct wchar_iterator *result;
-  iconv_t desc;
-
-  desc = iconv_open (INTERMEDIATE_ENCODING, charset);
-  if (desc == (iconv_t) -1)
+  m_desc = iconv_open (INTERMEDIATE_ENCODING, charset);
+  if (m_desc == (iconv_t) -1)
     perror_with_name (_("Converting character sets"));
-
-  result = XNEW (struct wchar_iterator);
-  result->desc = desc;
-  result->input = input;
-  result->bytes = bytes;
-  result->width = width;
-
-  result->out = XNEW (gdb_wchar_t);
-  result->out_size = 1;
-
-  return result;
 }
 
-static void
-do_cleanup_iterator (void *p)
+wchar_iterator::~wchar_iterator ()
 {
-  struct wchar_iterator *iter = (struct wchar_iterator *) p;
-
-  iconv_close (iter->desc);
-  xfree (iter->out);
-  xfree (iter);
-}
-
-struct cleanup *
-make_cleanup_wchar_iterator (struct wchar_iterator *iter)
-{
-  return make_cleanup (do_cleanup_iterator, iter);
+  if (m_desc != (iconv_t) -1)
+    iconv_close (m_desc);
 }
 
 int
-wchar_iterate (struct wchar_iterator *iter,
-	       enum wchar_iterate_result *out_result,
-	       gdb_wchar_t **out_chars,
-	       const gdb_byte **ptr,
-	       size_t *len)
+wchar_iterator::iterate (enum wchar_iterate_result *out_result,
+			 gdb_wchar_t **out_chars,
+			 const gdb_byte **ptr,
+			 size_t *len)
 {
   size_t out_request;
 
@@ -645,17 +633,17 @@ wchar_iterate (struct wchar_iterator *iter,
      invalid input sequence -- but we want to reliably report this to
      our caller so it can emit an escape sequence.  */
   out_request = 1;
-  while (iter->bytes > 0)
+  while (m_bytes > 0)
     {
-      ICONV_CONST char *inptr = (ICONV_CONST char *) iter->input;
-      char *outptr = (char *) &iter->out[0];
-      const gdb_byte *orig_inptr = iter->input;
-      size_t orig_in = iter->bytes;
+      ICONV_CONST char *inptr = (ICONV_CONST char *) m_input;
+      char *outptr = (char *) m_out.data ();
+      const gdb_byte *orig_inptr = m_input;
+      size_t orig_in = m_bytes;
       size_t out_avail = out_request * sizeof (gdb_wchar_t);
       size_t num;
-      size_t r = iconv (iter->desc, &inptr, &iter->bytes, &outptr, &out_avail);
+      size_t r = iconv (m_desc, &inptr, &m_bytes, &outptr, &out_avail);
 
-      iter->input = (gdb_byte *) inptr;
+      m_input = (gdb_byte *) inptr;
 
       if (r == (size_t) -1)
 	{
@@ -670,10 +658,10 @@ wchar_iterate (struct wchar_iterator *iter,
 	      /* Otherwise skip the first invalid character, and let
 		 the caller know about it.  */
 	      *out_result = wchar_iterate_invalid;
-	      *ptr = iter->input;
-	      *len = iter->width;
-	      iter->input += iter->width;
-	      iter->bytes -= iter->width;
+	      *ptr = m_input;
+	      *len = m_width;
+	      m_input += m_width;
+	      m_bytes -= m_width;
 	      return 0;
 
 	    case E2BIG:
@@ -684,20 +672,17 @@ wchar_iterate (struct wchar_iterator *iter,
 		break;
 
 	      ++out_request;
-	      if (out_request > iter->out_size)
-		{
-		  iter->out_size = out_request;
-		  iter->out = XRESIZEVEC (gdb_wchar_t, iter->out, out_request);
-		}
+	      if (out_request > m_out.size ())
+		m_out.reserve (out_request);
 	      continue;
 
 	    case EINVAL:
 	      /* Incomplete input sequence.  Let the caller know, and
 		 arrange for future calls to see EOF.  */
 	      *out_result = wchar_iterate_incomplete;
-	      *ptr = iter->input;
-	      *len = iter->bytes;
-	      iter->bytes = 0;
+	      *ptr = m_input;
+	      *len = m_bytes;
+	      m_bytes = 0;
 	      return 0;
 
 	    default:
@@ -709,9 +694,9 @@ wchar_iterate (struct wchar_iterator *iter,
       /* We converted something.  */
       num = out_request - out_avail / sizeof (gdb_wchar_t);
       *out_result = wchar_iterate_ok;
-      *out_chars = iter->out;
+      *out_chars = m_out.data ();
       *ptr = orig_inptr;
-      *len = orig_in - iter->bytes;
+      *len = orig_in - m_bytes;
       return num;
     }
 
@@ -732,7 +717,11 @@ static VEC (char_ptr) *charsets;
 static void
 find_charset_names (void)
 {
-  VEC_safe_push (char_ptr, charsets, GDB_DEFAULT_HOST_CHARSET);
+  /* Cast is fine here, because CHARSETS is never released.  Note that
+     the vec does not hold "const char *" pointers instead of "char *"
+     because the non-phony version stores heap-allocated strings in
+     it.  */
+  VEC_safe_push (char_ptr, charsets, (char *) GDB_DEFAULT_HOST_CHARSET);
   VEC_safe_push (char_ptr, charsets, NULL);
 }
 
@@ -801,7 +790,7 @@ static void
 find_charset_names (void)
 {
   struct pex_obj *child;
-  char *args[3];
+  const char *args[3];
   int err, status;
   int fail = 1;
   int flags;
@@ -837,7 +826,8 @@ find_charset_names (void)
 #endif
   /* Note that we simply ignore errors here.  */
   if (!pex_run_in_environment (child, flags,
-			       args[0], args, environ_vector (iconv_env),
+			       args[0], const_cast<char **> (args),
+			       environ_vector (iconv_env),
 			       NULL, NULL, &err))
     {
       FILE *in = pex_read_output (child, 0);

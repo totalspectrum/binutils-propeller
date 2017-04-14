@@ -1,6 +1,6 @@
 /* Target-dependent code for Xilinx MicroBlaze.
 
-   Copyright (C) 2009-2015 Free Software Foundation, Inc.
+   Copyright (C) 2009-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -134,15 +134,10 @@ microblaze_fetch_instruction (CORE_ADDR pc)
   return extract_unsigned_integer (buf, 4, byte_order);
 }
 
-static const gdb_byte *
-microblaze_breakpoint_from_pc (struct gdbarch *gdbarch, CORE_ADDR *pc, 
-			       int *len)
-{
-  static gdb_byte break_insn[] = MICROBLAZE_BREAKPOINT;
+constexpr gdb_byte microblaze_break_insn[] = MICROBLAZE_BREAKPOINT;
 
-  *len = sizeof (break_insn);
-  return break_insn;
-}
+typedef BP_MANIPULATION (microblaze_break_insn) microblaze_breakpoint;
+
 
 /* Allocate and initialize a frame cache.  */
 
@@ -437,7 +432,6 @@ microblaze_frame_cache (struct frame_info *next_frame, void **this_cache)
 {
   struct microblaze_frame_cache *cache;
   struct gdbarch *gdbarch = get_frame_arch (next_frame);
-  CORE_ADDR func;
   int rn;
 
   if (*this_cache)
@@ -451,7 +445,8 @@ microblaze_frame_cache (struct frame_info *next_frame, void **this_cache)
   for (rn = 0; rn < gdbarch_num_regs (gdbarch); rn++)
     cache->register_offsets[rn] = -1;
 
-  func = get_frame_func (next_frame);
+  /* Call for side effects.  */
+  get_frame_func (next_frame);
 
   cache->pc = get_frame_address_in_block (next_frame);
 
@@ -638,8 +633,9 @@ static int dwarf2_to_reg_map[78] =
 static int
 microblaze_dwarf2_reg_to_regnum (struct gdbarch *gdbarch, int reg)
 {
-  gdb_assert ((size_t) reg < sizeof (dwarf2_to_reg_map));
-  return dwarf2_to_reg_map[reg];
+  if (reg >= 0 && reg < sizeof (dwarf2_to_reg_map))
+    return dwarf2_to_reg_map[reg];
+  return -1;
 }
 
 static void
@@ -735,7 +731,10 @@ microblaze_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   /* Stack grows downward.  */
   set_gdbarch_inner_than (gdbarch, core_addr_lessthan);
 
-  set_gdbarch_breakpoint_from_pc (gdbarch, microblaze_breakpoint_from_pc);
+  set_gdbarch_breakpoint_kind_from_pc (gdbarch,
+				       microblaze_breakpoint::kind_from_pc);
+  set_gdbarch_sw_breakpoint_from_kind (gdbarch,
+				       microblaze_breakpoint::bp_from_kind);
 
   set_gdbarch_frame_args_skip (gdbarch, 8);
 

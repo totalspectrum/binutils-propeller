@@ -1,6 +1,6 @@
 /* Target-dependent code for the HP PA-RISC architecture.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    Contributed by the Center for Software Science at the
    University of Utah (pa-gdb-bugs@cs.utah.edu).
@@ -39,6 +39,7 @@
 #include "gdbtypes.h"
 #include "objfiles.h"
 #include "hppa-tdep.h"
+#include <algorithm>
 
 static int hppa_debug = 0;
 
@@ -104,7 +105,7 @@ static const struct objfile_data *hppa_objfile_priv_data = NULL;
 static int
 hppa_sign_extend (unsigned val, unsigned bits)
 {
-  return (int) (val >> (bits - 1) ? (-1 << bits) | val : val);
+  return (int) (val >> (bits - 1) ? (-(1 << bits)) | val : val);
 }
 
 /* For many immediate values the sign bit is the low bit!  */
@@ -112,7 +113,7 @@ hppa_sign_extend (unsigned val, unsigned bits)
 static int
 hppa_low_hppa_sign_extend (unsigned val, unsigned bits)
 {
-  return (int) ((val & 0x1 ? (-1 << (bits - 1)) : 0) | val >> 1);
+  return (int) ((val & 0x1 ? (-(1 << (bits - 1))) : 0) | val >> 1);
 }
 
 /* Extract the bits at positions between FROM and TO, using HP's numbering
@@ -603,20 +604,16 @@ hppa_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
   return 0;
 }
 
-static const unsigned char *
-hppa_breakpoint_from_pc (struct gdbarch *gdbarch, CORE_ADDR *pc, int *len)
-{
-  static const unsigned char breakpoint[] = {0x00, 0x01, 0x00, 0x04};
-  (*len) = sizeof (breakpoint);
-  return breakpoint;
-}
+constexpr gdb_byte hppa_break_insn[] = {0x00, 0x01, 0x00, 0x04};
+
+typedef BP_MANIPULATION (hppa_break_insn) hppa_breakpoint;
 
 /* Return the name of a register.  */
 
 static const char *
 hppa32_register_name (struct gdbarch *gdbarch, int i)
 {
-  static char *names[] = {
+  static const char *names[] = {
     "flags",  "r1",      "rp",     "r3",
     "r4",     "r5",      "r6",     "r7",
     "r8",     "r9",      "r10",    "r11",
@@ -659,7 +656,7 @@ hppa32_register_name (struct gdbarch *gdbarch, int i)
 static const char *
 hppa64_register_name (struct gdbarch *gdbarch, int i)
 {
-  static char *names[] = {
+  static const char *names[] = {
     "flags",  "r1",      "rp",     "r3",
     "r4",     "r5",      "r6",     "r7",
     "r8",     "r9",      "r10",    "r11",
@@ -696,14 +693,13 @@ static int
 hppa64_dwarf_reg_to_regnum (struct gdbarch *gdbarch, int reg)
 {
   /* The general registers and the sar are the same in both sets.  */
-  if (reg <= 32)
+  if (reg >= 0 && reg <= 32)
     return reg;
 
   /* fr4-fr31 are mapped from 72 in steps of 2.  */
   if (reg >= 72 && reg < 72 + 28 * 2 && !(reg & 1))
     return HPPA64_FP4_REGNUM + (reg - 72) / 2;
 
-  warning (_("Unmapped DWARF DBX Register #%d encountered."), reg);
   return -1;
 }
 
@@ -730,10 +726,6 @@ hppa32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   CORE_ADDR struct_end = 0;
   /* Stack base address at which the first parameter is stored.  */
   CORE_ADDR param_end = 0;
-
-  /* The inner most end of the stack after all the parameters have
-     been pushed.  */
-  CORE_ADDR new_sp = 0;
 
   /* Two passes.  First pass computes the location of everything,
      second pass writes the bytes out.  */
@@ -903,6 +895,7 @@ hppa64_integral_or_pointer_p (const struct type *type)
       }
     case TYPE_CODE_PTR:
     case TYPE_CODE_REF:
+    case TYPE_CODE_RVALUE_REF:
       return (TYPE_LENGTH (type) == 8);
     default:
       break;
@@ -1099,10 +1092,10 @@ hppa64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       while (regnum > HPPA_ARG0_REGNUM - 8 && len > 0)
 	{
 	  regcache_cooked_write_part (regcache, regnum,
-				      offset % 8, min (len, 8), valbuf);
-	  offset += min (len, 8);
-	  valbuf += min (len, 8);
-	  len -= min (len, 8);
+				      offset % 8, std::min (len, 8), valbuf);
+	  offset += std::min (len, 8);
+	  valbuf += std::min (len, 8);
+	  len -= std::min (len, 8);
 	  regnum--;
 	}
 
@@ -1114,7 +1107,7 @@ hppa64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 
   /* Allocate the outgoing parameter area.  Make sure the outgoing
      parameter area is multiple of 16 bytes in length.  */
-  sp += max (align_up (offset, 16), 64);
+  sp += std::max (align_up (offset, 16), (ULONGEST) 64);
 
   /* Allocate 32-bytes of scratch space.  The documentation doesn't
      mention this, but it seems to be needed.  */
@@ -1256,9 +1249,9 @@ hppa64_return_value (struct gdbarch *gdbarch, struct value *function,
       while (len > 0)
 	{
 	  regcache_cooked_read_part (regcache, regnum, offset,
-				     min (len, 8), readbuf);
-	  readbuf += min (len, 8);
-	  len -= min (len, 8);
+				     std::min (len, 8), readbuf);
+	  readbuf += std::min (len, 8);
+	  len -= std::min (len, 8);
 	  regnum++;
 	}
     }
@@ -1268,9 +1261,9 @@ hppa64_return_value (struct gdbarch *gdbarch, struct value *function,
       while (len > 0)
 	{
 	  regcache_cooked_write_part (regcache, regnum, offset,
-				      min (len, 8), writebuf);
-	  writebuf += min (len, 8);
-	  len -= min (len, 8);
+				      std::min (len, 8), writebuf);
+	  writebuf += std::min (len, 8);
+	  len -= std::min (len, 8);
 	  regnum++;
 	}
     }
@@ -1358,7 +1351,7 @@ prologue_inst_adjust_sp (unsigned long inst)
 
   /* std,ma X,D(sp) */
   if ((inst & 0xffe00008) == 0x73c00008)
-    return (inst & 0x1 ? -1 << 13 : 0) | (((inst >> 4) & 0x3ff) << 3);
+    return (inst & 0x1 ? -(1 << 13) : 0) | (((inst >> 4) & 0x3ff) << 3);
 
   /* addil high21,%r30; ldo low11,(%r1),%r30)
      save high bits in save_high21 for later use.  */
@@ -1854,7 +1847,7 @@ hppa_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
      may be the first instruction of the prologue.  If that happens, then
      the instruction skipping code has a bug that needs to be fixed.  */
   if (post_prologue_pc != 0)
-    return max (pc, post_prologue_pc);
+    return std::max (pc, post_prologue_pc);
   else
     return (skip_prologue_hard_way (gdbarch, pc, 1));
 }
@@ -2067,7 +2060,7 @@ hppa_frame_cache (struct frame_info *this_frame, void **this_cache)
 		CORE_ADDR offset;
 		
 		if ((inst >> 26) == 0x1c)
-		  offset = (inst & 0x1 ? -1 << 13 : 0)
+		  offset = (inst & 0x1 ? -(1 << 13) : 0)
 		    | (((inst >> 4) & 0x3ff) << 3);
 		else if ((inst >> 26) == 0x03)
 		  offset = hppa_low_hppa_sign_extend (inst & 0x1f, 5);
@@ -2289,7 +2282,6 @@ hppa_frame_this_id (struct frame_info *this_frame, void **this_cache,
 		    struct frame_id *this_id)
 {
   struct hppa_frame_cache *info;
-  CORE_ADDR pc = get_frame_pc (this_frame);
   struct unwind_table_entry *u;
 
   info = hppa_frame_cache (this_frame, this_cache);
@@ -2462,21 +2454,6 @@ hppa_stub_frame_unwind_cache (struct frame_info *this_frame,
   info->saved_regs = trad_frame_alloc_saved_regs (this_frame);
 
   info->base = get_frame_register_unsigned (this_frame, HPPA_SP_REGNUM);
-
-  if (gdbarch_osabi (gdbarch) == GDB_OSABI_HPUX_SOM)
-    {
-      /* HPUX uses export stubs in function calls; the export stub clobbers
-         the return value of the caller, and, later restores it from the
-	 stack.  */
-      u = find_unwind_entry (get_frame_pc (this_frame));
-
-      if (u && u->stub_unwind.stub_type == EXPORT)
-	{
-          info->saved_regs[HPPA_PCOQ_HEAD_REGNUM].addr = info->base - 24;
-
-	  return info;
-	}
-    }
 
   /* By default we assume that stubs do not change the rp.  */
   info->saved_regs[HPPA_PCOQ_HEAD_REGNUM].realreg = HPPA_RP_REGNUM;
@@ -3071,14 +3048,6 @@ hppa_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
   struct gdbarch_tdep *tdep;
   struct gdbarch *gdbarch;
-  
-  /* Try to determine the ABI of the object we are loading.  */
-  if (info.abfd != NULL && info.osabi == GDB_OSABI_UNKNOWN)
-    {
-      /* If it's a SOM file, assume it's HP/UX SOM.  */
-      if (bfd_get_flavour (info.abfd) == bfd_target_som_flavour)
-	info.osabi = GDB_OSABI_HPUX_SOM;
-    }
 
   /* find a candidate among the list of pre-declared architectures.  */
   arches = gdbarch_list_lookup_by_info (arches, &info);
@@ -3191,7 +3160,8 @@ hppa_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
       internal_error (__FILE__, __LINE__, _("bad switch"));
     }
       
-  set_gdbarch_breakpoint_from_pc (gdbarch, hppa_breakpoint_from_pc);
+  set_gdbarch_breakpoint_kind_from_pc (gdbarch, hppa_breakpoint::kind_from_pc);
+  set_gdbarch_sw_breakpoint_from_kind (gdbarch, hppa_breakpoint::bp_from_kind);
   set_gdbarch_pseudo_register_read (gdbarch, hppa_pseudo_register_read);
 
   /* Frame unwind methods.  */
@@ -3225,8 +3195,6 @@ extern initialize_file_ftype _initialize_hppa_tdep;
 void
 _initialize_hppa_tdep (void)
 {
-  struct cmd_list_element *c;
-
   gdbarch_register (bfd_arch_hppa, hppa_gdbarch_init, hppa_dump_tdep);
 
   hppa_objfile_priv_data = register_objfile_data ();

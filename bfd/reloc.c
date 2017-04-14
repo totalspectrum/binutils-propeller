@@ -1,5 +1,5 @@
 /* BFD support for handling relocation entries.
-   Copyright (C) 1990-2015 Free Software Foundation, Inc.
+   Copyright (C) 1990-2017 Free Software Foundation, Inc.
    Written by Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -586,16 +586,6 @@ bfd_perform_relocation (bfd *abfd,
   asymbol *symbol;
 
   symbol = *(reloc_entry->sym_ptr_ptr);
-  if (bfd_is_abs_section (symbol->section)
-      && output_bfd != NULL)
-    {
-      reloc_entry->address += input_section->output_offset;
-      return bfd_reloc_ok;
-    }
-
-  /* PR 17512: file: 0f67f69d.  */
-  if (howto == NULL)
-    return bfd_reloc_undefined;
 
   /* If we are not producing relocatable output, return an error if
      the symbol is not defined.  An undefined weak symbol is
@@ -608,7 +598,7 @@ bfd_perform_relocation (bfd *abfd,
   /* If there is a function supplied to handle this relocation type,
      call it.  It'll return `bfd_reloc_continue' if further processing
      can be done.  */
-  if (howto->special_function)
+  if (howto && howto->special_function)
     {
       bfd_reloc_status_type cont;
       cont = howto->special_function (abfd, reloc_entry, symbol, data,
@@ -617,6 +607,17 @@ bfd_perform_relocation (bfd *abfd,
       if (cont != bfd_reloc_continue)
 	return cont;
     }
+
+  if (bfd_is_abs_section (symbol->section)
+      && output_bfd != NULL)
+    {
+      reloc_entry->address += input_section->output_offset;
+      return bfd_reloc_ok;
+    }
+
+  /* PR 17512: file: 0f67f69d.  */
+  if (howto == NULL)
+    return bfd_reloc_undefined;
 
   /* Is the address of the relocation really within the section?
      Include the size of the reloc in the test for out of range addresses.
@@ -981,16 +982,11 @@ bfd_install_relocation (bfd *abfd,
   bfd_byte *data;
 
   symbol = *(reloc_entry->sym_ptr_ptr);
-  if (bfd_is_abs_section (symbol->section))
-    {
-      reloc_entry->address += input_section->output_offset;
-      return bfd_reloc_ok;
-    }
 
   /* If there is a function supplied to handle this relocation type,
      call it.  It'll return `bfd_reloc_continue' if further processing
      can be done.  */
-  if (howto->special_function)
+  if (howto && howto->special_function)
     {
       bfd_reloc_status_type cont;
 
@@ -1004,6 +1000,15 @@ bfd_install_relocation (bfd *abfd,
       if (cont != bfd_reloc_continue)
 	return cont;
     }
+
+  if (bfd_is_abs_section (symbol->section))
+    {
+      reloc_entry->address += input_section->output_offset;
+      return bfd_reloc_ok;
+    }
+
+  /* No need to check for howto != NULL if !bfd_is_abs_section as
+     it will have been checked in `bfd_perform_relocation already'.  */
 
   /* Is the address of the relocation really within the section?  */
   octets = reloc_entry->address * bfd_octets_per_byte (abfd);
@@ -1375,7 +1380,8 @@ _bfd_final_link_relocate (reloc_howto_type *howto,
     }
 
   return _bfd_relocate_contents (howto, input_bfd, relocation,
-				 contents + address);
+				 contents
+				 + address * bfd_octets_per_byte (input_bfd));
 }
 
 /* Relocate a given location using a given value and howto.  */
@@ -2304,6 +2310,11 @@ ENUMDOC
   microMIPS PC-relative relocations.
 
 ENUM
+  BFD_RELOC_MIPS16_16_PCREL_S1
+ENUMDOC
+  MIPS16 PC-relative relocation.
+
+ENUM
   BFD_RELOC_MIPS_21_PCREL_S2
 ENUMX
   BFD_RELOC_MIPS_26_PCREL_S2
@@ -2676,6 +2687,8 @@ ENUMX
   BFD_RELOC_386_TLS_DESC
 ENUMX
   BFD_RELOC_386_IRELATIVE
+ENUMX
+  BFD_RELOC_386_GOT32X
 ENUMDOC
   i386/elf relocations
 
@@ -2737,6 +2750,10 @@ ENUMX
   BFD_RELOC_X86_64_PC32_BND
 ENUMX
   BFD_RELOC_X86_64_PLT32_BND
+ENUMX
+  BFD_RELOC_X86_64_GOTPCRELX
+ENUMX
+  BFD_RELOC_X86_64_REX_GOTPCRELX
 ENUMDOC
   x86-64/elf relocations
 
@@ -2884,6 +2901,10 @@ ENUMX
 ENUMX
   BFD_RELOC_PPC_VLE_SDAREL_HA16D
 ENUMX
+  BFD_RELOC_PPC_16DX_HA
+ENUMX
+  BFD_RELOC_PPC_REL16DX_HA
+ENUMX
   BFD_RELOC_PPC64_HIGHER
 ENUMX
   BFD_RELOC_PPC64_HIGHER_S
@@ -2935,6 +2956,8 @@ ENUMX
   BFD_RELOC_PPC64_ADDR16_HIGHA
 ENUMX
   BFD_RELOC_PPC64_ADDR64_LOCAL
+ENUMX
+  BFD_RELOC_PPC64_ENTRY
 ENUMDOC
   Power(rs6000) and PowerPC relocations.
 
@@ -3311,6 +3334,17 @@ ENUMDOC
   ARM support for STT_GNU_IFUNC.
 
 ENUM
+  BFD_RELOC_ARM_THUMB_ALU_ABS_G0_NC
+ENUMX
+  BFD_RELOC_ARM_THUMB_ALU_ABS_G1_NC
+ENUMX
+  BFD_RELOC_ARM_THUMB_ALU_ABS_G2_NC
+ENUMX
+  BFD_RELOC_ARM_THUMB_ALU_ABS_G3_NC
+ENUMDOC
+  Thumb1 relocations to support execute-only code.
+
+ENUM
   BFD_RELOC_ARM_IMMEDIATE
 ENUMX
   BFD_RELOC_ARM_ADRL_IMMEDIATE
@@ -3564,18 +3598,143 @@ ENUMDOC
   Renesas / SuperH SH relocs.  Not all of these appear in object files.
 
 ENUM
-  BFD_RELOC_ARC_B22_PCREL
+  BFD_RELOC_ARC_NONE
+ENUMX
+  BFD_RELOC_ARC_8
+ENUMX
+  BFD_RELOC_ARC_16
+ENUMX
+  BFD_RELOC_ARC_24
+ENUMX
+  BFD_RELOC_ARC_32
+ENUMX
+  BFD_RELOC_ARC_N8
+ENUMX
+  BFD_RELOC_ARC_N16
+ENUMX
+  BFD_RELOC_ARC_N24
+ENUMX
+  BFD_RELOC_ARC_N32
+ENUMX
+  BFD_RELOC_ARC_SDA
+ENUMX
+  BFD_RELOC_ARC_SECTOFF
+ENUMX
+  BFD_RELOC_ARC_S21H_PCREL
+ENUMX
+  BFD_RELOC_ARC_S21W_PCREL
+ENUMX
+  BFD_RELOC_ARC_S25H_PCREL
+ENUMX
+  BFD_RELOC_ARC_S25W_PCREL
+ENUMX
+  BFD_RELOC_ARC_SDA32
+ENUMX
+  BFD_RELOC_ARC_SDA_LDST
+ENUMX
+  BFD_RELOC_ARC_SDA_LDST1
+ENUMX
+  BFD_RELOC_ARC_SDA_LDST2
+ENUMX
+  BFD_RELOC_ARC_SDA16_LD
+ENUMX
+  BFD_RELOC_ARC_SDA16_LD1
+ENUMX
+  BFD_RELOC_ARC_SDA16_LD2
+ENUMX
+  BFD_RELOC_ARC_S13_PCREL
+ENUMX
+  BFD_RELOC_ARC_W
+ENUMX
+  BFD_RELOC_ARC_32_ME
+ENUMX
+  BFD_RELOC_ARC_32_ME_S
+ENUMX
+  BFD_RELOC_ARC_N32_ME
+ENUMX
+  BFD_RELOC_ARC_SECTOFF_ME
+ENUMX
+  BFD_RELOC_ARC_SDA32_ME
+ENUMX
+  BFD_RELOC_ARC_W_ME
+ENUMX
+  BFD_RELOC_AC_SECTOFF_U8
+ENUMX
+  BFD_RELOC_AC_SECTOFF_U8_1
+ENUMX
+  BFD_RELOC_AC_SECTOFF_U8_2
+ENUMX
+  BFD_RELOC_AC_SECTOFF_S9
+ENUMX
+  BFD_RELOC_AC_SECTOFF_S9_1
+ENUMX
+  BFD_RELOC_AC_SECTOFF_S9_2
+ENUMX
+  BFD_RELOC_ARC_SECTOFF_ME_1
+ENUMX
+  BFD_RELOC_ARC_SECTOFF_ME_2
+ENUMX
+  BFD_RELOC_ARC_SECTOFF_1
+ENUMX
+  BFD_RELOC_ARC_SECTOFF_2
+ENUMX
+  BFD_RELOC_ARC_SDA_12
+ENUMX
+  BFD_RELOC_ARC_SDA16_ST2
+ENUMX
+  BFD_RELOC_ARC_32_PCREL
+ENUMX
+  BFD_RELOC_ARC_PC32
+ENUMX
+  BFD_RELOC_ARC_GOT32
+ENUMX
+  BFD_RELOC_ARC_GOTPC32
+ENUMX
+  BFD_RELOC_ARC_PLT32
+ENUMX
+  BFD_RELOC_ARC_COPY
+ENUMX
+  BFD_RELOC_ARC_GLOB_DAT
+ENUMX
+  BFD_RELOC_ARC_JMP_SLOT
+ENUMX
+  BFD_RELOC_ARC_RELATIVE
+ENUMX
+  BFD_RELOC_ARC_GOTOFF
+ENUMX
+  BFD_RELOC_ARC_GOTPC
+ENUMX
+  BFD_RELOC_ARC_S21W_PCREL_PLT
+ENUMX
+  BFD_RELOC_ARC_S25H_PCREL_PLT
+ENUMX
+  BFD_RELOC_ARC_TLS_DTPMOD
+ENUMX
+  BFD_RELOC_ARC_TLS_TPOFF
+ENUMX
+  BFD_RELOC_ARC_TLS_GD_GOT
+ENUMX
+  BFD_RELOC_ARC_TLS_GD_LD
+ENUMX
+  BFD_RELOC_ARC_TLS_GD_CALL
+ENUMX
+  BFD_RELOC_ARC_TLS_IE_GOT
+ENUMX
+  BFD_RELOC_ARC_TLS_DTPOFF
+ENUMX
+  BFD_RELOC_ARC_TLS_DTPOFF_S9
+ENUMX
+  BFD_RELOC_ARC_TLS_LE_S9
+ENUMX
+  BFD_RELOC_ARC_TLS_LE_32
+ENUMX
+  BFD_RELOC_ARC_S25W_PCREL_PLT
+ENUMX
+  BFD_RELOC_ARC_S21H_PCREL_PLT
+ENUMX
+  BFD_RELOC_ARC_NPS_CMEM16
 ENUMDOC
-  ARC Cores relocs.
-  ARC 22 bit pc-relative branch.  The lowest two bits must be zero and are
-  not stored in the instruction.  The high 20 bits are installed in bits 26
-  through 7 of the instruction.
-ENUM
-  BFD_RELOC_ARC_B26
-ENUMDOC
-  ARC 26 bit absolute branch.  The lowest two bits must be zero and are not
-  stored in the instruction.  The high 24 bits are installed in bits 23
-  through 0.
+  ARC relocs.
 
 ENUM
   BFD_RELOC_BFIN_16_IMM
@@ -4939,6 +5098,104 @@ ENUM
 ENUMDOC
   This is a 5 bit reloc for the AVR that stores an I/O register
   number for the SBIC, SBIS, SBI and CBI instructions
+
+ENUM
+  BFD_RELOC_RISCV_HI20
+ENUMX
+  BFD_RELOC_RISCV_PCREL_HI20
+ENUMX
+  BFD_RELOC_RISCV_PCREL_LO12_I
+ENUMX
+  BFD_RELOC_RISCV_PCREL_LO12_S
+ENUMX
+  BFD_RELOC_RISCV_LO12_I
+ENUMX
+  BFD_RELOC_RISCV_LO12_S
+ENUMX
+  BFD_RELOC_RISCV_GPREL12_I
+ENUMX
+  BFD_RELOC_RISCV_GPREL12_S
+ENUMX
+  BFD_RELOC_RISCV_TPREL_HI20
+ENUMX
+  BFD_RELOC_RISCV_TPREL_LO12_I
+ENUMX
+  BFD_RELOC_RISCV_TPREL_LO12_S
+ENUMX
+  BFD_RELOC_RISCV_TPREL_ADD
+ENUMX
+  BFD_RELOC_RISCV_CALL
+ENUMX
+  BFD_RELOC_RISCV_CALL_PLT
+ENUMX
+  BFD_RELOC_RISCV_ADD8
+ENUMX
+  BFD_RELOC_RISCV_ADD16
+ENUMX
+  BFD_RELOC_RISCV_ADD32
+ENUMX
+  BFD_RELOC_RISCV_ADD64
+ENUMX
+  BFD_RELOC_RISCV_SUB8
+ENUMX
+  BFD_RELOC_RISCV_SUB16
+ENUMX
+  BFD_RELOC_RISCV_SUB32
+ENUMX
+  BFD_RELOC_RISCV_SUB64
+ENUMX
+  BFD_RELOC_RISCV_GOT_HI20
+ENUMX
+  BFD_RELOC_RISCV_TLS_GOT_HI20
+ENUMX
+  BFD_RELOC_RISCV_TLS_GD_HI20
+ENUMX
+  BFD_RELOC_RISCV_JMP
+ENUMX
+  BFD_RELOC_RISCV_TLS_DTPMOD32
+ENUMX
+  BFD_RELOC_RISCV_TLS_DTPREL32
+ENUMX
+  BFD_RELOC_RISCV_TLS_DTPMOD64
+ENUMX
+  BFD_RELOC_RISCV_TLS_DTPREL64
+ENUMX
+  BFD_RELOC_RISCV_TLS_TPREL32
+ENUMX
+  BFD_RELOC_RISCV_TLS_TPREL64
+ENUMX
+  BFD_RELOC_RISCV_ALIGN
+ENUMX
+  BFD_RELOC_RISCV_RVC_BRANCH
+ENUMX
+  BFD_RELOC_RISCV_RVC_JUMP
+ENUMX
+  BFD_RELOC_RISCV_RVC_LUI
+ENUMX
+  BFD_RELOC_RISCV_GPREL_I
+ENUMX
+  BFD_RELOC_RISCV_GPREL_S
+ENUMX
+  BFD_RELOC_RISCV_TPREL_I
+ENUMX
+  BFD_RELOC_RISCV_TPREL_S
+ENUMX
+  BFD_RELOC_RISCV_RELAX
+ENUMX
+  BFD_RELOC_RISCV_CFA
+ENUMX
+  BFD_RELOC_RISCV_SUB6
+ENUMX
+  BFD_RELOC_RISCV_SET6
+ENUMX
+  BFD_RELOC_RISCV_SET8
+ENUMX
+  BFD_RELOC_RISCV_SET16
+ENUMX
+  BFD_RELOC_RISCV_SET32
+ENUMDOC
+  RISC-V relocations.
+
 ENUM
   BFD_RELOC_RL78_NEG8
 ENUMX
@@ -6311,6 +6568,54 @@ ENUMDOC
   Relocations used by the Altera Nios II core.
 
 ENUM
+  BFD_RELOC_PRU_U16
+ENUMDOC
+  PRU LDI 16-bit unsigned data-memory relocation.
+ENUM
+  BFD_RELOC_PRU_U16_PMEMIMM
+ENUMDOC
+  PRU LDI 16-bit unsigned instruction-memory relocation.
+ENUM
+  BFD_RELOC_PRU_LDI32
+ENUMDOC
+  PRU relocation for two consecutive LDI load instructions that load a
+  32 bit value into a register. If the higher bits are all zero, then
+  the second instruction may be relaxed.
+ENUM
+  BFD_RELOC_PRU_S10_PCREL
+ENUMDOC
+  PRU QBBx 10-bit signed PC-relative relocation.
+ENUM
+  BFD_RELOC_PRU_U8_PCREL
+ENUMDOC
+  PRU 8-bit unsigned relocation used for the LOOP instruction.
+ENUM
+  BFD_RELOC_PRU_32_PMEM
+ENUMX
+  BFD_RELOC_PRU_16_PMEM
+ENUMDOC
+  PRU Program Memory relocations.  Used to convert from byte addressing to
+  32-bit word addressing.
+ENUM
+  BFD_RELOC_PRU_GNU_DIFF8
+ENUMX
+  BFD_RELOC_PRU_GNU_DIFF16
+ENUMX
+  BFD_RELOC_PRU_GNU_DIFF32
+ENUMX
+  BFD_RELOC_PRU_GNU_DIFF16_PMEM
+ENUMX
+  BFD_RELOC_PRU_GNU_DIFF32_PMEM
+ENUMDOC
+  PRU relocations to mark the difference of two local symbols.
+  These are only needed to support linker relaxation and can be ignored
+  when not relaxing.  The field is set to the value of the difference
+  assuming no relaxation.  The relocation encodes the position of the
+  second symbol so the linker can determine whether to adjust the field
+  value. The PMEM variants encode the word difference, instead of byte
+  difference between symbols.
+
+ENUM
   BFD_RELOC_IQ2000_OFFSET_16
 ENUMX
   BFD_RELOC_IQ2000_OFFSET_21
@@ -6510,6 +6815,14 @@ ENUM
   BFD_RELOC_MACH_O_PAIR
 ENUMDOC
   Pair of relocation.  Contains the first symbol.
+ENUM
+  BFD_RELOC_MACH_O_SUBTRACTOR32
+ENUMDOC
+  Symbol will be substracted.  Must be followed by a BFD_RELOC_32.
+ENUM
+  BFD_RELOC_MACH_O_SUBTRACTOR64
+ENUMDOC
+  Symbol will be substracted.  Must be followed by a BFD_RELOC_64.
 
 ENUM
   BFD_RELOC_MACH_O_X86_64_BRANCH32
@@ -6528,14 +6841,6 @@ ENUMDOC
   Used when loading a GOT entry with movq.  It is specially marked so that
   the linker could optimize the movq to a leaq if possible.
 ENUM
-  BFD_RELOC_MACH_O_X86_64_SUBTRACTOR32
-ENUMDOC
-  Symbol will be substracted.  Must be followed by a BFD_RELOC_64.
-ENUM
-  BFD_RELOC_MACH_O_X86_64_SUBTRACTOR64
-ENUMDOC
-  Symbol will be substracted.  Must be followed by a BFD_RELOC_64.
-ENUM
   BFD_RELOC_MACH_O_X86_64_PCREL32_1
 ENUMDOC
   Same as BFD_RELOC_32_PCREL but with an implicit -1 addend.
@@ -6547,6 +6852,24 @@ ENUM
   BFD_RELOC_MACH_O_X86_64_PCREL32_4
 ENUMDOC
   Same as BFD_RELOC_32_PCREL but with an implicit -4 addend.
+
+
+ENUM
+  BFD_RELOC_MACH_O_ARM64_ADDEND
+ENUMDOC
+  Addend for PAGE or PAGEOFF.
+ENUM
+  BFD_RELOC_MACH_O_ARM64_GOT_LOAD_PAGE21
+ENUMDOC
+  Relative offset to page of GOT slot.
+ENUM
+  BFD_RELOC_MACH_O_ARM64_GOT_LOAD_PAGEOFF12
+ENUMDOC
+  Relative offset within page of GOT slot.
+ENUM
+  BFD_RELOC_MACH_O_ARM64_POINTER_TO_GOT
+ENUMDOC
+  Address of a GOT entry.
 
 ENUM
   BFD_RELOC_MICROBLAZE_32_LO
@@ -6661,6 +6984,10 @@ ENUMDOC
   relocation enumerators.  N.B. the order of the enumerators is
   important as several tables in the AArch64 bfd backend are indexed
   by these enumerators; make sure they are all synced.
+ENUM
+  BFD_RELOC_AARCH64_NULL
+ENUMDOC
+  Deprecated AArch64 null relocation code.
 ENUM
   BFD_RELOC_AARCH64_NONE
 ENUMDOC
@@ -6838,6 +7165,16 @@ ENUMDOC
   Unsigned 12 bit byte offset for 32 bit load/store from the page of
   the GOT entry for this symbol.  Used in conjunction with
   BFD_RELOC_AARCH64_ADR_GOTPAGE.  Valid in ILP32 ABI only.
+ ENUM
+  BFD_RELOC_AARCH64_MOVW_GOTOFF_G0_NC
+ENUMDOC
+  Unsigned 16 bit byte offset for 64 bit load/store from the GOT entry
+  for this symbol.  Valid in LP64 ABI only.
+ENUM
+  BFD_RELOC_AARCH64_MOVW_GOTOFF_G1
+ENUMDOC
+  Unsigned 16 bit byte higher offset for 64 bit load/store from the GOT entry
+  for this symbol.  Valid in LP64 ABI only.
 ENUM
   BFD_RELOC_AARCH64_LD64_GOTOFF_LO15
 ENUMDOC
@@ -6869,13 +7206,13 @@ ENUMDOC
   tls_index structure.  Used in conjunction with
   BFD_RELOC_AARCH64_TLSGD_ADR_PAGE21.
 ENUM
-  BFD_RELOC_AARCH64_TLSIE_MOVW_GOTTPREL_G1
+  BFD_RELOC_AARCH64_TLSGD_MOVW_G0_NC
 ENUMDOC
-  AArch64 TLS INITIAL EXEC relocation.
+  AArch64 TLS General Dynamic relocation.
 ENUM
-  BFD_RELOC_AARCH64_TLSIE_MOVW_GOTTPREL_G0_NC
+  BFD_RELOC_AARCH64_TLSGD_MOVW_G1
 ENUMDOC
-  AArch64 TLS INITIAL EXEC relocation.
+  AArch64 TLS General Dynamic relocation.
 ENUM
   BFD_RELOC_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21
 ENUMDOC
@@ -6890,6 +7227,14 @@ ENUMDOC
   AArch64 TLS INITIAL EXEC relocation.
 ENUM
   BFD_RELOC_AARCH64_TLSIE_LD_GOTTPREL_PREL19
+ENUMDOC
+  AArch64 TLS INITIAL EXEC relocation.
+ENUM
+  BFD_RELOC_AARCH64_TLSIE_MOVW_GOTTPREL_G0_NC
+ENUMDOC
+  AArch64 TLS INITIAL EXEC relocation.
+ENUM
+  BFD_RELOC_AARCH64_TLSIE_MOVW_GOTTPREL_G1
 ENUMDOC
   AArch64 TLS INITIAL EXEC relocation.
 ENUM
@@ -7020,7 +7365,7 @@ ENUM
 ENUMDOC
   AArch64 TLS DESC relocation.
 ENUM
-  BFD_RELOC_AARCH64_TLSDESC_LD64_LO12_NC
+  BFD_RELOC_AARCH64_TLSDESC_LD64_LO12
 ENUMDOC
   AArch64 TLS DESC relocation.
 ENUM
@@ -7028,7 +7373,7 @@ ENUM
 ENUMDOC
   AArch64 TLS DESC relocation.
 ENUM
-  BFD_RELOC_AARCH64_TLSDESC_ADD_LO12_NC
+  BFD_RELOC_AARCH64_TLSDESC_ADD_LO12
 ENUMDOC
   AArch64 TLS DESC relocation.
 ENUM
@@ -7557,6 +7902,29 @@ ENUMX
 ENUMDOC
   Visium Relocations.
 
+ENUM
+  BFD_RELOC_WASM32_LEB128
+ENUMX
+  BFD_RELOC_WASM32_LEB128_GOT
+ENUMX
+  BFD_RELOC_WASM32_LEB128_GOT_CODE
+ENUMX
+  BFD_RELOC_WASM32_LEB128_PLT
+ENUMX
+  BFD_RELOC_WASM32_PLT_INDEX
+ENUMX
+  BFD_RELOC_WASM32_ABS32_CODE
+ENUMX
+  BFD_RELOC_WASM32_COPY
+ENUMX
+  BFD_RELOC_WASM32_CODE_POINTER
+ENUMX
+  BFD_RELOC_WASM32_INDEX
+ENUMX
+  BFD_RELOC_WASM32_PLT_SIG
+ENUMDOC
+  WebAssembly relocations.
+
 ENDSENUM
   BFD_RELOC_UNUSED
 CODE_FRAGMENT
@@ -7622,13 +7990,16 @@ bfd_default_reloc_type_lookup (bfd *abfd, bfd_reloc_code_real_type code)
 	{
 	case 64:
 	  BFD_FAIL ();
+	  break;
 	case 32:
 	  return &bfd_howto_32;
 	case 16:
 	  BFD_FAIL ();
+	  break;
 	default:
 	  BFD_FAIL ();
 	}
+      break;
     default:
       BFD_FAIL ();
     }
@@ -7726,7 +8097,7 @@ bfd_generic_lookup_section_flags (struct bfd_link_info *info ATTRIBUTE_UNUSED,
 {
   if (flaginfo != NULL)
     {
-      (*_bfd_error_handler) (_("INPUT_SECTION_FLAGS are not supported.\n"));
+      _bfd_error_handler (_("INPUT_SECTION_FLAGS are not supported.\n"));
       return FALSE;
     }
   return TRUE;
@@ -7810,6 +8181,7 @@ bfd_generic_get_relocated_section_contents (bfd *abfd,
   if (reloc_count > 0)
     {
       arelent **parent;
+
       for (parent = reloc_vector; *parent != NULL; parent++)
 	{
 	  char *error_message = NULL;
@@ -7817,6 +8189,17 @@ bfd_generic_get_relocated_section_contents (bfd *abfd,
 	  bfd_reloc_status_type r;
 
 	  symbol = *(*parent)->sym_ptr_ptr;
+	  /* PR ld/19628: A specially crafted input file
+	     can result in a NULL symbol pointer here.  */
+	  if (symbol == NULL)
+	    {
+	      link_info->callbacks->einfo
+		/* xgettext:c-format */
+		(_("%X%P: %B(%A): error: relocation for offset %V has no value\n"),
+		 abfd, input_section, (* parent)->address);
+	      goto error_return;
+	    }
+
 	  if (symbol->section && discarded_section (symbol->section))
 	    {
 	      bfd_byte *p;
@@ -7854,26 +8237,22 @@ bfd_generic_get_relocated_section_contents (bfd *abfd,
 	      switch (r)
 		{
 		case bfd_reloc_undefined:
-		  if (!((*link_info->callbacks->undefined_symbol)
-			(link_info, bfd_asymbol_name (*(*parent)->sym_ptr_ptr),
-			 input_bfd, input_section, (*parent)->address,
-			 TRUE)))
-		    goto error_return;
+		  (*link_info->callbacks->undefined_symbol)
+		    (link_info, bfd_asymbol_name (*(*parent)->sym_ptr_ptr),
+		     input_bfd, input_section, (*parent)->address, TRUE);
 		  break;
 		case bfd_reloc_dangerous:
 		  BFD_ASSERT (error_message != NULL);
-		  if (!((*link_info->callbacks->reloc_dangerous)
-			(link_info, error_message, input_bfd, input_section,
-			 (*parent)->address)))
-		    goto error_return;
+		  (*link_info->callbacks->reloc_dangerous)
+		    (link_info, error_message,
+		     input_bfd, input_section, (*parent)->address);
 		  break;
 		case bfd_reloc_overflow:
-		  if (!((*link_info->callbacks->reloc_overflow)
-			(link_info, NULL,
-			 bfd_asymbol_name (*(*parent)->sym_ptr_ptr),
-			 (*parent)->howto->name, (*parent)->addend,
-			 input_bfd, input_section, (*parent)->address)))
-		    goto error_return;
+		  (*link_info->callbacks->reloc_overflow)
+		    (link_info, NULL,
+		     bfd_asymbol_name (*(*parent)->sym_ptr_ptr),
+		     (*parent)->howto->name, (*parent)->addend,
+		     input_bfd, input_section, (*parent)->address);
 		  break;
 		case bfd_reloc_outofrange:
 		  /* PR ld/13730:
@@ -7881,6 +8260,7 @@ bfd_generic_get_relocated_section_contents (bfd *abfd,
 		     complete binaries.  Do not abort, but issue an error
 		     message instead.  */
 		  link_info->callbacks->einfo
+		    /* xgettext:c-format */
 		    (_("%X%P: %B(%A): relocation \"%R\" goes out of range\n"),
 		     abfd, input_section, * parent);
 		  goto error_return;
@@ -7890,6 +8270,7 @@ bfd_generic_get_relocated_section_contents (bfd *abfd,
 		     This error can result when processing a corrupt binary.
 		     Do not abort.  Issue an error message instead.  */
 		  link_info->callbacks->einfo
+		    /* xgettext:c-format */
 		    (_("%X%P: %B(%A): relocation \"%R\" is not supported\n"),
 		     abfd, input_section, * parent);
 		  goto error_return;
@@ -7898,6 +8279,7 @@ bfd_generic_get_relocated_section_contents (bfd *abfd,
 		  /* PR 17512; file: 90c2a92e.
 		     Report unexpected results, without aborting.  */
 		  link_info->callbacks->einfo
+		    /* xgettext:c-format */
 		    (_("%X%P: %B(%A): relocation \"%R\" returns an unrecognized value %x\n"),
 		     abfd, input_section, * parent, r);
 		  break;

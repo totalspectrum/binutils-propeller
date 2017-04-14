@@ -1,5 +1,5 @@
 /* tc-vax.c - vax-specific -
-   Copyright (C) 1987-2015 Free Software Foundation, Inc.
+   Copyright (C) 1987-2017 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -127,7 +127,7 @@ int flag_want_pic;		/* -k */
  bbsc		e4
  bbcc		e5
  Always, you complement 0th bit to reverse condition.
- Always, 1-byte opcde, longword-address, byte-address, 1-byte-displacement
+ Always, 1-byte opcode, longword-address, byte-address, 1-byte-displacement
 
  2c.	J<cond> where cond tests low-order memory bit
  length of byte,word,long.
@@ -188,7 +188,7 @@ int flag_want_pic;		/* -k */
 #define BB (1+-128)
 #define WF (2+ 32767)
 #define WB (2+-32768)
-/* Dont need LF, LB because they always reach. [They are coded as 0.]  */
+/* Don't need LF, LB because they always reach. [They are coded as 0.]  */
 
 #define C(a,b) ENCODE_RELAX(a,b)
 /* This macro has no side-effects.  */
@@ -236,7 +236,7 @@ const relax_typeS md_relax_table[] =
 #undef WB
 
 void float_cons (int);
-int flonum_gen2vax (char, FLONUM_TYPE *, LITTLENUM_TYPE *);
+int flonum_gen2vax (int, FLONUM_TYPE *, LITTLENUM_TYPE *);
 
 const pseudo_typeS md_pseudo_table[] =
 {
@@ -1796,8 +1796,10 @@ vip_op (char *optext, struct vop *vopP)
 	{
 	case 'l':
 	  mode += 2;
+	  /* Fall through.  */
 	case 'w':
 	  mode += 2;
+	  /* Fall through.  */
 	case ' ':	/* Assumed B^ until our caller changes it.  */
 	case 'b':
 	  break;
@@ -2111,7 +2113,7 @@ main (void)
 
 	default:
 	  my_operand_length = 2;
-	  printf ("I dn't understand access width %c\n", mywidth);
+	  printf ("I don't understand access width %c\n", mywidth);
 	  break;
 	}
       printf ("VAX assembler instruction operand: ");
@@ -2210,7 +2212,7 @@ struct option md_longopts[] =
 size_t md_longopts_size = sizeof (md_longopts);
 
 int
-md_parse_option (int c, char *arg)
+md_parse_option (int c, const char *arg)
 {
   switch (c)
     {
@@ -2388,8 +2390,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
 #undef F
 #undef MAP
 
-  reloc = xmalloc (sizeof (arelent));
-  reloc->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+  reloc = XNEW (arelent);
+  reloc->sym_ptr_ptr = XNEW (asymbol *);
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
 #ifndef OBJ_ELF
@@ -3127,9 +3129,9 @@ md_assemble (char *instruction_string)
 			  || operandP->vop_access == 'a')
 			{
 			  if (operandP->vop_access == 'v')
-			    as_warn (_("Invalid operand:  immediate value used as base address."));
+			    as_warn (_("Invalid operand: immediate value used as base address."));
 			  else
-			    as_warn (_("Invalid operand:  immediate value used as address."));
+			    as_warn (_("Invalid operand: immediate value used as address."));
 			  /* gcc 2.6.3 is known to generate these in at least
 			     one case.  */
 			}
@@ -3274,7 +3276,7 @@ bfd_reloc_code_real_type
 vax_cons (expressionS *exp, int size)
 {
   char *save;
-  char *vax_cons_special_reloc;
+  const char *vax_cons_special_reloc;
 
   SKIP_WHITESPACE ();
   vax_cons_special_reloc = NULL;
@@ -3403,7 +3405,7 @@ vax_cons_fix_new (fragS *frag, int where, unsigned int nbytes, expressionS *exp,
   fix_new_exp (frag, where, (int) nbytes, exp, 0, r);
 }
 
-char *
+const char *
 md_atof (int type, char * litP, int * sizeP)
 {
   return vax_md_atof (type, litP, sizeP);

@@ -1,4 +1,4 @@
-# Copyright 2008-2015 Free Software Foundation, Inc.
+# Copyright 2008-2017 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -86,7 +86,7 @@ proc corefunc { threadtype executable } {
 		# Main test:
 		set test "attach (pass $passes), pending signal catch"
 		if {[gdb_test_multiple "attach $testpid" $test {
-		    -re "Attaching to program.*`?$escapedbinfile'?, process $testpid.*Program received signal SIGALRM.*$gdb_prompt $" {
+		    -re "Attaching to program.*`?$escapedbinfile'?, process $testpid.* received signal SIGALRM.*$gdb_prompt $" {
 			# nonthreaded:
 			pass $test
 			verbose -log "$test succeeded on the attempt # $attempt of $attempts"

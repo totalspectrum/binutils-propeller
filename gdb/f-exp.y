@@ -1,6 +1,6 @@
 
 /* YACC parser for Fortran expressions, for GDB.
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    Contributed by Motorola.  Adapted from the C parser by Farooq Butt
    (fmbutt@engage.sps.mot.com).
@@ -53,69 +53,15 @@
 #include "objfiles.h" /* For have_full_symbols and have_partial_symbols */
 #include "block.h"
 #include <ctype.h>
+#include <algorithm>
 
 #define parse_type(ps) builtin_type (parse_gdbarch (ps))
 #define parse_f_type(ps) builtin_f_type (parse_gdbarch (ps))
 
-/* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
-   as well as gratuitiously global symbol names, so we can have multiple
-   yacc generated parsers in gdb.  Note that these are only the variables
-   produced by yacc.  If other parser generators (bison, byacc, etc) produce
-   additional global names that conflict at link time, then those parser
-   generators need to be fixed instead of adding those names to this list.  */
-
-#define	yymaxdepth f_maxdepth
-#define	yyparse f_parse_internal
-#define	yylex	f_lex
-#define	yyerror	f_error
-#define	yylval	f_lval
-#define	yychar	f_char
-#define	yydebug	f_debug
-#define	yypact	f_pact	
-#define	yyr1	f_r1			
-#define	yyr2	f_r2			
-#define	yydef	f_def		
-#define	yychk	f_chk		
-#define	yypgo	f_pgo		
-#define	yyact	f_act		
-#define	yyexca	f_exca
-#define yyerrflag f_errflag
-#define yynerrs	f_nerrs
-#define	yyps	f_ps
-#define	yypv	f_pv
-#define	yys	f_s
-#define	yy_yys	f_yys
-#define	yystate	f_state
-#define	yytmp	f_tmp
-#define	yyv	f_v
-#define	yy_yyv	f_yyv
-#define	yyval	f_val
-#define	yylloc	f_lloc
-#define yyreds	f_reds		/* With YYDEBUG defined */
-#define yytoks	f_toks		/* With YYDEBUG defined */
-#define yyname	f_name		/* With YYDEBUG defined */
-#define yyrule	f_rule		/* With YYDEBUG defined */
-#define yylhs	f_yylhs
-#define yylen	f_yylen
-#define yydefred f_yydefred
-#define yydgoto	f_yydgoto
-#define yysindex f_yysindex
-#define yyrindex f_yyrindex
-#define yygindex f_yygindex
-#define yytable	 f_yytable
-#define yycheck	 f_yycheck
-#define yyss	f_yyss
-#define yysslim	f_yysslim
-#define yyssp	f_yyssp
-#define yystacksize f_yystacksize
-#define yyvs	f_yyvs
-#define yyvsp	f_yyvsp
-
-#ifndef YYDEBUG
-#define	YYDEBUG	1		/* Default to yydebug support */
-#endif
-
-#define YYFPRINTF parser_fprintf
+/* Remap normal yacc parser interface names (yyparse, yylex, yyerror,
+   etc).  */
+#define GDB_YY_REMAP_PREFIX f_
+#include "yy-remap.h"
 
 /* The state of the parser, used internally when we are parsing the
    expression.  */
@@ -126,7 +72,7 @@ int yyparse (void);
 
 static int yylex (void);
 
-void yyerror (char *);
+void yyerror (const char *);
 
 static void growbuf_by_size (int);
 
@@ -313,27 +259,27 @@ arglist	:	arglist ',' exp   %prec ABOVE_COMMA
 /* There are four sorts of subrange types in F90.  */
 
 subrange:	exp ':' exp	%prec ABOVE_COMMA
-			{ write_exp_elt_opcode (pstate, OP_F90_RANGE); 
+			{ write_exp_elt_opcode (pstate, OP_RANGE); 
 			  write_exp_elt_longcst (pstate, NONE_BOUND_DEFAULT);
-			  write_exp_elt_opcode (pstate, OP_F90_RANGE); }
+			  write_exp_elt_opcode (pstate, OP_RANGE); }
 	;
 
 subrange:	exp ':'	%prec ABOVE_COMMA
-			{ write_exp_elt_opcode (pstate, OP_F90_RANGE);
+			{ write_exp_elt_opcode (pstate, OP_RANGE);
 			  write_exp_elt_longcst (pstate, HIGH_BOUND_DEFAULT);
-			  write_exp_elt_opcode (pstate, OP_F90_RANGE); }
+			  write_exp_elt_opcode (pstate, OP_RANGE); }
 	;
 
 subrange:	':' exp	%prec ABOVE_COMMA
-			{ write_exp_elt_opcode (pstate, OP_F90_RANGE);
+			{ write_exp_elt_opcode (pstate, OP_RANGE);
 			  write_exp_elt_longcst (pstate, LOW_BOUND_DEFAULT);
-			  write_exp_elt_opcode (pstate, OP_F90_RANGE); }
+			  write_exp_elt_opcode (pstate, OP_RANGE); }
 	;
 
 subrange:	':'	%prec ABOVE_COMMA
-			{ write_exp_elt_opcode (pstate, OP_F90_RANGE);
+			{ write_exp_elt_opcode (pstate, OP_RANGE);
 			  write_exp_elt_longcst (pstate, BOTH_BOUND_DEFAULT);
-			  write_exp_elt_opcode (pstate, OP_F90_RANGE); }
+			  write_exp_elt_opcode (pstate, OP_RANGE); }
 	;
 
 complexnum:     exp ',' exp 
@@ -567,7 +513,7 @@ ptype	:	typebase
 			follow_type = lookup_pointer_type (follow_type);
 			break;
 		      case tp_reference:
-			follow_type = lookup_reference_type (follow_type);
+			follow_type = lookup_lvalue_reference_type (follow_type);
 			break;
 		      case tp_array:
 			array_size = pop_type_int ();
@@ -827,7 +773,7 @@ parse_number (struct parser_state *par_state,
 
 struct token
 {
-  char *oper;
+  const char *oper;
   int token;
   enum exp_opcode opcode;
 };
@@ -861,7 +807,7 @@ static const struct token dot_ops[] =
 
 struct f77_boolean_val 
 {
-  char *name;
+  const char *name;
   int value;
 }; 
 
@@ -921,7 +867,7 @@ growbuf_by_size (int count)
 {
   int growby;
 
-  growby = max (count, GROWBY_MIN_SIZE);
+  growby = std::max (count, GROWBY_MIN_SIZE);
   tempbufsize += growby;
   if (tempbuf == NULL)
     tempbuf = (char *) malloc (tempbufsize);
@@ -1273,7 +1219,7 @@ f_parse (struct parser_state *par_state)
 }
 
 void
-yyerror (char *msg)
+yyerror (const char *msg)
 {
   if (prev_lexptr)
     lexptr = prev_lexptr;

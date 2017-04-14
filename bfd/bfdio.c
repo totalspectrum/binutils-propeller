@@ -1,6 +1,6 @@
 /* Low-level I/O routines for BFDs.
 
-   Copyright (C) 1990-2015 Free Software Foundation, Inc.
+   Copyright (C) 1990-2017 Free Software Foundation, Inc.
 
    Written by Cygnus Support.
 
@@ -41,7 +41,7 @@
 #endif
 
 file_ptr
-real_ftell (FILE *file)
+_bfd_real_ftell (FILE *file)
 {
 #if defined (HAVE_FTELLO64)
   return ftello64 (file);
@@ -53,7 +53,7 @@ real_ftell (FILE *file)
 }
 
 int
-real_fseek (FILE *file, file_ptr offset, int whence)
+_bfd_real_fseek (FILE *file, file_ptr offset, int whence)
 {
 #if defined (HAVE_FSEEKO64)
   return fseeko64 (file, offset, whence);
@@ -82,7 +82,7 @@ close_on_exec (FILE *file)
 }
 
 FILE *
-real_fopen (const char *filename, const char *modes)
+_bfd_real_fopen (const char *filename, const char *modes)
 {
 #ifdef VMS
   char *vms_attr;
@@ -234,7 +234,8 @@ bfd_tell (bfd *abfd)
       bfd *parent_bfd = abfd;
       ptr = abfd->iovec->btell (abfd);
 
-      while (parent_bfd->my_archive != NULL)
+      while (parent_bfd->my_archive != NULL
+	     && !bfd_is_thin_archive (parent_bfd->my_archive))
 	{
 	  ptr -= parent_bfd->origin;
 	  parent_bfd = parent_bfd->my_archive;
@@ -289,7 +290,7 @@ bfd_seek (bfd *abfd, file_ptr position, int direction)
   if (direction == SEEK_CUR && position == 0)
     return 0;
 
-  if (abfd->format != bfd_archive && abfd->my_archive == 0)
+  if (abfd->my_archive == NULL || bfd_is_thin_archive (abfd->my_archive))
     {
       if (direction == SEEK_SET && (bfd_vma) position == abfd->where)
 	return 0;
@@ -314,7 +315,8 @@ bfd_seek (bfd *abfd, file_ptr position, int direction)
     {
       bfd *parent_bfd = abfd;
 
-      while (parent_bfd->my_archive != NULL)
+      while (parent_bfd->my_archive != NULL
+	     && !bfd_is_thin_archive (parent_bfd->my_archive))
         {
           file_position += parent_bfd->origin;
           parent_bfd = parent_bfd->my_archive;

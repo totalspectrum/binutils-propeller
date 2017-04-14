@@ -1,5 +1,5 @@
 /* List lines of source files for GDB, the GNU debugger.
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -42,6 +42,8 @@
 #include "completer.h"
 #include "ui-out.h"
 #include "readline/readline.h"
+#include "common/enum-flags.h"
+#include <algorithm>
 
 #define OPEN_MODE (O_RDONLY | O_BINARY)
 #define FDOPEN_MODE FOPEN_RB
@@ -94,7 +96,7 @@ static struct program_space *current_source_pspace;
    and friends should be rewritten to count characters and see where
    things are wrapping, but that would be a fair amount of work.  */
 
-int lines_to_list = 10;
+static int lines_to_list = 10;
 static void
 show_lines_to_list (struct ui_file *file, int from_tty,
 		    struct cmd_list_element *c, const char *value)
@@ -282,7 +284,7 @@ select_source_symtab (struct symtab *s)
       xfree (sals.sals);
       current_source_pspace = sal.pspace;
       current_source_symtab = sal.symtab;
-      current_source_line = max (sal.line - (lines_to_list - 1), 1);
+      current_source_line = std::max (sal.line - (lines_to_list - 1), 1);
       if (current_source_symtab)
 	return;
     }
@@ -684,9 +686,12 @@ source_info (char *ignore, int from_tty)
 }
 
 
-/* Return True if the file NAME exists and is a regular file.  */
+/* Return True if the file NAME exists and is a regular file.
+   If the result is false then *ERRNO_PTR is set to a useful value assuming
+   we're expecting a regular file.  */
+
 static int
-is_regular_file (const char *name)
+is_regular_file (const char *name, int *errno_ptr)
 {
   struct stat st;
   const int status = stat (name, &st);
@@ -697,9 +702,21 @@ is_regular_file (const char *name)
      on obscure systems where stat does not work as expected.  */
 
   if (status != 0)
-    return (errno != ENOENT);
+    {
+      if (errno != ENOENT)
+	return 1;
+      *errno_ptr = ENOENT;
+      return 0;
+    }
 
-  return S_ISREG (st.st_mode);
+  if (S_ISREG (st.st_mode))
+    return 1;
+
+  if (S_ISDIR (st.st_mode))
+    *errno_ptr = EISDIR;
+  else
+    *errno_ptr = EINVAL;
+  return 0;
 }
 
 /* Open a file named STRING, searching path PATH (dir names sep by some char)
@@ -746,6 +763,9 @@ openp (const char *path, int opts, const char *string,
   struct cleanup *back_to;
   int ix;
   char *dir;
+  /* The errno set for the last name we tried to open (and
+     failed).  */
+  int last_errno = 0;
 
   /* The open syscall MODE parameter is not specified.  */
   gdb_assert ((mode & O_CREAT) == 0);
@@ -771,20 +791,22 @@ openp (const char *path, int opts, const char *string,
 
   if ((opts & OPF_TRY_CWD_FIRST) || IS_ABSOLUTE_PATH (string))
     {
-      int i;
+      int i, reg_file_errno;
 
-      if (is_regular_file (string))
+      if (is_regular_file (string, &reg_file_errno))
 	{
 	  filename = (char *) alloca (strlen (string) + 1);
 	  strcpy (filename, string);
 	  fd = gdb_open_cloexec (filename, mode, 0);
 	  if (fd >= 0)
 	    goto done;
+	  last_errno = errno;
 	}
       else
 	{
 	  filename = NULL;
 	  fd = -1;
+	  last_errno = reg_file_errno;
 	}
 
       if (!(opts & OPF_SEARCH_IN_PATH))
@@ -808,6 +830,7 @@ openp (const char *path, int opts, const char *string,
   alloclen = strlen (path) + strlen (string) + 2;
   filename = (char *) alloca (alloclen);
   fd = -1;
+  last_errno = ENOENT;
 
   dir_vec = dirnames_to_char_ptr_vec (path);
   back_to = make_cleanup_free_char_ptr_vec (dir_vec);
@@ -815,6 +838,7 @@ openp (const char *path, int opts, const char *string,
   for (ix = 0; VEC_iterate (char_ptr, dir_vec, ix, dir); ++ix)
     {
       size_t len = strlen (dir);
+      int reg_file_errno;
 
       if (strcmp (dir, "$cwd") == 0)
 	{
@@ -873,12 +897,15 @@ openp (const char *path, int opts, const char *string,
       strcat (filename + len, SLASH_STRING);
       strcat (filename, string);
 
-      if (is_regular_file (filename))
+      if (is_regular_file (filename, &reg_file_errno))
 	{
 	  fd = gdb_open_cloexec (filename, mode, 0);
 	  if (fd >= 0)
 	    break;
+	  last_errno = errno;
 	}
+      else
+	last_errno = reg_file_errno;
     }
 
   do_cleanups (back_to);
@@ -895,6 +922,7 @@ done:
 	*filename_opened = gdb_abspath (filename);
     }
 
+  errno = last_errno;
   return fd;
 }
 
@@ -1151,8 +1179,8 @@ symtab_to_fullname (struct symtab *s)
 	  if (SYMTAB_DIRNAME (s) == NULL || IS_ABSOLUTE_PATH (s->filename))
 	    fullname = xstrdup (s->filename);
 	  else
-	    fullname = concat (SYMTAB_DIRNAME (s), SLASH_STRING, s->filename,
-			       NULL);
+	    fullname = concat (SYMTAB_DIRNAME (s), SLASH_STRING,
+			       s->filename, (char *) NULL);
 
 	  back_to = make_cleanup (xfree, fullname);
 	  s->fullname = rewrite_source_path (fullname);
@@ -1320,7 +1348,7 @@ identify_source_line (struct symtab *s, int line, int mid_statement,
 
 static void
 print_source_lines_base (struct symtab *s, int line, int stopline,
-			 enum print_source_lines_flags flags)
+			 print_source_lines_flags flags)
 {
   int c;
   int desc;
@@ -1337,7 +1365,7 @@ print_source_lines_base (struct symtab *s, int line, int stopline,
 
   /* If printing of source lines is disabled, just print file and line
      number.  */
-  if (ui_out_test_flags (uiout, ui_source_list))
+  if (uiout->test_flags (ui_source_list))
     {
       /* Only prints "No such file or directory" once.  */
       if ((s != last_source_visited) || (!last_source_error))
@@ -1354,7 +1382,7 @@ print_source_lines_base (struct symtab *s, int line, int stopline,
   else
     {
       desc = last_source_error;
-	  flags |= PRINT_SOURCE_LINES_NOERROR;
+      flags |= PRINT_SOURCE_LINES_NOERROR;
       noprint = 1;
     }
 
@@ -1373,19 +1401,16 @@ print_source_lines_base (struct symtab *s, int line, int stopline,
 	}
       else
 	{
-	  ui_out_field_int (uiout, "line", line);
-	  ui_out_text (uiout, "\tin ");
+	  uiout->field_int ("line", line);
+	  uiout->text ("\tin ");
 
 	  /* CLI expects only the "file" field.  TUI expects only the
 	     "fullname" field (and TUI does break if "file" is printed).
 	     MI expects both fields.  ui_source_list is set only for CLI,
 	     not for TUI.  */
-	  if (ui_out_is_mi_like_p (uiout)
-	      || ui_out_test_flags (uiout, ui_source_list))
-	    ui_out_field_string (uiout, "file",
-				 symtab_to_filename_for_display (s));
-	  if (ui_out_is_mi_like_p (uiout)
-	      || !ui_out_test_flags (uiout, ui_source_list))
+	  if (uiout->is_mi_like_p () || uiout->test_flags (ui_source_list))
+	    uiout->field_string ("file", symtab_to_filename_for_display (s));
+	  if (uiout->is_mi_like_p () || !uiout->test_flags (ui_source_list))
  	    {
 	      const char *s_fullname = symtab_to_fullname (s);
 	      char *local_fullname;
@@ -1396,10 +1421,10 @@ print_source_lines_base (struct symtab *s, int line, int stopline,
 	      local_fullname = (char *) alloca (strlen (s_fullname) + 1);
 	      strcpy (local_fullname, s_fullname);
 
-	      ui_out_field_string (uiout, "fullname", local_fullname);
+	      uiout->field_string ("fullname", local_fullname);
  	    }
 
-	  ui_out_text (uiout, "\n");
+	  uiout->text ("\n");
 	}
 
       return;
@@ -1437,20 +1462,20 @@ print_source_lines_base (struct symtab *s, int line, int stopline,
       last_line_listed = current_source_line;
       if (flags & PRINT_SOURCE_LINES_FILENAME)
         {
-          ui_out_text (uiout, symtab_to_filename_for_display (s));
-          ui_out_text (uiout, ":");
+          uiout->text (symtab_to_filename_for_display (s));
+          uiout->text (":");
         }
       xsnprintf (buf, sizeof (buf), "%d\t", current_source_line++);
-      ui_out_text (uiout, buf);
+      uiout->text (buf);
       do
 	{
 	  if (c < 040 && c != '\t' && c != '\n' && c != '\r')
 	    {
 	      xsnprintf (buf, sizeof (buf), "^%c", c + 0100);
-	      ui_out_text (uiout, buf);
+	      uiout->text (buf);
 	    }
 	  else if (c == 0177)
-	    ui_out_text (uiout, "^?");
+	    uiout->text ("^?");
 	  else if (c == '\r')
 	    {
 	      /* Skip a \r character, but only before a \n.  */
@@ -1464,7 +1489,7 @@ print_source_lines_base (struct symtab *s, int line, int stopline,
 	  else
 	    {
 	      xsnprintf (buf, sizeof (buf), "%c", c);
-	      ui_out_text (uiout, buf);
+	      uiout->text (buf);
 	    }
 	}
       while (c != '\n' && (c = fgetc (stream)) >= 0);
@@ -1480,7 +1505,7 @@ print_source_lines_base (struct symtab *s, int line, int stopline,
 
 void
 print_source_lines (struct symtab *s, int line, int stopline,
-		    enum print_source_lines_flags flags)
+		    print_source_lines_flags flags)
 {
   print_source_lines_base (s, line, stopline, flags);
 }
@@ -1679,7 +1704,7 @@ forward_search_command (char *regex, int from_tty)
 	  do_cleanups (cleanups);
 	  print_source_lines (current_source_symtab, line, line + 1, 0);
 	  set_internalvar_integer (lookup_internalvar ("_"), line);
-	  current_source_line = max (line - lines_to_list / 2, 1);
+	  current_source_line = std::max (line - lines_to_list / 2, 1);
 	  return;
 	}
       line++;
@@ -1757,7 +1782,7 @@ reverse_search_command (char *regex, int from_tty)
 	  do_cleanups (cleanups);
 	  print_source_lines (current_source_symtab, line, line + 1, 0);
 	  set_internalvar_integer (lookup_internalvar ("_"), line);
-	  current_source_line = max (line - lines_to_list / 2, 1);
+	  current_source_line = std::max (line - lines_to_list / 2, 1);
 	  return;
 	}
       line--;

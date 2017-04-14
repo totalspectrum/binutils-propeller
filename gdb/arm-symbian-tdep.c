@@ -1,6 +1,6 @@
 /* ARM Symbian OS target support.
 
-   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+   Copyright (C) 2008-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -63,8 +63,6 @@ static void
 arm_symbian_init_abi (struct gdbarch_info info,
 		      struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
-
   /* Shared library handling.  */
   set_gdbarch_skip_trampoline_code (gdbarch, arm_symbian_skip_trampoline_code);
 

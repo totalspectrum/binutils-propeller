@@ -1,5 +1,5 @@
 /* BFD back-end for mmo objects (MMIX-specific object-format).
-   Copyright (C) 2001-2015 Free Software Foundation, Inc.
+   Copyright (C) 2001-2017 Free Software Foundation, Inc.
    Written by Hans-Peter Nilsson (hp@bitrange.com).
    Infrastructure and other bits originally copied from srec.c and
    binary.c.
@@ -330,6 +330,14 @@ struct mmo_data_struct
 
     /* We also need a buffer to hold the bytes we count reading or writing.  */
     bfd_byte buf[4];
+
+    /* Whether we've calculated symbol consistency requirement yet.  We do this
+       when-needed, which must be at some time after all section
+       contents is known.  */
+    bfd_boolean symbol_consistency_override_calculated;
+
+    /* Whether to consistency-check symbol values, in particular "Main".  */
+    bfd_boolean ignore_symbol_consistency;
   };
 
 typedef struct mmo_data_struct tdata_type;
@@ -455,9 +463,10 @@ mmo_make_section (bfd *abfd, const char *secname)
 
       if (newsecname == NULL)
 	{
-	  (*_bfd_error_handler)
-	    (_("%s: No core to allocate section name %s\n"),
-	     bfd_get_filename (abfd), secname);
+	  _bfd_error_handler
+	    /* xgettext:c-format */
+	    (_("%B: No core to allocate section name %s\n"),
+	     abfd, secname);
 	  bfd_set_error (bfd_error_system_call);
 	  return NULL;
 	}
@@ -530,9 +539,10 @@ mmo_object_p (bfd *abfd)
 
   if (abfd->tdata.mmo_data->lop_stab_symbol == NULL)
     {
-      (*_bfd_error_handler)
-	(_("%s: No core to allocate a symbol %d bytes long\n"),
-	 bfd_get_filename (abfd), abfd->tdata.mmo_data->max_symbol_length);
+      _bfd_error_handler
+	/* xgettext:c-format */
+	(_("%B: No core to allocate a symbol %d bytes long\n"),
+	 abfd, abfd->tdata.mmo_data->max_symbol_length);
       goto bad_final;
     }
 
@@ -583,6 +593,34 @@ mmo_mkobject (bfd *abfd)
     }
 
   return TRUE;
+}
+
+static bfd_boolean
+mmo_section_has_contents (bfd *abfd ATTRIBUTE_UNUSED, asection *sec, void *p ATTRIBUTE_UNUSED)
+{
+  /* The point is to match what --extract-symbols does (well, negated).  */
+  return bfd_get_section_size (sec) != 0;
+}
+
+/* Find out whether we should omit symbol consistency checks for this
+   bfd and cache the value.
+
+   This function must only be called when all section contents is
+   known.  However, calculating symbol consistency at the time the
+   private BFD data is initialized is too late for some uses.  */
+
+static bfd_boolean
+mmo_ignore_symbol_consistency (bfd *abfd)
+{
+  if (!abfd->tdata.mmo_data->symbol_consistency_override_calculated)
+    {
+      abfd->tdata.mmo_data->ignore_symbol_consistency =
+	bfd_sections_find_if (abfd, mmo_section_has_contents, NULL) == NULL;
+
+      abfd->tdata.mmo_data->symbol_consistency_override_calculated = TRUE;
+    }
+
+  return abfd->tdata.mmo_data->ignore_symbol_consistency;
 }
 
 static bfd_boolean
@@ -915,9 +953,11 @@ mmo_write_loc_chunk (bfd *abfd, bfd_vma vma, const bfd_byte *loc,
 	 group-wise aligned.  */
       if ((vma & 3) != 0)
 	{
-	  (*_bfd_error_handler)
-	    (_("%s: attempt to emit contents at non-multiple-of-4 address 0x%lx\n"),
-	     bfd_get_filename (abfd), (unsigned long) vma);
+	  _bfd_error_handler
+	    /* xgettext:c-format */
+	    (_("%B: attempt to emit contents at non-multiple-of-4"
+	       " address 0x%lx\n"),
+	     abfd, (unsigned long) vma);
 	  bfd_set_error (bfd_error_bad_value);
 	  return FALSE;
 	}
@@ -1208,11 +1248,13 @@ mmo_create_symbol (bfd *abfd, const char *symname, bfd_vma addr, enum
      object.  For written objects, we do it while setting the symbol
      table.  */
   if (strcmp (symname, MMIX_START_SYMBOL_NAME) == 0
-      && bfd_get_start_address (abfd) != addr)
+      && bfd_get_start_address (abfd) != addr
+      && !mmo_ignore_symbol_consistency (abfd))
     {
-      (*_bfd_error_handler)
-	(_("%s: invalid mmo file: initialization value for $255 is not `Main'\n"),
-	 bfd_get_filename (abfd));
+      _bfd_error_handler
+	(_("%B: invalid mmo file: initialization value for $255"
+	   " is not `Main'\n"),
+	 abfd);
       bfd_set_error (bfd_error_bad_value);
       return FALSE;
     }
@@ -1355,11 +1397,11 @@ SUBSECTION
 	      abfd->tdata.mmo_data->lop_stab_symbol
 		[abfd->tdata.mmo_data->symbol_position] = 0;
 
-	      (*_bfd_error_handler)
-		(_("%s: unsupported wide character sequence"
+	      _bfd_error_handler
+		/* xgettext:c-format */
+		(_("%B: unsupported wide character sequence"
 		   " 0x%02X 0x%02X after symbol name starting with `%s'\n"),
-		 bfd_get_filename (abfd), c, c2,
-		 abfd->tdata.mmo_data->lop_stab_symbol);
+		 abfd, c, c2, abfd->tdata.mmo_data->lop_stab_symbol);
 	      bfd_set_error (bfd_error_bad_value);
 	      abfd->tdata.mmo_data->have_error = TRUE;
 	      return FALSE;
@@ -1589,9 +1631,10 @@ mmo_scan (bfd *abfd)
 	  switch (buf[1])
 	    {
 	    default:
-	      (*_bfd_error_handler)
-		(_("%s: invalid mmo file: unsupported lopcode `%d'\n"),
-		 bfd_get_filename (abfd), buf[1]);
+	      _bfd_error_handler
+		/* xgettext:c-format */
+		(_("%B: invalid mmo file: unsupported lopcode `%d'\n"),
+		 abfd, buf[1]);
 	      bfd_set_error (bfd_error_bad_value);
 	      goto error_return;
 
@@ -1599,9 +1642,11 @@ mmo_scan (bfd *abfd)
 	      /* Quote the next 32-bit word.  */
 	      if (y != 0 || z != 1)
 		{
-		  (*_bfd_error_handler)
-		    (_("%s: invalid mmo file: expected YZ = 1 got YZ = %d for lop_quote\n"),
-		     bfd_get_filename (abfd), y*256+z);
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%B: invalid mmo file: expected YZ = 1"
+		       " got YZ = %d for lop_quote\n"),
+		     abfd, y*256+z);
 		  bfd_set_error (bfd_error_bad_value);
 		  goto error_return;
 		}
@@ -1635,9 +1680,11 @@ mmo_scan (bfd *abfd)
 		}
 	      else
 		{
-		  (*_bfd_error_handler)
-		    (_("%s: invalid mmo file: expected z = 1 or z = 2, got z = %d for lop_loc\n"),
-		     bfd_get_filename (abfd), z);
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%B: invalid mmo file: expected z = 1 or z = 2,"
+		       " got z = %d for lop_loc\n"),
+		     abfd, z);
 		  bfd_set_error (bfd_error_bad_value);
 		  goto error_return;
 		}
@@ -1684,9 +1731,11 @@ mmo_scan (bfd *abfd)
 		  }
 		else
 		  {
-		    (*_bfd_error_handler)
-		      (_("%s: invalid mmo file: expected z = 1 or z = 2, got z = %d for lop_fixo\n"),
-		       bfd_get_filename (abfd), z);
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("%B: invalid mmo file: expected z = 1 or z = 2,"
+			 " got z = %d for lop_fixo\n"),
+		       abfd, z);
 		    bfd_set_error (bfd_error_bad_value);
 		    goto error_return;
 		  }
@@ -1723,18 +1772,22 @@ mmo_scan (bfd *abfd)
 
 		if (y != 0)
 		  {
-		    (*_bfd_error_handler)
-		      (_("%s: invalid mmo file: expected y = 0, got y = %d for lop_fixrx\n"),
-		       bfd_get_filename (abfd), y);
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("%B: invalid mmo file: expected y = 0,"
+			 " got y = %d for lop_fixrx\n"),
+		       abfd, y);
 		    bfd_set_error (bfd_error_bad_value);
 		    goto error_return;
 		  }
 
 		if (z != 16 && z != 24)
 		  {
-		    (*_bfd_error_handler)
-		      (_("%s: invalid mmo file: expected z = 16 or z = 24, got z = %d for lop_fixrx\n"),
-		       bfd_get_filename (abfd), z);
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("%B: invalid mmo file: expected z = 16 or z = 24,"
+			 " got z = %d for lop_fixrx\n"),
+		       abfd, z);
 		    bfd_set_error (bfd_error_bad_value);
 		    goto error_return;
 		  }
@@ -1755,9 +1808,11 @@ mmo_scan (bfd *abfd)
 		  p = vma - 4 * ((delta & 0xffffff) - (1 << z));
 		else
 		  {
-		    (*_bfd_error_handler)
-		      (_("%s: invalid mmo file: leading byte of operand word must be 0 or 1, got %d for lop_fixrx\n"),
-		       bfd_get_filename (abfd), buf[0]);
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("%B: invalid mmo file: leading byte of operand word"
+			 " must be 0 or 1, got %d for lop_fixrx\n"),
+		       abfd, buf[0]);
 		    bfd_set_error (bfd_error_bad_value);
 		    goto error_return;
 		  }
@@ -1778,9 +1833,11 @@ mmo_scan (bfd *abfd)
 
 		  if (fname == NULL)
 		    {
-		      (*_bfd_error_handler)
-			(_("%s: cannot allocate file name for file number %d, %d bytes\n"),
-			 bfd_get_filename (abfd), y, z * 4 + 1);
+		      _bfd_error_handler
+			/* xgettext:c-format */
+			(_("%B: cannot allocate file name for file number %d,"
+			   " %d bytes\n"),
+			 abfd, y, z * 4 + 1);
 		      bfd_set_error (bfd_error_system_call);
 		      goto error_return;
 		    }
@@ -1798,10 +1855,11 @@ mmo_scan (bfd *abfd)
 
 		  if (file_names[y] != NULL)
 		    {
-		      (*_bfd_error_handler)
-			(_("%s: invalid mmo file: file number %d `%s',"
+		      _bfd_error_handler
+			/* xgettext:c-format */
+			(_("%B: invalid mmo file: file number %d `%s',"
 			   " was already entered as `%s'\n"),
-			 bfd_get_filename (abfd), y, fname, file_names[y]);
+			 abfd, y, fname, file_names[y]);
 		      bfd_set_error (bfd_error_bad_value);
 		      goto error_return;
 		    }
@@ -1811,10 +1869,11 @@ mmo_scan (bfd *abfd)
 
 	      if (file_names[y] == NULL)
 		{
-		  (*_bfd_error_handler)
-		    (_("%s: invalid mmo file: file name for number %d"
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%B: invalid mmo file: file name for number %d"
 		       " was not specified before use\n"),
-		     bfd_get_filename (abfd), y);
+		     abfd, y);
 		  bfd_set_error (bfd_error_bad_value);
 		  goto error_return;
 		}
@@ -1917,10 +1976,11 @@ mmo_scan (bfd *abfd)
 	      /* We read in the symbols now, not later.  */
 	      if (y != 0 || z != 0)
 		{
-		  (*_bfd_error_handler)
-		    (_("%s: invalid mmo file: fields y and z of lop_stab"
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%B: invalid mmo file: fields y and z of lop_stab"
 		       " non-zero, y: %d, z: %d\n"),
-		     bfd_get_filename (abfd), y, z);
+		     abfd, y, z);
 		  bfd_set_error (bfd_error_bad_value);
 		  goto error_return;
 		}
@@ -1953,10 +2013,11 @@ mmo_scan (bfd *abfd)
 
 		if (statbuf.st_size != curpos)
 		  {
-		    (*_bfd_error_handler)
-		      (_("%s: invalid mmo file: lop_end not last item in"
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("%B: invalid mmo file: lop_end not last item in"
 			 " file\n"),
-		       bfd_get_filename (abfd));
+		       abfd);
 		    bfd_set_error (bfd_error_bad_value);
 		    goto error_return;
 		  }
@@ -1966,11 +2027,12 @@ mmo_scan (bfd *abfd)
 		   it.  */
 		if ((long) (y * 256 + z) * 4 != (curpos - stab_loc) - 4)
 		  {
-		    (*_bfd_error_handler)
-		      (_("%s: invalid mmo file: YZ of lop_end (%ld)"
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("%B: invalid mmo file: YZ of lop_end (%ld)"
 			 " not equal to the number of tetras to the preceding"
 			 " lop_stab (%ld)\n"),
-		       bfd_get_filename (abfd), (long) (y * 256 + z),
+		       abfd, (long) (y * 256 + z),
 		       (curpos - stab_loc - 4)/4);
 		    bfd_set_error (bfd_error_bad_value);
 		    goto error_return;
@@ -2083,7 +2145,7 @@ mmo_get_section_contents (bfd *abfd ATTRIBUTE_UNUSED,
 
       memcpy (location, loc, chunk_size);
 
-      location += chunk_size;
+      location = (bfd_byte *) location + chunk_size;
       bytes_to_do -= chunk_size;
       offset += chunk_size;
     }
@@ -2620,7 +2682,7 @@ mmo_set_section_contents (bfd *abfd ATTRIBUTE_UNUSED, sec_ptr sec,
 
       memcpy (loc, location, chunk_size);
 
-      location += chunk_size;
+      location = (bfd_byte *) location + chunk_size;
       bytes_to_do -= chunk_size;
       offset += chunk_size;
     }
@@ -2676,9 +2738,10 @@ mmo_internal_add_3_sym (bfd *abfd, struct mmo_symbol_trie *rootp,
      we discover it and bail out.  */
   if (trie->sym.name != NULL)
     {
-      (*_bfd_error_handler)
-	(_("%s: invalid symbol table: duplicate symbol `%s'\n"),
-	 bfd_get_filename (abfd), trie->sym.name);
+      _bfd_error_handler
+	/* xgettext:c-format */
+	(_("%B: invalid symbol table: duplicate symbol `%s'\n"),
+	 abfd, trie->sym.name);
       bfd_set_error (bfd_error_bad_value);
       return FALSE;
     }
@@ -2896,16 +2959,18 @@ mmo_write_symbols_and_terminator (bfd *abfd)
 	&& (table[i]->flags & (BSF_DEBUGGING|BSF_GLOBAL)) == BSF_GLOBAL)
       {
 	asymbol *mainsym = table[i];
+	bfd_vma mainvalue
+	  = (mainsym->value
+	     + mainsym->section->output_section->vma
+	     + mainsym->section->output_offset);
 	memcpy (table + 1, orig_table, i * sizeof (asymbol *));
 	table[0] = mainsym;
 
 	/* Check that the value assigned to :Main is the same as the entry
 	   address.  The default linker script asserts this.  This is as
 	   good a place as any to check this consistency. */
-	if ((mainsym->value
-	     + mainsym->section->output_section->vma
-	     + mainsym->section->output_offset)
-	    != bfd_get_start_address (abfd))
+	if (mainvalue != bfd_get_start_address (abfd)
+	    && !mmo_ignore_symbol_consistency (abfd))
 	  {
 	    /* Arbitrary buffer to hold the printable representation of a
 	       vma.  */
@@ -2913,13 +2978,14 @@ mmo_write_symbols_and_terminator (bfd *abfd)
 	    char vmas_start[40];
 	    bfd_vma vma_start = bfd_get_start_address (abfd);
 
-	    sprintf_vma (vmas_main, mainsym->value);
+	    sprintf_vma (vmas_main, mainvalue);
 	    sprintf_vma (vmas_start, vma_start);
 
-	    (*_bfd_error_handler)
-	      (_("%s: Bad symbol definition: `Main' set to %s rather"
+	    _bfd_error_handler
+	      /* xgettext:c-format */
+	      (_("%B: Bad symbol definition: `Main' set to %s rather"
 		 " than the start address %s\n"),
-	       bfd_get_filename (abfd), vmas_main, vmas_start);
+	       abfd, vmas_main, vmas_start);
 	    bfd_set_error (bfd_error_bad_value);
 	    return FALSE;
 	  }
@@ -3014,10 +3080,11 @@ mmo_write_symbols_and_terminator (bfd *abfd)
 	 There's no specific test-case.  */
       struct mmo_symbol sym;
 
-      (*_bfd_error_handler)
-	(_("%s: warning: symbol table too large for mmo, larger than 65535"
+      _bfd_error_handler
+	/* xgettext:c-format */
+	(_("%B: warning: symbol table too large for mmo, larger than 65535"
 	   " 32-bit words: %d.  Only `Main' will be emitted.\n"),
-	 bfd_get_filename (abfd), trie_len);
+	 abfd, trie_len);
 
       memset (&sym, 0, sizeof (sym));
       sym.sym_type = mmo_abs_sym;
@@ -3059,10 +3126,11 @@ mmo_write_symbols_and_terminator (bfd *abfd)
       /* I haven't seen this trig.  It seems no use claiming this case
 	 isn't debugged and abort if we get here.  Instead emit a
 	 diagnostic and fail "normally".  */
-      (*_bfd_error_handler)
-	(_("%s: internal error, symbol table changed size from %d to %d"
+      _bfd_error_handler
+	/* xgettext:c-format */
+	(_("%B: internal error, symbol table changed size from %d to %d"
 	   " words\n"),
-	 bfd_get_filename (abfd), trie_len,
+	 abfd, trie_len,
 	 (abfd->tdata.mmo_data->byte_no + 3)/4);
       bfd_set_error (bfd_error_bad_value);
       return FALSE;
@@ -3111,10 +3179,11 @@ mmo_write_section_unless_reg_contents (bfd *abfd, asection *sec, void *p)
 	  /* Make sure it hasn't got contents.  It seems impossible to
 	     make it carry contents, so we don't have a test-case for
 	     this.  */
-	  (*_bfd_error_handler)
-	    (_("%s: internal error, internal register section %s had"
+	  _bfd_error_handler
+	    /* xgettext:c-format */
+	    (_("%B: internal error, internal register section %A had"
 	       " contents\n"),
-	     bfd_get_filename (abfd), sec->name);
+	     abfd, sec);
 	  bfd_set_error (bfd_error_bad_value);
 	  infop->retval = FALSE;
 	  return;
@@ -3162,22 +3231,22 @@ mmo_write_object_contents (bfd *abfd)
 
 	  if (sec->size == 0)
 	    /* There must always be at least one such register.  */
-	    (*_bfd_error_handler)
-	      (_("%s: no initialized registers; section length 0\n"),
-	       bfd_get_filename (abfd));
+	    _bfd_error_handler
+	      (_("%B: no initialized registers; section length 0\n"),
+	       abfd);
 	  else if (sec->vma > (256 - 32) * 8)
 	    /* Provide better error message for the case of too many
 	       global registers.  */
-	    (*_bfd_error_handler)
-	      (_("%s: too many initialized registers; section length %ld\n"),
-	       bfd_get_filename (abfd),
-	       (long) sec->size);
+	    _bfd_error_handler
+	      /* xgettext:c-format */
+	      (_("%B: too many initialized registers; section length %ld\n"),
+	       abfd, (long) sec->size);
 	  else
-	    (*_bfd_error_handler)
-	      (_("%s: invalid start address for initialized registers of"
+	    _bfd_error_handler
+	      /* xgettext:c-format */
+	      (_("%B: invalid start address for initialized registers of"
 		 " length %ld: 0x%lx%08lx\n"),
-	       bfd_get_filename (abfd),
-	       (long) sec->size,
+	       abfd, (long) sec->size,
 	       (unsigned long) (sec->vma >> 32), (unsigned long) (sec->vma));
 
 	  return FALSE;
@@ -3239,6 +3308,7 @@ mmo_write_object_contents (bfd *abfd)
   _bfd_generic_copy_link_hash_symbol_type
 #define mmo_bfd_final_link _bfd_generic_final_link
 #define mmo_bfd_link_split_section _bfd_generic_link_split_section
+#define mmo_bfd_link_check_relocs  _bfd_generic_link_check_relocs
 
 /* Strictly speaking, only MMIX uses this restricted format, but let's not
    stop anybody from shooting themselves in the foot.  */

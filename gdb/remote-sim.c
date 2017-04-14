@@ -1,6 +1,6 @@
 /* Generic remote debugging interface for simulators.
 
-   Copyright (C) 1993-2015 Free Software Foundation, Inc.
+   Copyright (C) 1993-2017 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support.
    Steve Chamberlain (sac@cygnus.com).
@@ -152,9 +152,10 @@ static int
 check_for_duplicate_sim_descriptor (struct inferior *inf, void *arg)
 {
   struct sim_inferior_data *sim_data;
-  SIM_DESC new_sim_desc = arg;
+  SIM_DESC new_sim_desc = (SIM_DESC) arg;
 
-  sim_data = inferior_data (inf, sim_inferior_data_key);
+  sim_data = ((struct sim_inferior_data *)
+	      inferior_data (inf, sim_inferior_data_key));
 
   return (sim_data != NULL && sim_data->gdbsim_desc == new_sim_desc);
 }
@@ -172,7 +173,7 @@ get_sim_inferior_data (struct inferior *inf, int sim_instance_needed)
 {
   SIM_DESC sim_desc = NULL;
   struct sim_inferior_data *sim_data
-    = inferior_data (inf, sim_inferior_data_key);
+    = (struct sim_inferior_data *) inferior_data (inf, sim_inferior_data_key);
 
   /* Try to allocate a new sim instance, if needed.  We do this ahead of
      a potential allocation of a sim_inferior_data struct in order to
@@ -257,7 +258,7 @@ get_sim_inferior_data_by_ptid (ptid_t ptid, int sim_instance_needed)
 static void
 sim_inferior_data_cleanup (struct inferior *inf, void *data)
 {
-  struct sim_inferior_data *sim_data = data;
+  struct sim_inferior_data *sim_data = (struct sim_inferior_data *) data;
 
   if (sim_data != NULL)
     {
@@ -428,8 +429,9 @@ gdbsim_fetch_register (struct target_ops *ops,
 		       struct regcache *regcache, int regno)
 {
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct inferior *inf = find_inferior_ptid (regcache_get_ptid (regcache));
   struct sim_inferior_data *sim_data
-    = get_sim_inferior_data (current_inferior (), SIM_INSTANCE_NEEDED);
+    = get_sim_inferior_data (inf, SIM_INSTANCE_NEEDED);
 
   if (regno == -1)
     {
@@ -504,8 +506,9 @@ gdbsim_store_register (struct target_ops *ops,
 		       struct regcache *regcache, int regno)
 {
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct inferior *inf = find_inferior_ptid (regcache_get_ptid (regcache));
   struct sim_inferior_data *sim_data
-    = get_sim_inferior_data (current_inferior (), SIM_INSTANCE_NEEDED);
+    = get_sim_inferior_data (inf, SIM_INSTANCE_NEEDED);
 
   if (regno == -1)
     {
@@ -553,7 +556,7 @@ gdbsim_kill (struct target_ops *ops)
 
   /* There is no need to `kill' running simulator - the simulator is
      not running.  Mourning it is enough.  */
-  target_mourn_inferior ();
+  target_mourn_inferior (inferior_ptid);
 }
 
 /* Load an executable file into the target process.  This is expected to
@@ -604,13 +607,14 @@ gdbsim_load (struct target_ops *self, const char *args, int fromtty)
    user types "run" after having attached.  */
 
 static void
-gdbsim_create_inferior (struct target_ops *target, char *exec_file, char *args,
-			char **env, int from_tty)
+gdbsim_create_inferior (struct target_ops *target, const char *exec_file,
+			const std::string &allargs, char **env, int from_tty)
 {
   struct sim_inferior_data *sim_data
     = get_sim_inferior_data (current_inferior (), SIM_INSTANCE_NEEDED);
   int len;
   char *arg_buf, **argv;
+  const char *args = allargs.c_str ();
 
   if (exec_file == 0 || exec_bfd == 0)
     warning (_("No executable file specified."));
@@ -630,7 +634,7 @@ gdbsim_create_inferior (struct target_ops *target, char *exec_file, char *args,
 
   if (exec_file != NULL)
     {
-      len = strlen (exec_file) + 1 + strlen (args) + 1 + /*slop */ 10;
+      len = strlen (exec_file) + 1 + allargs.size () + 1 + /*slop */ 10;
       arg_buf = (char *) alloca (len);
       arg_buf[0] = '\0';
       strcat (arg_buf, exec_file);
@@ -766,8 +770,8 @@ gdbsim_open (const char *args, int from_tty)
 static int
 gdbsim_close_inferior (struct inferior *inf, void *arg)
 {
-  struct sim_inferior_data *sim_data = inferior_data (inf,
-						      sim_inferior_data_key);
+  struct sim_inferior_data *sim_data
+    = (struct sim_inferior_data *) inferior_data (inf, sim_inferior_data_key);
   if (sim_data != NULL)
     {
       ptid_t ptid = sim_data->remote_sim_ptid;
@@ -849,7 +853,7 @@ gdbsim_resume_inferior (struct inferior *inf, void *arg)
 {
   struct sim_inferior_data *sim_data
     = get_sim_inferior_data (inf, SIM_INSTANCE_NOT_NEEDED);
-  struct resume_data *rd = arg;
+  struct resume_data *rd = (struct resume_data *) arg;
 
   if (sim_data)
     {
@@ -954,10 +958,7 @@ gdb_os_poll_quit (host_callback *p)
     deprecated_ui_loop_hook (0);
 
   if (check_quit_flag ())	/* gdb's idea of quit */
-    {
-      clear_quit_flag ();	/* we've stolen it */
-      return 1;
-    }
+    return 1;
   return 0;
 }
 
@@ -1034,13 +1035,13 @@ gdbsim_wait (struct target_ops *ops,
 	case GDB_SIGNAL_TRAP:
 	default:
 	  status->kind = TARGET_WAITKIND_STOPPED;
-	  status->value.sig = sigrc;
+	  status->value.sig = (enum gdb_signal) sigrc;
 	  break;
 	}
       break;
     case sim_signalled:
       status->kind = TARGET_WAITKIND_SIGNALLED;
-      status->value.sig = sigrc;
+      status->value.sig = (enum gdb_signal) sigrc;
       break;
     case sim_running:
     case sim_polling:
@@ -1198,7 +1199,8 @@ simulator_command (char *args, int from_tty)
      thus allocating memory that would not be garbage collected until
      the ultimate destruction of the associated inferior.  */
 
-  sim_data  = inferior_data (current_inferior (), sim_inferior_data_key);
+  sim_data  = ((struct sim_inferior_data *)
+	       inferior_data (current_inferior (), sim_inferior_data_key));
   if (sim_data == NULL || sim_data->gdbsim_desc == NULL)
     {
 
@@ -1231,7 +1233,8 @@ sim_command_completer (struct cmd_list_element *ignore, const char *text,
   int i;
   VEC (char_ptr) *result = NULL;
 
-  sim_data = inferior_data (current_inferior (), sim_inferior_data_key);
+  sim_data = ((struct sim_inferior_data *)
+	      inferior_data (current_inferior (), sim_inferior_data_key));
   if (sim_data == NULL || sim_data->gdbsim_desc == NULL)
     return NULL;
 
@@ -1268,7 +1271,7 @@ gdbsim_thread_alive (struct target_ops *ops, ptid_t ptid)
 /* Convert a thread ID to a string.  Returns the string in a static
    buffer.  */
 
-static char *
+static const char *
 gdbsim_pid_to_str (struct target_ops *ops, ptid_t ptid)
 {
   return normal_pid_to_str (ptid);

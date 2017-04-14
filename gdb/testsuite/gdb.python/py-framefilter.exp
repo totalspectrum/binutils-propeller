@@ -1,4 +1,4 @@
-# Copyright (C) 2013-2015 Free Software Foundation, Inc.
+# Copyright (C) 2013-2017 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,6 +33,10 @@ gdb_start
 # Skip all tests if Python scripting is not enabled.
 if { [skip_python_tests] } { continue }
 
+gdb_test "info frame-filter" \
+    "No frame filters\\." \
+    "info frame filter before loading filters"
+
 # Make the -gdb.py script available to gdb, it is automagically loaded by gdb.
 # Care is taken to put it in the same directory as the binary so that
 # gdb will find it.
@@ -54,13 +58,12 @@ if ![runto_main] then {
     return
 }
 gdb_test_no_output "set python print-stack full" \
-    "Set python print-stack to full"
+    "set python print-stack to full"
 
 # Load global frame-filters
 set remote_python_file [gdb_remote_download host \
 			    ${srcdir}/${subdir}/${testfile}.py]
-gdb_test_no_output "python exec (open ('${remote_python_file}').read ())" \
-    "Load python file"
+gdb_test_no_output "source ${remote_python_file}" "load python file"
 
 gdb_breakpoint [gdb_get_line_number "Backtrace end breakpoint"]
 gdb_breakpoint [gdb_get_line_number "Inner test breakpoint"]
@@ -104,6 +107,9 @@ gdb_test "show frame-filter priority global Elider" \
 gdb_test "info frame-filter" \
     ".*1000.*Yes.*Elider.*100.*Yes.*Reverse.*10.*.*No.*Object.*1.*" \
     "info frame filter after setting priority"
+gdb_test "set frame-filter priority global NoSuchFilter 900" \
+    "frame-filter 'NoSuchFilter' not found." \
+    "set priority of a non-existing filter"
 
 # Test enable/disable
 gdb_test "info frame-filter" \
@@ -119,6 +125,9 @@ gdb_test_no_output  "enable frame-filter global Elider" \
 gdb_test "info frame-filter" \
     ".*1000.*Yes.*Elider.*100.*Yes.*Reverse.*10.*.*No.*Object.*1.*" \
     "info frame filter after reenabling frame filter"
+gdb_test "disable frame-filter global NoSuchFilter" \
+    "frame-filter 'NoSuchFilter' not found." \
+    "disable a non-existing filter"
 
 # Test no-filters
 gdb_test "bt no-filters" \
@@ -243,8 +252,8 @@ gdb_test_no_output "set python print-stack full" \
 # Load global frame-filters
 set remote_python_file [gdb_remote_download host \
 			    ${srcdir}/${subdir}/${testfile}.py]
-gdb_test_no_output "python exec (open ('${remote_python_file}').read ())" \
-    "Load python file for no debuginfo tests"
+gdb_test_no_output "source ${remote_python_file}" \
+    "load python file for no debuginfo tests"
 
 # Disable Reverse
 gdb_test_no_output "disable frame-filter global Reverse" \

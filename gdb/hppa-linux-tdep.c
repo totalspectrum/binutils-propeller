@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux running on PA-RISC, for GDB.
 
-   Copyright (C) 2004-2015 Free Software Foundation, Inc.
+   Copyright (C) 2004-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -39,14 +39,13 @@ static int
 hppa_dwarf_reg_to_regnum (struct gdbarch *gdbarch, int reg)
 {
   /* The general registers and the sar are the same in both sets.  */
-  if (reg <= 32)
+  if (reg >= 0 && reg <= 32)
     return reg;
 
   /* fr4-fr31 (left and right halves) are mapped from 72.  */
   if (reg >= 72 && reg <= 72 + 28 * 2)
     return HPPA_FP4_REGNUM + (reg - 72);
 
-  warning (_("Unmapped DWARF DBX Register #%d encountered."), reg);
   return -1;
 }
 
@@ -519,6 +518,7 @@ hppa_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
      some discussions to support 128-bit long double, but it requires some
      more work in gcc and glibc first.  */
   set_gdbarch_long_double_bit (gdbarch, 64);
+  set_gdbarch_long_double_format (gdbarch, floatformats_ieee_double);
 
   set_gdbarch_iterate_over_regset_sections
     (gdbarch, hppa_linux_iterate_over_regset_sections);

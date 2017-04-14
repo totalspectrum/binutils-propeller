@@ -1,5 +1,5 @@
 /* obj-evax.c - EVAX (openVMS/Alpha) object file format.
-   Copyright (C) 1996-2015 Free Software Foundation, Inc.
+   Copyright (C) 1996-2017 Free Software Foundation, Inc.
    Contributed by Klaus Kämpf (kkaempf@progis.de) of
      proGIS Software, Aachen, Germany.
    Extensively enhanced by Douglas Rupp of AdaCore.
@@ -86,8 +86,7 @@ evax_symbol_new_hook (symbolS *sym)
 {
   struct evax_private_udata_struct *udata;
 
-  udata = (struct evax_private_udata_struct *)
-    xmalloc (sizeof (struct evax_private_udata_struct));
+  udata = XNEW (struct evax_private_udata_struct);
 
   udata->bsym = symbol_get_bfdsym (sym);
   udata->enbsym = NULL;
@@ -217,7 +216,7 @@ evax_frob_file_before_fix (void)
 
 /* The length is computed from the maximum allowable length of 64 less the
    4 character ..xx extension that must be preserved (removed before
-   krunching and appended back on afterwards).  The $<nnn>.. prefix is
+   crunching and appended back on afterwards).  The $<nnn>.. prefix is
    also removed and prepened back on, but doesn't enter into the length
    computation because symbols with that prefix are always resolved
    by the assembler and will never appear in the symbol table. At least
@@ -272,10 +271,8 @@ evax_shorten_name (char *id)
         }
     }
 
-  /* We only need worry about krunching the base symbol.  */
-  base_id = xmalloc (suffix_dotdot - prefix_dotdot + 1);
-  strncpy (base_id, &id[prefix_dotdot], suffix_dotdot - prefix_dotdot);
-  base_id [suffix_dotdot - prefix_dotdot] = 0;
+  /* We only need worry about crunching the base symbol.  */
+  base_id = xmemdup0 (&id[prefix_dotdot], suffix_dotdot - prefix_dotdot);
 
   if (strlen (base_id) > MAX_LABEL_LENGTH)
     {
@@ -299,8 +296,7 @@ evax_shorten_name (char *id)
 	strcat (new_id, suffix);
 
       /* Save it on the heap and return.  */
-      return_id = xmalloc (strlen (new_id) + 1);
-      strcpy (return_id, new_id);
+      return_id = xstrdup (new_id);
 
       return return_id;
     }
@@ -357,7 +353,7 @@ static const int number_of_codings = sizeof (codings) / sizeof (char);
    an integer.  */
 static char decodings[256];
 
-/* Table used by the crc32 function to calcuate the checksum.  */
+/* Table used by the crc32 function to calculate the checksum.  */
 static unsigned int crc32_table[256] = {0, 0};
 
 /* Given a string in BUF, calculate a 32-bit CRC for it.
@@ -506,7 +502,7 @@ is_truncated_identifier (char *id)
     {
       if (ptr[0] == '_' && ptr[1] == 'h')
 	{
-	  /* Now see if the sum encoded in the identifer matches.  */
+	  /* Now see if the sum encoded in the identifier matches.  */
 	  int x, sum;
 	  sum = 0;
 	  for (x = 0; x < 5; x++)

@@ -1,5 +1,5 @@
 /* bfin-parse.y  ADI Blackfin parser
-   Copyright (C) 2005-2015 Free Software Foundation, Inc.
+   Copyright (C) 2005-2017 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -22,7 +22,6 @@
 #include "as.h"
 
 #include "bfin-aux.h"  /* Opcode generating auxiliaries.  */
-#include "libbfd.h"
 #include "elf/common.h"
 #include "elf/bfin.h"
 
@@ -158,16 +157,15 @@ extern INSTR_T insn;
 static Expr_Node *binary (Expr_Op_Type, Expr_Node *, Expr_Node *);
 static Expr_Node *unary  (Expr_Op_Type, Expr_Node *);
 
-static void notethat (char *, ...);
+static void notethat (const char *, ...);
 
-char *current_inputline;
 extern char *yytext;
-int yyerror (char *);
+int yyerror (const char *);
 
 /* Used to set SRCx fields to all 1s as described in the PRM.  */
 static Register reg7 = {REG_R7, 0};
 
-void error (char *format, ...)
+void error (const char *format, ...)
 {
     va_list ap;
     static char buffer[2000];
@@ -180,7 +178,7 @@ void error (char *format, ...)
 }
 
 int
-yyerror (char *msg)
+yyerror (const char *msg)
 {
   if (msg[0] == '\0')
     error ("%s", msg);
@@ -668,7 +666,7 @@ asm: asm_1 SEMICOLON
 	      else if (is_group2 ($3) && is_group1 ($5))
 		$$ = gen_multi_instr_1 ($1, $5, $3);
 	      else
-		return yyerror ("Wrong 16 bit instructions groups, slot 2 and slot 3 must be 16-bit instrution group");
+		return yyerror ("Wrong 16 bit instructions groups, slot 2 and slot 3 must be 16-bit instruction group");
 	    }
 	  else if (($3->value & 0xf800) == 0xc000)
 	    {
@@ -677,7 +675,7 @@ asm: asm_1 SEMICOLON
 	      else if (is_group2 ($1) && is_group1 ($5))
 		$$ = gen_multi_instr_1 ($3, $5, $1);
 	      else
-		return yyerror ("Wrong 16 bit instructions groups, slot 1 and slot 3 must be 16-bit instrution group");
+		return yyerror ("Wrong 16 bit instructions groups, slot 1 and slot 3 must be 16-bit instruction group");
 	    }
 	  else if (($5->value & 0xf800) == 0xc000)
 	    {
@@ -686,7 +684,7 @@ asm: asm_1 SEMICOLON
 	      else if (is_group2 ($1) && is_group1 ($3))
 		$$ = gen_multi_instr_1 ($5, $3, $1);
 	      else
-		return yyerror ("Wrong 16 bit instructions groups, slot 1 and slot 2 must be 16-bit instrution group");
+		return yyerror ("Wrong 16 bit instructions groups, slot 1 and slot 2 must be 16-bit instruction group");
 	    }
 	  else
 	    error ("\nIllegal Multi Issue Construct, at least any one of the slot must be DSP32 instruction group\n");
@@ -4495,7 +4493,7 @@ expr_1: expr_1 STAR expr_1
 EXPR_T
 mkexpr (int x, SYMBOL_T s)
 {
-  EXPR_T e = (EXPR_T) ALLOCATE (sizeof (struct expression_cell));
+  EXPR_T e = XNEW (struct expression_cell);
   e->value = x;
   EXPR_SYMBOL(e) = s;
   return e;
@@ -4505,7 +4503,7 @@ static int
 value_match (Expr_Node *exp, int sz, int sign, int mul, int issigned)
 {
   int umax = (1 << sz) - 1;
-  int min = -1 << (sz - 1);
+  int min = -(1 << (sz - 1));
   int max = (1 << (sz - 1)) - 1;
 
   int v = (EXPR_VALUE (exp)) & 0xffffffff;
@@ -4651,7 +4649,7 @@ unary (Expr_Op_Type op, Expr_Node *x)
 
 int debug_codeselection = 0;
 static void
-notethat (char *format, ...)
+notethat (const char *format, ...)
 {
   va_list ap;
   va_start (ap, format);

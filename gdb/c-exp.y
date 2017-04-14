@@ -1,5 +1,5 @@
 /* YACC parser for C expressions, for GDB.
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -56,65 +56,10 @@
 
 #define parse_type(ps) builtin_type (parse_gdbarch (ps))
 
-/* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
-   as well as gratuitiously global symbol names, so we can have multiple
-   yacc generated parsers in gdb.  Note that these are only the variables
-   produced by yacc.  If other parser generators (bison, byacc, etc) produce
-   additional global names that conflict at link time, then those parser
-   generators need to be fixed instead of adding those names to this list. */
-
-#define	yymaxdepth c_maxdepth
-#define	yyparse	c_parse_internal
-#define	yylex	c_lex
-#define	yyerror	c_error
-#define	yylval	c_lval
-#define	yychar	c_char
-#define	yydebug	c_debug
-#define	yypact	c_pact	
-#define	yyr1	c_r1			
-#define	yyr2	c_r2			
-#define	yydef	c_def		
-#define	yychk	c_chk		
-#define	yypgo	c_pgo		
-#define	yyact	c_act		
-#define	yyexca	c_exca
-#define yyerrflag c_errflag
-#define yynerrs	c_nerrs
-#define	yyps	c_ps
-#define	yypv	c_pv
-#define	yys	c_s
-#define	yy_yys	c_yys
-#define	yystate	c_state
-#define	yytmp	c_tmp
-#define	yyv	c_v
-#define	yy_yyv	c_yyv
-#define	yyval	c_val
-#define	yylloc	c_lloc
-#define yyreds	c_reds		/* With YYDEBUG defined */
-#define yytoks	c_toks		/* With YYDEBUG defined */
-#define yyname	c_name		/* With YYDEBUG defined */
-#define yyrule	c_rule		/* With YYDEBUG defined */
-#define yylhs	c_yylhs
-#define yylen	c_yylen
-#define yydefred c_yydefred
-#define yydgoto	c_yydgoto
-#define yysindex c_yysindex
-#define yyrindex c_yyrindex
-#define yygindex c_yygindex
-#define yytable	 c_yytable
-#define yycheck	 c_yycheck
-#define yyss	c_yyss
-#define yysslim	c_yysslim
-#define yyssp	c_yyssp
-#define yystacksize c_yystacksize
-#define yyvs	c_yyvs
-#define yyvsp	c_yyvsp
-
-#ifndef YYDEBUG
-#define	YYDEBUG 1		/* Default to yydebug support */
-#endif
-
-#define YYFPRINTF parser_fprintf
+/* Remap normal yacc parser interface names (yyparse, yylex, yyerror,
+   etc).  */
+#define GDB_YY_REMAP_PREFIX c_
+#include "yy-remap.h"
 
 /* The state of the parser, used internally when we are parsing the
    expression.  */
@@ -125,7 +70,7 @@ int yyparse (void);
 
 static int yylex (void);
 
-void yyerror (char *);
+void yyerror (const char *);
 
 static int type_aggregate_p (struct type *);
 
@@ -799,7 +744,7 @@ exp	:	SIZEOF '(' type ')'	%prec UNARY
 			       says of sizeof:  "When applied to a reference
 			       or a reference type, the result is the size of
 			       the referenced type."  */
-			  if (TYPE_CODE (type) == TYPE_CODE_REF)
+			  if (TYPE_IS_REFERENCE (type))
 			    type = check_typedef (TYPE_TARGET_TYPE (type));
 			  write_exp_elt_longcst (pstate,
 						 (LONGEST) TYPE_LENGTH (type));
@@ -864,7 +809,7 @@ string_exp:
 exp	:	string_exp
 			{
 			  int i;
-			  enum c_string_type type = C_STRING;
+			  c_string_type type = C_STRING;
 
 			  for (i = 0; i < $1.len; ++i)
 			    {
@@ -878,7 +823,7 @@ exp	:	string_exp
 				  if (type != C_STRING
 				      && type != $1.tokens[i].type)
 				    error (_("Undefined string concatenation."));
-				  type = (enum c_string_type) $1.tokens[i].type;
+				  type = (enum c_string_type_values) $1.tokens[i].type;
 				  break;
 				default:
 				  /* internal error */
@@ -1140,6 +1085,10 @@ ptr_operator:
 			{ insert_type (tp_reference); }
 	|	'&' ptr_operator
 			{ insert_type (tp_reference); }
+	|       ANDAND
+			{ insert_type (tp_rvalue_reference); }
+	|       ANDAND ptr_operator
+			{ insert_type (tp_rvalue_reference); }
 	;
 
 ptr_operator_ts: ptr_operator
@@ -1610,16 +1559,11 @@ oper:	OPERATOR NEW
 	|	OPERATOR OBJC_LBRAC ']'
 			{ $$ = operator_stoken ("[]"); }
 	|	OPERATOR conversion_type_id
-			{ char *name;
-			  long length;
-			  struct ui_file *buf = mem_fileopen ();
+			{ string_file buf;
 
-			  c_print_type ($2, NULL, buf, -1, 0,
+			  c_print_type ($2, NULL, &buf, -1, 0,
 					&type_print_raw_options);
-			  name = ui_file_xstrdup (buf, &length);
-			  ui_file_delete (buf);
-			  $$ = operator_stoken (name);
-			  free (name);
+			  $$ = operator_stoken (buf.c_str ());
 			}
 	;
 
@@ -2164,7 +2108,7 @@ parse_string_or_char (const char *tokptr, const char **outptr,
 		      struct typed_stoken *value, int *host_chars)
 {
   int quote;
-  enum c_string_type type;
+  c_string_type type;
   int is_objc = 0;
 
   /* Build the gdb internal form of the input string in tempbuf.  Note
@@ -2247,7 +2191,7 @@ parse_string_or_char (const char *tokptr, const char **outptr,
   ++tokptr;
 
   value->type = type;
-  value->ptr = obstack_base (&tempbuf);
+  value->ptr = (char *) obstack_base (&tempbuf);
   value->length = obstack_object_size (&tempbuf);
 
   *outptr = tokptr;
@@ -2257,7 +2201,7 @@ parse_string_or_char (const char *tokptr, const char **outptr,
 
 /* This is used to associate some attributes with a token.  */
 
-enum token_flags
+enum token_flag
 {
   /* If this bit is set, the token is C++-only.  */
 
@@ -2269,13 +2213,14 @@ enum token_flags
 
   FLAG_SHADOW = 2
 };
+DEF_ENUM_FLAGS_TYPE (enum token_flag, token_flags);
 
 struct token
 {
-  char *oper;
+  const char *oper;
   int token;
   enum exp_opcode opcode;
-  enum token_flags flags;
+  token_flags flags;
 };
 
 static const struct token tokentab3[] =
@@ -3172,7 +3117,7 @@ yylex (void)
 	  obstack_grow (&name_obstack, next->value.sval.ptr,
 			next->value.sval.length);
 
-	  yylval.sval.ptr = obstack_base (&name_obstack);
+	  yylval.sval.ptr = (const char *) obstack_base (&name_obstack);
 	  yylval.sval.length = obstack_object_size (&name_obstack);
 	  current.value = yylval;
 	  current.token = classification;
@@ -3243,8 +3188,8 @@ c_parse (struct parser_state *par_state)
   gdb_assert (! macro_original_text);
   make_cleanup (scan_macro_cleanup, 0);
 
-  make_cleanup_restore_integer (&yydebug);
-  yydebug = parser_debug;
+  scoped_restore restore_yydebug = make_scoped_restore (&yydebug,
+							parser_debug);
 
   /* Initialize some state used by the lexer.  */
   last_was_structop = 0;
@@ -3272,9 +3217,9 @@ c_print_token (FILE *file, int type, YYSTYPE value)
   switch (type)
     {
     case INT:
-      fprintf (file, "typed_val_int<%s, %s>",
-	       TYPE_SAFE_NAME (value.typed_val_int.type),
-	       pulongest (value.typed_val_int.val));
+      parser_fprintf (file, "typed_val_int<%s, %s>",
+		      TYPE_SAFE_NAME (value.typed_val_int.type),
+		      pulongest (value.typed_val_int.val));
       break;
 
     case CHAR:
@@ -3285,34 +3230,34 @@ c_print_token (FILE *file, int type, YYSTYPE value)
 	memcpy (copy, value.tsval.ptr, value.tsval.length);
 	copy[value.tsval.length] = '\0';
 
-	fprintf (file, "tsval<type=%d, %s>", value.tsval.type, copy);
+	parser_fprintf (file, "tsval<type=%d, %s>", value.tsval.type, copy);
       }
       break;
 
     case NSSTRING:
     case VARIABLE:
-      fprintf (file, "sval<%s>", copy_name (value.sval));
+      parser_fprintf (file, "sval<%s>", copy_name (value.sval));
       break;
 
     case TYPENAME:
-      fprintf (file, "tsym<type=%s, name=%s>",
-	       TYPE_SAFE_NAME (value.tsym.type),
-	       copy_name (value.tsym.stoken));
+      parser_fprintf (file, "tsym<type=%s, name=%s>",
+		      TYPE_SAFE_NAME (value.tsym.type),
+		      copy_name (value.tsym.stoken));
       break;
 
     case NAME:
     case UNKNOWN_CPP_NAME:
     case NAME_OR_INT:
     case BLOCKNAME:
-      fprintf (file, "ssym<name=%s, sym=%s, field_of_this=%d>",
-	       copy_name (value.ssym.stoken),
-	       (value.ssym.sym.symbol == NULL
-		? "(null)" : SYMBOL_PRINT_NAME (value.ssym.sym.symbol)),
-	       value.ssym.is_a_field_of_this);
+      parser_fprintf (file, "ssym<name=%s, sym=%s, field_of_this=%d>",
+		       copy_name (value.ssym.stoken),
+		       (value.ssym.sym.symbol == NULL
+			? "(null)" : SYMBOL_PRINT_NAME (value.ssym.sym.symbol)),
+		       value.ssym.is_a_field_of_this);
       break;
 
     case FILENAME:
-      fprintf (file, "bval<%s>", host_address_to_string (value.bval));
+      parser_fprintf (file, "bval<%s>", host_address_to_string (value.bval));
       break;
     }
 }
@@ -3320,7 +3265,7 @@ c_print_token (FILE *file, int type, YYSTYPE value)
 #endif
 
 void
-yyerror (char *msg)
+yyerror (const char *msg)
 {
   if (prev_lexptr)
     lexptr = prev_lexptr;

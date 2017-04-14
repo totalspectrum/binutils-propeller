@@ -1,6 +1,6 @@
 /* Header file for command creation.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -115,6 +115,17 @@ struct cmd_list_element;
 
 typedef void cmd_cfunc_ftype (char *args, int from_tty);
 
+/* This structure specifies notifications to be suppressed by a cli
+   command interpreter.  */
+
+struct cli_suppress_notification
+{
+  /* Inferior, thread, frame selected notification suppressed?  */
+  int user_selected_context;
+};
+
+extern struct cli_suppress_notification cli_suppress_notification;
+
 /* Forward-declarations of the entry-points of cli/cli-decode.c.  */
 
 /* API to the manipulation of command lists.  */
@@ -193,7 +204,8 @@ extern enum cmd_types cmd_type (struct cmd_list_element *cmd);
 #define CMD_LIST_AMBIGUOUS ((struct cmd_list_element *) -1)
 
 extern struct cmd_list_element *lookup_cmd (const char **,
-					    struct cmd_list_element *, char *,
+					    struct cmd_list_element *,
+					    const char *,
 					    int, int);
 
 extern struct cmd_list_element *lookup_cmd_1 (const char **,
@@ -217,6 +229,11 @@ extern struct cmd_list_element *add_com (const char *, enum command_class,
 
 extern struct cmd_list_element *add_com_alias (const char *, const char *,
 					       enum command_class, int);
+
+extern struct cmd_list_element *add_com_suppress_notification
+		       (const char *name, enum command_class theclass,
+			cmd_cfunc_ftype *fun, const char *doc,
+			int *supress_notification);
 
 extern struct cmd_list_element *add_info (const char *,
 					  cmd_cfunc_ftype *fun,
@@ -392,7 +409,7 @@ extern void error_no_arg (const char *) ATTRIBUTE_NORETURN;
 
 extern void dont_repeat (void);
 
-extern struct cleanup *prevent_dont_repeat (void);
+extern scoped_restore_tmpl<int> prevent_dont_repeat (void);
 
 /* Used to mark commands that don't do anything.  If we just leave the
    function field NULL, the command is interpreted as a help topic, or

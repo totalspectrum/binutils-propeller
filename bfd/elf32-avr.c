@@ -1,5 +1,5 @@
 /* AVR-specific support for 32-bit ELF
-   Copyright (C) 1999-2015 Free Software Foundation, Inc.
+   Copyright (C) 1999-2017 Free Software Foundation, Inc.
    Contributed by Denis Chertykov <denisc@overta.ru>
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -955,6 +955,7 @@ avr_info_to_howto_rela (bfd *abfd ATTRIBUTE_UNUSED,
   r_type = ELF32_R_TYPE (dst->r_info);
   if (r_type >= (unsigned int) R_AVR_max)
     {
+      /* xgettext:c-format */
       _bfd_error_handler (_("%B: invalid AVR reloc number: %d"), abfd, r_type);
       r_type = 0;
     }
@@ -1487,14 +1488,13 @@ elf32_avr_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
 	  switch (r)
 	    {
 	    case bfd_reloc_overflow:
-	      r = info->callbacks->reloc_overflow
-		(info, (h ? &h->root : NULL),
-		 name, howto->name, (bfd_vma) 0,
-		 input_bfd, input_section, rel->r_offset);
+	      (*info->callbacks->reloc_overflow)
+		(info, (h ? &h->root : NULL), name, howto->name,
+		 (bfd_vma) 0, input_bfd, input_section, rel->r_offset);
 	      break;
 
 	    case bfd_reloc_undefined:
-	      r = info->callbacks->undefined_symbol
+	      (*info->callbacks->undefined_symbol)
 		(info, name, input_bfd, input_section, rel->r_offset, TRUE);
 	      break;
 
@@ -1516,11 +1516,8 @@ elf32_avr_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
 	    }
 
 	  if (msg)
-	    r = info->callbacks->warning
-	      (info, msg, name, input_bfd, input_section, rel->r_offset);
-
-	  if (! r)
-	    return FALSE;
+	    (*info->callbacks->warning) (info, msg, name, input_bfd,
+					 input_section, rel->r_offset);
 	}
     }
 
@@ -1745,22 +1742,22 @@ elf32_avr_adjust_diff_reloc_value (bfd *abfd,
   reloc_contents = isec_contents + irel->r_offset;
 
   /* Read value written in object file. */
- bfd_vma x = 0;
+  bfd_signed_vma x = 0;
   switch (ELF32_R_TYPE (irel->r_info))
   {
   case R_AVR_DIFF8:
     {
-      x = *reloc_contents;
+      x = bfd_get_signed_8 (abfd, reloc_contents);
       break;
     }
   case R_AVR_DIFF16:
     {
-      x = bfd_get_16 (abfd, reloc_contents);
+      x = bfd_get_signed_16 (abfd, reloc_contents);
       break;
     }
   case R_AVR_DIFF32:
     {
-      x = bfd_get_32 (abfd, reloc_contents);
+      x = bfd_get_signed_32 (abfd, reloc_contents);
       break;
     }
   default:
@@ -1774,30 +1771,41 @@ elf32_avr_adjust_diff_reloc_value (bfd *abfd,
      symval (<start_of_section>) + reloc addend. Compute the start and end
      addresses and check if the shrinked insn falls between sym1 and sym2. */
 
-  bfd_vma end_address = symval + irel->r_addend;
-  bfd_vma start_address = end_address - x;
+  bfd_vma sym2_address = symval + irel->r_addend;
+  bfd_vma sym1_address = sym2_address - x;
 
-  /* Reduce the diff value by count bytes and write it back into section
-    contents. */
+  /* Don't assume sym2 is bigger than sym1 - the difference
+     could be negative. Compute start and end addresses, and
+     use those to see if they span shrinked_insn_address. */
+
+  bfd_vma start_address = sym1_address < sym2_address
+    ? sym1_address : sym2_address;
+  bfd_vma end_address = sym1_address > sym2_address
+    ? sym1_address : sym2_address;
+
 
   if (shrinked_insn_address >= start_address
       && shrinked_insn_address <= end_address)
   {
+    /* Reduce the diff value by count bytes and write it back into section
+       contents. */
+    bfd_signed_vma new_diff = x < 0 ? x + count : x - count;
+
     switch (ELF32_R_TYPE (irel->r_info))
     {
     case R_AVR_DIFF8:
       {
-        *reloc_contents = (x - count);
+        bfd_put_signed_8 (abfd, new_diff, reloc_contents);
         break;
       }
     case R_AVR_DIFF16:
       {
-        bfd_put_16 (abfd, (x - count) & 0xFFFF, reloc_contents);
+        bfd_put_signed_16 (abfd, new_diff & 0xFFFF, reloc_contents);
         break;
       }
     case R_AVR_DIFF32:
       {
-        bfd_put_32 (abfd, (x - count) & 0xFFFFFFFF, reloc_contents);
+        bfd_put_signed_32 (abfd, new_diff & 0xFFFFFFFF, reloc_contents);
         break;
       }
     default:
@@ -1809,16 +1817,57 @@ elf32_avr_adjust_diff_reloc_value (bfd *abfd,
   }
 }
 
+static void
+elf32_avr_adjust_reloc_if_spans_insn (bfd *abfd,
+                                      asection *isec,
+                                      Elf_Internal_Rela *irel,  bfd_vma symval,
+                                      bfd_vma shrinked_insn_address,
+                                      bfd_vma shrink_boundary,
+                                      int count)
+{
+
+  if (elf32_avr_is_diff_reloc (irel))
+    {
+      elf32_avr_adjust_diff_reloc_value (abfd, isec, irel,
+                                         symval,
+                                         shrinked_insn_address,
+                                         count);
+    }
+  else
+    {
+      bfd_vma reloc_value = symval + irel->r_addend;
+      bfd_boolean addend_within_shrink_boundary =
+        (reloc_value <= shrink_boundary);
+
+      bfd_boolean reloc_spans_insn =
+        (symval <= shrinked_insn_address
+         && reloc_value > shrinked_insn_address
+         && addend_within_shrink_boundary);
+
+      if (! reloc_spans_insn)
+        return;
+
+      irel->r_addend -= count;
+
+      if (debug_relax)
+        printf ("Relocation's addend needed to be fixed \n");
+    }
+}
+
 /* Delete some bytes from a section while changing the size of an instruction.
    The parameter "addr" denotes the section-relative offset pointing just
    behind the shrinked instruction. "addr+count" point at the first
-   byte just behind the original unshrinked instruction.  */
+   byte just behind the original unshrinked instruction. If delete_shrinks_insn
+   is FALSE, we are deleting redundant padding bytes from relax_info prop
+   record handling. In that case, addr is section-relative offset of start
+   of padding, and count is the number of padding bytes to delete. */
 
 static bfd_boolean
 elf32_avr_relax_delete_bytes (bfd *abfd,
                               asection *sec,
                               bfd_vma addr,
-                              int count)
+                              int count,
+                              bfd_boolean delete_shrinks_insn)
 {
   Elf_Internal_Shdr *symtab_hdr;
   unsigned int sec_shndx;
@@ -1826,12 +1875,13 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
   Elf_Internal_Rela *irel, *irelend;
   Elf_Internal_Sym *isym;
   Elf_Internal_Sym *isymbuf = NULL;
-  bfd_vma toaddr;
+  bfd_vma toaddr, reloc_toaddr;
   struct elf_link_hash_entry **sym_hashes;
   struct elf_link_hash_entry **end_hashes;
   unsigned int symcount;
   struct avr_relax_info *relax_info;
   struct avr_property_record *prop_record = NULL;
+  bfd_boolean did_shrink = FALSE;
 
   symtab_hdr = &elf_tdata (abfd)->symtab_hdr;
   sec_shndx = _bfd_elf_section_from_bfd_section (abfd, sec);
@@ -1862,15 +1912,32 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
         }
     }
 
+  /* We need to look at all relocs with offsets less than toaddr. prop
+     records handling adjusts toaddr downwards to avoid moving syms at the
+     address of the property record, but all relocs with offsets between addr
+     and the current value of toaddr need to have their offsets adjusted.
+     Assume addr = 0, toaddr = 4 and count = 2. After prop records handling,
+     toaddr becomes 2, but relocs with offsets 2 and 3 still need to be
+     adjusted (to 0 and 1 respectively), as the first 2 bytes are now gone.
+     So record the current value of toaddr here, and use it when adjusting
+     reloc offsets. */
+  reloc_toaddr = toaddr;
+
   irel = elf_section_data (sec)->relocs;
   irelend = irel + sec->reloc_count;
 
   /* Actually delete the bytes.  */
   if (toaddr - addr - count > 0)
-    memmove (contents + addr, contents + addr + count,
-             (size_t) (toaddr - addr - count));
+    {
+      memmove (contents + addr, contents + addr + count,
+               (size_t) (toaddr - addr - count));
+      did_shrink = TRUE;
+    }
   if (prop_record == NULL)
-    sec->size -= count;
+    {
+      sec->size -= count;
+      did_shrink = TRUE;
+    }
   else
     {
       /* Use the property record to fill in the bytes we've opened up.  */
@@ -1889,12 +1956,20 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
           prop_record->data.align.preceding_deleted += count;
           break;
         };
+      /* If toaddr == (addr + count), then we didn't delete anything, yet
+         we fill count bytes backwards from toaddr. This is still ok - we
+         end up overwriting the bytes we would have deleted. We just need
+         to remember we didn't delete anything i.e. don't set did_shrink,
+         so that we don't corrupt reloc offsets or symbol values.*/
       memset (contents + toaddr - count, fill, count);
 
       /* Adjust the TOADDR to avoid moving symbols located at the address
          of the property record, which has not moved.  */
       toaddr -= count;
     }
+
+  if (!did_shrink)
+    return TRUE;
 
   /* Adjust all the reloc addresses.  */
   for (irel = elf_section_data (sec)->relocs; irel < irelend; irel++)
@@ -1906,7 +1981,7 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
 
       /* Get the new reloc address.  */
       if ((irel->r_offset > addr
-           && irel->r_offset < toaddr))
+           && irel->r_offset < reloc_toaddr))
         {
           if (debug_relax)
             printf ("Relocation at address 0x%x needs to be moved.\n"
@@ -1943,7 +2018,9 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
 	 continue;
 
        shrinked_insn_address = (sec->output_section->vma
-                                + sec->output_offset + addr - count);
+                                + sec->output_offset + addr);
+       if (delete_shrinks_insn)
+         shrinked_insn_address -= count;
 
        irel = elf_section_data (isec)->relocs;
        /* PR 12161: Read in the relocs for this section if necessary.  */
@@ -1980,6 +2057,12 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
                   a symbol or section associated with it.  */
                if (sym_sec == sec)
                  {
+                   /* If there is an alignment boundary, we only need to
+                      adjust addends that end up below the boundary. */
+                   bfd_vma shrink_boundary = (reloc_toaddr
+                                              + sec->output_section->vma
+                                              + sec->output_offset);
+
                    symval += sym_sec->output_section->vma
                              + sym_sec->output_offset;
 
@@ -1993,22 +2076,11 @@ elf32_avr_relax_delete_bytes (bfd *abfd,
                              (unsigned int) (symval + irel->r_addend),
                              (unsigned int) shrinked_insn_address);
 
-                   if (symval <= shrinked_insn_address
-                       && (symval + irel->r_addend) > shrinked_insn_address)
-                     {
-                       if (elf32_avr_is_diff_reloc (irel))
-                         {
-                           elf32_avr_adjust_diff_reloc_value (abfd, isec, irel,
+                   elf32_avr_adjust_reloc_if_spans_insn (abfd, isec, irel,
                                                          symval,
                                                          shrinked_insn_address,
-                                                        count);
-                         }
-
-                       irel->r_addend -= count;
-
-                       if (debug_relax)
-                         printf ("Relocation's addend needed to be fixed \n");
-                     }
+                                                         shrink_boundary,
+                                                         count);
                  }
 	       /* else...Reference symbol is absolute.  No adjustment needed.  */
 	     }
@@ -2626,7 +2698,8 @@ elf32_avr_relax_section (bfd *abfd,
                   {
                     /* Delete two bytes of data.  */
                     if (!elf32_avr_relax_delete_bytes (abfd, sec,
-                                                       irel->r_offset + 2, 2))
+                                                       irel->r_offset + 2, 2,
+                                                       TRUE))
                       goto error_return;
 
                     /* That will change things, so, we should relax again.
@@ -2635,6 +2708,7 @@ elf32_avr_relax_section (bfd *abfd,
                   }
               }
           }
+	  /* Fall through.  */
 
         default:
           {
@@ -2950,7 +3024,8 @@ elf32_avr_relax_section (bfd *abfd,
 
 			    /* Delete two bytes of data.  */
 			    if (!elf32_avr_relax_delete_bytes (abfd, sec,
-							       irel->r_offset + insn_size, 2))
+							       irel->r_offset + insn_size, 2,
+							       TRUE))
 			      goto error_return;
 
 			    /* That will change things, so, we should relax
@@ -3018,7 +3093,7 @@ elf32_avr_relax_section (bfd *abfd,
                         record->offset -= count;
                         elf32_avr_relax_delete_bytes (abfd, sec,
                                                       addr - count,
-                                                      count);
+                                                      count, FALSE);
                         *again = TRUE;
                       }
                   }
@@ -3208,8 +3283,8 @@ avr_add_stub (const char *stub_name,
 
   if (hsh == NULL)
     {
-      (*_bfd_error_handler) (_("%B: cannot create stub entry %s"),
-                             NULL, stub_name);
+      /* xgettext:c-format */
+      _bfd_error_handler (_("cannot create stub entry %s"), stub_name);
       return NULL;
     }
 
@@ -4068,11 +4143,13 @@ avr_elf32_load_records_from_section (bfd *abfd, asection *sec)
     }
 
   free (contents);
-  free (internal_relocs);
+  if (elf_section_data (sec)->relocs != internal_relocs)
+    free (internal_relocs);
   return r_list;
 
  load_failed:
-  free (internal_relocs);
+  if (elf_section_data (sec)->relocs != internal_relocs)
+    free (internal_relocs);
   free (contents);
   free (r_list);
   return NULL;

@@ -1,5 +1,5 @@
 /* Helper routines for C++ support in GDB.
-   Copyright (C) 2003-2015 Free Software Foundation, Inc.
+   Copyright (C) 2003-2017 Free Software Foundation, Inc.
 
    Contributed by David Carlton and by Kealia, Inc.
 
@@ -32,6 +32,7 @@
 #include "buildsym.h"
 #include "language.h"
 #include "namespace.h"
+#include <string>
 
 static struct block_symbol
   cp_lookup_nested_symbol_1 (struct type *container_type,
@@ -170,7 +171,7 @@ cp_lookup_bare_symbol (const struct language_defn *langdef,
      ':' may be in the args of a template spec.  This isn't intended to be
      a complete test, just cheap and documentary.  */
   if (strchr (name, '<') == NULL && strchr (name, '(') == NULL)
-    gdb_assert (strchr (name, ':') == NULL);
+    gdb_assert (strstr (name, "::") == NULL);
 
   sym = lookup_symbol_in_static_block (name, block, domain);
   if (sym.symbol != NULL)
@@ -206,16 +207,21 @@ cp_lookup_bare_symbol (const struct language_defn *langdef,
       struct block_symbol lang_this;
       struct type *type;
 
-      lang_this = lookup_language_this (language_def (language_cplus), block);
+      lang_this.symbol = NULL;
+
+      if (langdef != NULL)
+	lang_this = lookup_language_this (langdef, block);
+
       if (lang_this.symbol == NULL)
-	return (struct block_symbol) {NULL, NULL};
+	return null_block_symbol;
+
 
       type = check_typedef (TYPE_TARGET_TYPE (SYMBOL_TYPE (lang_this.symbol)));
       /* If TYPE_NAME is NULL, abandon trying to find this symbol.
 	 This can happen for lambda functions compiled with clang++,
 	 which outputs no name for the container class.  */
       if (TYPE_NAME (type) == NULL)
-	return (struct block_symbol) {NULL, NULL};
+	return null_block_symbol;
 
       /* Look for symbol NAME in this class.  */
       sym = cp_lookup_nested_symbol (type, name, block, domain);
@@ -241,49 +247,38 @@ cp_search_static_and_baseclasses (const char *name,
 				  int is_in_anonymous)
 {
   struct block_symbol sym;
-  char *klass, *nested;
-  struct cleanup *cleanup;
   struct block_symbol klass_sym;
   struct type *klass_type;
 
-  /* The test here uses <= instead of < because Fortran also uses this,
-     and the module.exp testcase will pass "modmany::" for NAME here.  */
-  gdb_assert (prefix_len + 2 <= strlen (name));
-  gdb_assert (name[prefix_len + 1] == ':');
+  /* Check for malformed input.  */
+  if (prefix_len + 2 > strlen (name) || name[prefix_len + 1] != ':')
+    return null_block_symbol;
 
   /* Find the name of the class and the name of the method, variable, etc.  */
 
   /* The class name is everything up to and including PREFIX_LEN.  */
-  klass = savestring (name, prefix_len);
+  std::string klass (name, prefix_len);
 
   /* The rest of the name is everything else past the initial scope
      operator.  */
-  nested = xstrdup (name + prefix_len + 2);
-
-  /* Add cleanups to free memory for these strings.  */
-  cleanup = make_cleanup (xfree, klass);
-  make_cleanup (xfree, nested);
+  std::string nested (name + prefix_len + 2);
 
   /* Lookup a class named KLASS.  If none is found, there is nothing
      more that can be done.  KLASS could be a namespace, so always look
      in VAR_DOMAIN.  This works for classes too because of
      symbol_matches_domain (which should be replaced with something else,
      but it's what we have today).  */
-  klass_sym = lookup_global_symbol (klass, block, VAR_DOMAIN);
+  klass_sym = lookup_global_symbol (klass.c_str (), block, VAR_DOMAIN);
   if (klass_sym.symbol == NULL)
-    {
-      do_cleanups (cleanup);
-      return (struct block_symbol) {NULL, NULL};
-    }
+    return null_block_symbol;
   klass_type = SYMBOL_TYPE (klass_sym.symbol);
 
   /* Look for a symbol named NESTED in this class.
      The caller is assumed to have already have done a basic lookup of NAME.
      So we pass zero for BASIC_LOOKUP to cp_lookup_nested_symbol_1 here.  */
-  sym = cp_lookup_nested_symbol_1 (klass_type, nested, name, block, domain,
-				   0, is_in_anonymous);
+  sym = cp_lookup_nested_symbol_1 (klass_type, nested.c_str (), name,
+				   block, domain, 0, is_in_anonymous);
 
-  do_cleanups (cleanup);
   return sym;
 }
 
@@ -492,7 +487,7 @@ cp_lookup_symbol_via_imports (const char *scope,
 	}
     }
 
-  return (struct block_symbol) {NULL, NULL};
+  return null_block_symbol;
 }
 
 /* Helper function that searches an array of symbols for one named NAME.  */
@@ -563,8 +558,7 @@ cp_lookup_symbol_imports_or_template (const char *scope,
       if (SYMBOL_NATURAL_NAME (function))
 	{
 	  struct type *context;
-	  char *name_copy = xstrdup (SYMBOL_NATURAL_NAME (function));
-	  struct cleanup *cleanups = make_cleanup (xfree, name_copy);
+	  std::string name_copy (SYMBOL_NATURAL_NAME (function));
 	  const struct language_defn *lang = language_def (language_cplus);
 	  struct gdbarch *arch = symbol_arch (function);
 	  const struct block *parent = BLOCK_SUPERBLOCK (block);
@@ -572,15 +566,16 @@ cp_lookup_symbol_imports_or_template (const char *scope,
 
 	  while (1)
 	    {
-	      unsigned int prefix_len = cp_entire_prefix_len (name_copy);
+	      unsigned int prefix_len
+		= cp_entire_prefix_len (name_copy.c_str ());
 
 	      if (prefix_len == 0)
 		context = NULL;
 	      else
 		{
-		  name_copy[prefix_len] = '\0';
+		  name_copy.erase (prefix_len);
 		  context = lookup_typename (lang, arch,
-					     name_copy,
+					     name_copy.c_str (),
 					     parent, 1);
 		}
 
@@ -593,7 +588,6 @@ cp_lookup_symbol_imports_or_template (const char *scope,
 				      TYPE_TEMPLATE_ARGUMENTS (context));
 	      if (sym != NULL)
 		{
-		  do_cleanups (cleanups);
 		  if (symbol_lookup_debug)
 		    {
 		      fprintf_unfiltered
@@ -604,8 +598,6 @@ cp_lookup_symbol_imports_or_template (const char *scope,
 		  return (struct block_symbol) {sym, parent};
 		}
 	    }
-
-	  do_cleanups (cleanups);
 	}
     }
 
@@ -640,7 +632,7 @@ cp_lookup_symbol_via_all_imports (const char *scope, const char *name,
       block = BLOCK_SUPERBLOCK (block);
     }
 
-  return (struct block_symbol) {NULL, NULL};
+  return null_block_symbol;
 }
 
 /* Searches for NAME in the current namespace, and by applying
@@ -828,34 +820,27 @@ find_symbol_in_baseclass (struct type *parent_type, const char *name,
 {
   int i;
   struct block_symbol sym;
-  struct cleanup *cleanup;
-  char *concatenated_name;
 
   sym.symbol = NULL;
   sym.block = NULL;
-  concatenated_name = NULL;
-  cleanup = make_cleanup (free_current_contents, &concatenated_name);
 
   for (i = 0; i < TYPE_N_BASECLASSES (parent_type); ++i)
     {
-      size_t len;
       struct type *base_type = TYPE_BASECLASS (parent_type, i);
       const char *base_name = TYPE_BASECLASS_NAME (parent_type, i);
 
       if (base_name == NULL)
 	continue;
 
-      len = strlen (base_name) + 2 + strlen (name) + 1;
-      concatenated_name = (char *) xrealloc (concatenated_name, len);
-      xsnprintf (concatenated_name, len, "%s::%s", base_name, name);
+      std::string concatenated_name = std::string (base_name) + "::" + name;
 
-      sym = cp_lookup_nested_symbol_1 (base_type, name, concatenated_name,
+      sym = cp_lookup_nested_symbol_1 (base_type, name,
+				       concatenated_name.c_str (),
 				       block, domain, 1, is_in_anonymous);
       if (sym.symbol != NULL)
 	break;
     }
 
-  do_cleanups (cleanup);
   return sym;
 }
 
@@ -928,7 +913,7 @@ cp_lookup_nested_symbol_1 (struct type *container_type,
 	return sym;
     }
 
-  return (struct block_symbol) {NULL, NULL};
+  return null_block_symbol;
 }
 
 /* Look up a symbol named NESTED_NAME that is nested inside the C++
@@ -1005,7 +990,7 @@ cp_lookup_nested_symbol (struct type *parent_type,
 			      "cp_lookup_nested_symbol (...) = NULL"
 			      " (func/method)\n");
 	}
-      return (struct block_symbol) {NULL, NULL};
+      return null_block_symbol;
 
     default:
       internal_error (__FILE__, __LINE__,

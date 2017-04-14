@@ -1,6 +1,6 @@
 /* YACC parser for Go expressions, for GDB.
 
-   Copyright (C) 2012-2015 Free Software Foundation, Inc.
+   Copyright (C) 2012-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -67,59 +67,10 @@
 
 #define parse_type(ps) builtin_type (parse_gdbarch (ps))
 
-/* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
-   as well as gratuitiously global symbol names, so we can have multiple
-   yacc generated parsers in gdb.  Note that these are only the variables
-   produced by yacc.  If other parser generators (bison, byacc, etc) produce
-   additional global names that conflict at link time, then those parser
-   generators need to be fixed instead of adding those names to this list.  */
-
-#define	yymaxdepth go_maxdepth
-#define	yyparse	go_parse_internal
-#define	yylex	go_lex
-#define	yyerror	go_error
-#define	yylval	go_lval
-#define	yychar	go_char
-#define	yydebug	go_debug
-#define	yypact	go_pact
-#define	yyr1	go_r1
-#define	yyr2	go_r2
-#define	yydef	go_def
-#define	yychk	go_chk
-#define	yypgo	go_pgo
-#define	yyact	go_act
-#define	yyexca	go_exca
-#define yyerrflag go_errflag
-#define yynerrs	go_nerrs
-#define	yyps	go_ps
-#define	yypv	go_pv
-#define	yys	go_s
-#define	yy_yys	go_yys
-#define	yystate	go_state
-#define	yytmp	go_tmp
-#define	yyv	go_v
-#define	yy_yyv	go_yyv
-#define	yyval	go_val
-#define	yylloc	go_lloc
-#define yyreds	go_reds		/* With YYDEBUG defined */
-#define yytoks	go_toks		/* With YYDEBUG defined */
-#define yyname	go_name		/* With YYDEBUG defined */
-#define yyrule	go_rule		/* With YYDEBUG defined */
-#define yylhs	go_yylhs
-#define yylen	go_yylen
-#define yydefred go_yydefred
-#define yydgoto	go_yydgoto
-#define yysindex go_yysindex
-#define yyrindex go_yyrindex
-#define yygindex go_yygindex
-#define yytable	 go_yytable
-#define yycheck	 go_yycheck
-
-#ifndef YYDEBUG
-#define	YYDEBUG 1		/* Default to yydebug support */
-#endif
-
-#define YYFPRINTF parser_fprintf
+/* Remap normal yacc parser interface names (yyparse, yylex, yyerror,
+   etc).  */
+#define GDB_YY_REMAP_PREFIX go_
+#include "yy-remap.h"
 
 /* The state of the parser, used internally when we are parsing the
    expression.  */
@@ -130,7 +81,7 @@ int yyparse (void);
 
 static int yylex (void);
 
-void yyerror (char *);
+void yyerror (const char *);
 
 %}
 
@@ -975,7 +926,7 @@ parse_string_or_char (const char *tokptr, const char **outptr,
   ++tokptr;
 
   value->type = C_STRING | (quote == '\'' ? C_CHAR : 0); /*FIXME*/
-  value->ptr = obstack_base (&tempbuf);
+  value->ptr = (char *) obstack_base (&tempbuf);
   value->length = obstack_object_size (&tempbuf);
 
   *outptr = tokptr;
@@ -985,7 +936,7 @@ parse_string_or_char (const char *tokptr, const char **outptr,
 
 struct token
 {
-  char *oper;
+  const char *oper;
   int token;
   enum exp_opcode opcode;
 };
@@ -1363,7 +1314,7 @@ build_packaged_name (const char *package, int package_len,
   obstack_grow_str (&name_obstack, ".");
   obstack_grow (&name_obstack, name, name_len);
   obstack_grow (&name_obstack, "", 1);
-  result.ptr = obstack_base (&name_obstack);
+  result.ptr = (char *) obstack_base (&name_obstack);
   result.length = obstack_object_size (&name_obstack) - 1;
 
   return result;
@@ -1618,9 +1569,9 @@ go_parse (struct parser_state *par_state)
 
   back_to = make_cleanup (null_cleanup, NULL);
 
-  make_cleanup_restore_integer (&yydebug);
+  scoped_restore restore_yydebug = make_scoped_restore (&yydebug,
+							parser_debug);
   make_cleanup_clear_parser_state (&pstate);
-  yydebug = parser_debug;
 
   /* Initialize some state used by the lexer.  */
   last_was_structop = 0;
@@ -1637,7 +1588,7 @@ go_parse (struct parser_state *par_state)
 }
 
 void
-yyerror (char *msg)
+yyerror (const char *msg)
 {
   if (prev_lexptr)
     lexptr = prev_lexptr;

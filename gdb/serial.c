@@ -1,6 +1,6 @@
 /* Generic serial interface routines
 
-   Copyright (C) 1992-2015 Free Software Foundation, Inc.
+   Copyright (C) 1992-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -179,6 +179,27 @@ serial_for_fd (int fd)
   return NULL;
 }
 
+/* Create a new serial for OPS.  */
+
+static struct serial *
+new_serial (const struct serial_ops *ops)
+{
+  struct serial *scb;
+
+  scb = XCNEW (struct serial);
+
+  scb->ops = ops;
+
+  scb->bufp = scb->buf;
+  scb->error_fd = -1;
+  scb->refcnt = 1;
+
+  return scb;
+}
+
+static struct serial *serial_open_ops_1 (const struct serial_ops *ops,
+					 const char *open_name);
+
 /* Open up a device or a network socket, depending upon the syntax of NAME.  */
 
 struct serial *
@@ -188,11 +209,7 @@ serial_open (const char *name)
   const struct serial_ops *ops;
   const char *open_name = name;
 
-  if (strcmp (name, "pc") == 0)
-    ops = serial_interface_lookup ("pc");
-  else if (startswith (name, "lpt"))
-    ops = serial_interface_lookup ("parallel");
-  else if (startswith (name, "|"))
+  if (startswith (name, "|"))
     {
       ops = serial_interface_lookup ("pipe");
       /* Discard ``|'' and any space before the command itself.  */
@@ -210,14 +227,17 @@ serial_open (const char *name)
   if (!ops)
     return NULL;
 
-  scb = XNEW (struct serial);
+  return serial_open_ops_1 (ops, open_name);
+}
 
-  scb->ops = ops;
+/* Open up a serial for OPS, passing OPEN_NAME to the open method.  */
 
-  scb->bufcnt = 0;
-  scb->bufp = scb->buf;
-  scb->error_fd = -1;
-  scb->refcnt = 1;
+static struct serial *
+serial_open_ops_1 (const struct serial_ops *ops, const char *open_name)
+{
+  struct serial *scb;
+
+  scb = new_serial (ops);
 
   /* `...->open (...)' would get expanded by the open(2) syscall macro.  */
   if ((*scb->ops->open) (scb, open_name))
@@ -226,22 +246,28 @@ serial_open (const char *name)
       return NULL;
     }
 
-  scb->name = xstrdup (name);
   scb->next = scb_base;
-  scb->debug_p = 0;
-  scb->async_state = 0;
-  scb->async_handler = NULL;
-  scb->async_context = NULL;
   scb_base = scb;
 
   if (serial_logfile != NULL)
     {
-      serial_logfp = gdb_fopen (serial_logfile, "w");
-      if (serial_logfp == NULL)
+      stdio_file_up file (new stdio_file ());
+
+      if (!file->open (serial_logfile, "w"))
 	perror_with_name (serial_logfile);
+
+      serial_logfp = file.release ();
     }
 
   return scb;
+}
+
+/* See serial.h.  */
+
+struct serial *
+serial_open_ops (const struct serial_ops *ops)
+{
+  return serial_open_ops_1 (ops, NULL);
 }
 
 /* Open a new serial stream using a file handle, using serial
@@ -262,21 +288,9 @@ serial_fdopen_ops (const int fd, const struct serial_ops *ops)
   if (!ops)
     return NULL;
 
-  scb = XCNEW (struct serial);
+  scb = new_serial (ops);
 
-  scb->ops = ops;
-
-  scb->bufcnt = 0;
-  scb->bufp = scb->buf;
-  scb->error_fd = -1;
-  scb->refcnt = 1;
-
-  scb->name = NULL;
   scb->next = scb_base;
-  scb->debug_p = 0;
-  scb->async_state = 0;
-  scb->async_handler = NULL;
-  scb->async_context = NULL;
   scb_base = scb;
 
   if ((ops->fdopen) != NULL)
@@ -304,7 +318,7 @@ do_serial_close (struct serial *scb, int really_close)
       serial_current_type = 0;
 
       /* XXX - What if serial_logfp == gdb_stdout or gdb_stderr?  */
-      ui_file_delete (serial_logfp);
+      delete serial_logfp;
       serial_logfp = NULL;
     }
 
@@ -314,9 +328,6 @@ do_serial_close (struct serial *scb, int really_close)
 
   if (really_close)
     scb->ops->close (scb);
-
-  if (scb->name)
-    xfree (scb->name);
 
   /* For serial_is_open.  */
   scb->bufp = NULL;

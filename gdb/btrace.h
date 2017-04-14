@@ -1,6 +1,6 @@
 /* Branch trace support for GDB, the GNU debugger.
 
-   Copyright (C) 2013-2015 Free Software Foundation, Inc.
+   Copyright (C) 2013-2017 Free Software Foundation, Inc.
 
    Contributed by Intel Corp. <markus.t.metzger@intel.com>.
 
@@ -28,6 +28,7 @@
 
 #include "btrace-common.h"
 #include "target/waitstatus.h" /* For enum target_stop_reason.  */
+#include "common/enum-flags.h"
 
 #if defined (HAVE_LIBIPT)
 #  include <intel-pt.h>
@@ -58,6 +59,7 @@ enum btrace_insn_flag
   /* The instruction has been executed speculatively.  */
   BTRACE_INSN_FLAG_SPECULATIVE = (1 << 0)
 };
+DEF_ENUM_FLAGS_TYPE (enum btrace_insn_flag, btrace_insn_flags);
 
 /* A branch trace instruction.
 
@@ -74,7 +76,7 @@ struct btrace_insn
   enum btrace_insn_class iclass;
 
   /* A bit vector of BTRACE_INSN_FLAGS.  */
-  enum btrace_insn_flag flags;
+  btrace_insn_flags flags;
 };
 
 /* A vector of branch trace instructions.  */
@@ -100,6 +102,7 @@ enum btrace_function_flag
      if bfun_up_links_to_ret is clear.  */
   BFUN_UP_LINKS_TO_TAILCALL = (1 << 1)
 };
+DEF_ENUM_FLAGS_TYPE (enum btrace_function_flag, btrace_function_flags);
 
 /* Decode errors for the BTS recording format.  */
 enum btrace_bts_error
@@ -111,7 +114,7 @@ enum btrace_bts_error
   BDE_BTS_INSN_SIZE
 };
 
-/* Decode errors for the Intel(R) Processor Trace recording format.  */
+/* Decode errors for the Intel Processor Trace recording format.  */
 enum btrace_pt_error
 {
   /* The user cancelled trace processing.  */
@@ -181,8 +184,11 @@ struct btrace_function
   int level;
 
   /* A bit-vector of btrace_function_flag.  */
-  enum btrace_function_flag flags;
+  btrace_function_flags flags;
 };
+
+typedef struct btrace_function *btrace_fun_p;
+DEF_VEC_P (btrace_fun_p);
 
 /* A branch trace instruction iterator.  */
 struct btrace_insn_iterator
@@ -245,6 +251,7 @@ enum btrace_thread_flag
   /* The thread is to be stopped.  */
   BTHR_STOP = (1 << 4)
 };
+DEF_ENUM_FLAGS_TYPE (enum btrace_thread_flag, btrace_thread_flags);
 
 #if defined (HAVE_LIBIPT)
 /* A packet.  */
@@ -333,6 +340,10 @@ struct btrace_thread_info
   struct btrace_function *begin;
   struct btrace_function *end;
 
+  /* Vector of pointer to decoded function segments.  These are in execution
+     order with the first element == BEGIN and the last element == END.  */
+  VEC (btrace_fun_p) *functions;
+
   /* The function level offset.  When added to each function's LEVEL,
      this normalizes the function levels such that the smallest level
      becomes zero.  */
@@ -342,7 +353,7 @@ struct btrace_thread_info
   unsigned int ngaps;
 
   /* A bit-vector of btrace_thread_flag.  */
-  enum btrace_thread_flag flags;
+  btrace_thread_flags flags;
 
   /* The instruction history iterator.  */
   struct btrace_insn_history *insn_history;
@@ -380,6 +391,11 @@ extern void btrace_disable (struct thread_info *);
    target_teardown_btrace instead of target_disable_btrace.  */
 extern void btrace_teardown (struct thread_info *);
 
+/* Return a human readable error string for the given ERRCODE in FORMAT.
+   The pointer will never be NULL and must not be freed.  */
+
+extern const char *btrace_decode_error (enum btrace_format format, int errcode);
+
 /* Fetch the branch trace for a single thread.  */
 extern void btrace_fetch (struct thread_info *);
 
@@ -401,9 +417,12 @@ extern void parse_xml_btrace_conf (struct btrace_config *conf, const char *xml);
 extern const struct btrace_insn *
   btrace_insn_get (const struct btrace_insn_iterator *);
 
+/* Return the error code for a branch trace instruction iterator.  Returns zero
+   if there is no error, i.e. the instruction is valid.  */
+extern int btrace_insn_get_error (const struct btrace_insn_iterator *);
+
 /* Return the instruction number for a branch trace iterator.
-   Returns one past the maximum instruction number for the end iterator.
-   Returns zero if the iterator does not point to a valid instruction.  */
+   Returns one past the maximum instruction number for the end iterator.  */
 extern unsigned int btrace_insn_number (const struct btrace_insn_iterator *);
 
 /* Initialize a branch trace instruction iterator to point to the begin/end of
@@ -429,7 +448,7 @@ extern unsigned int btrace_insn_prev (struct btrace_insn_iterator *,
 extern int btrace_insn_cmp (const struct btrace_insn_iterator *lhs,
 			    const struct btrace_insn_iterator *rhs);
 
-/* Find an instruction in the function branch trace by its number.
+/* Find an instruction or gap in the function branch trace by its number.
    If the instruction is found, initialize the branch trace instruction
    iterator to point to this instruction and return non-zero.
    Return zero otherwise.  */

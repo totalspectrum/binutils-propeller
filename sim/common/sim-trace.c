@@ -1,5 +1,5 @@
 /* Simulator tracing/debugging support.
-   Copyright (C) 1997-2015 Free Software Foundation, Inc.
+   Copyright (C) 1997-2017 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -24,6 +24,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "bfd.h"
 #include "libiberty.h"
+
+#include "dis-asm.h"
 
 #include "sim-assert.h"
 
@@ -61,6 +63,7 @@ static DECLARE_OPTION_HANDLER (trace_option_handler);
 
 enum {
   OPTION_TRACE_INSN	= OPTION_START,
+  OPTION_TRACE_DISASM,
   OPTION_TRACE_DECODE,
   OPTION_TRACE_EXTRACT,
   OPTION_TRACE_LINENUM,
@@ -89,6 +92,9 @@ static const OPTION trace_options[] =
       trace_option_handler, NULL },
   { {"trace-insn", optional_argument, NULL, OPTION_TRACE_INSN},
       '\0', "on|off", "Perform instruction tracing",
+      trace_option_handler, NULL },
+  { {"trace-disasm", optional_argument, NULL, OPTION_TRACE_DISASM},
+      '\0', "on|off", "Disassemble instructions (slower, but more accurate)",
       trace_option_handler, NULL },
   { {"trace-decode", optional_argument, NULL, OPTION_TRACE_DECODE},
       '\0', "on|off", "Trace instruction decoding",
@@ -247,6 +253,13 @@ trace_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
 	return set_trace_option (sd, "-insn", TRACE_INSN_IDX, arg);
       else
 	sim_io_eprintf (sd, "Instruction tracing not compiled in, `--trace-insn' ignored\n");
+      break;
+
+    case OPTION_TRACE_DISASM :
+      if (WITH_TRACE_DISASM_P)
+	return set_trace_option (sd, "-disasm", TRACE_DISASM_IDX, arg);
+      else
+	sim_io_eprintf (sd, "Instruction tracing not compiled in, `--trace-disasm' ignored\n");
       break;
 
     case OPTION_TRACE_DECODE :
@@ -497,6 +510,9 @@ trace_uninstall (SIM_DESC sd)
 	    fclose (cfile);
 	}
     }
+
+  if (STATE_PROG_SYMS (sd))
+    free (STATE_PROG_SYMS (sd));
 }
 
 /* compute the nr of trace data units consumed by data */
@@ -616,6 +632,7 @@ trace_idx_to_str (int trace_idx)
     {
     case TRACE_ALU_IDX:      return "alu:     ";
     case TRACE_INSN_IDX:     return "insn:    ";
+    case TRACE_DISASM_IDX:   return "disasm:  ";
     case TRACE_DECODE_IDX:   return "decode:  ";
     case TRACE_EXTRACT_IDX:  return "extract: ";
     case TRACE_MEMORY_IDX:   return "memory:  ";
@@ -669,6 +686,57 @@ trace_results (SIM_DESC sd,
 		  &TRACE_INPUT_DATA (data) [i]);
     }
   trace_printf (sd, cpu, "\n");
+}
+
+int
+trace_load_symbols (SIM_DESC sd)
+{
+  bfd *abfd;
+  asymbol **asymbols;
+  long symsize;
+  long symbol_count;
+
+  /* Already loaded, so nothing to do.  */
+  if (STATE_PROG_SYMS (sd))
+    return 1;
+
+  abfd = STATE_PROG_BFD (sd);
+  if (abfd == NULL)
+    return 0;
+
+  symsize = bfd_get_symtab_upper_bound (abfd);
+  if (symsize < 0)
+    return 0;
+
+  asymbols = xmalloc (symsize);
+  symbol_count = bfd_canonicalize_symtab (abfd, asymbols);
+  if (symbol_count < 0)
+    {
+      free (asymbols);
+      return 0;
+    }
+
+  STATE_PROG_SYMS (sd) = asymbols;
+  STATE_PROG_SYMS_COUNT (sd) = symbol_count;
+  return 1;
+}
+
+bfd_vma
+trace_sym_value (SIM_DESC sd, const char *name)
+{
+  asymbol **asymbols;
+  long i;
+
+  if (!trace_load_symbols (sd))
+    return -1;
+
+  asymbols = STATE_PROG_SYMS (sd);
+
+  for (i = 0; i < STATE_PROG_SYMS_COUNT (sd); ++i)
+    if (strcmp (asymbols[i]->name, name) == 0)
+      return bfd_asymbol_value (asymbols[i]);
+
+  return -1;
 }
 
 void
@@ -730,9 +798,9 @@ trace_prefix (SIM_DESC sd,
     {
       char buf[256];
       buf[0] = 0;
-      if (STATE_TEXT_SECTION (CPU_STATE (cpu))
-	  && pc >= STATE_TEXT_START (CPU_STATE (cpu))
-	  && pc < STATE_TEXT_END (CPU_STATE (cpu)))
+      if (STATE_TEXT_SECTION (sd)
+	  && pc >= STATE_TEXT_START (sd)
+	  && pc < STATE_TEXT_END (sd))
 	{
 	  const char *pc_filename = (const char *)0;
 	  const char *pc_function = (const char *)0;
@@ -740,31 +808,14 @@ trace_prefix (SIM_DESC sd,
 	  bfd *abfd;
 	  asymbol **asymbols;
 
-	  abfd = STATE_PROG_BFD (CPU_STATE (cpu));
-	  asymbols = STATE_PROG_SYMS (CPU_STATE (cpu));
-	  if (asymbols == NULL)
-	    {
-	      long symsize;
-	      long symbol_count;
+	  if (!trace_load_symbols (sd))
+	    sim_engine_abort (sd, cpu, cia, "could not load symbols");
 
-	      symsize = bfd_get_symtab_upper_bound (abfd);
-	      if (symsize < 0)
-		{
-		  sim_engine_abort (sd, cpu, cia, "could not read symbols");
-		}
-	      asymbols = (asymbol **) xmalloc (symsize);
-	      symbol_count = bfd_canonicalize_symtab (abfd, asymbols);
-	      if (symbol_count < 0)
-		{
-		  sim_engine_abort (sd, cpu, cia, "could not canonicalize symbols");
-		}
-	      STATE_PROG_SYMS (CPU_STATE (cpu)) = asymbols;
-	    }
+	  abfd = STATE_PROG_BFD (sd);
+	  asymbols = STATE_PROG_SYMS (sd);
 
-	  if (bfd_find_nearest_line (abfd,
-				     STATE_TEXT_SECTION (CPU_STATE (cpu)),
-				     asymbols,
-				     pc - STATE_TEXT_START (CPU_STATE (cpu)),
+	  if (bfd_find_nearest_line (abfd, STATE_TEXT_SECTION (sd), asymbols,
+				     pc - STATE_TEXT_START (sd),
 				     &pc_filename, &pc_function, &pc_linenum))
 	    {
 	      char *p = buf;
@@ -834,6 +885,54 @@ trace_generic (SIM_DESC sd,
   va_start (ap, fmt);
   trace_vprintf (sd, cpu, fmt, ap);
   va_end (ap);
+  trace_printf (sd, cpu, "\n");
+}
+
+static int
+dis_read (bfd_vma memaddr, bfd_byte *myaddr, unsigned int length,
+	  struct disassemble_info *dinfo)
+{
+  SIM_CPU *cpu = dinfo->application_data;
+  sim_core_read_buffer (CPU_STATE (cpu), cpu, NULL_CIA, myaddr, memaddr, length);
+  return 0;
+}
+
+static int
+dis_printf (SIM_CPU *cpu, const char *fmt, ...)
+{
+  SIM_DESC sd = CPU_STATE (cpu);
+  va_list ap;
+  va_start (ap, fmt);
+  trace_vprintf (sd, cpu, fmt, ap);
+  va_end (ap);
+  return 0;
+}
+
+void
+trace_disasm (SIM_DESC sd, sim_cpu *cpu, address_word addr)
+{
+  struct bfd *bfd = STATE_PROG_BFD (sd);
+  TRACE_DATA *trace_data = CPU_TRACE_DATA (cpu);
+  disassemble_info *info = &trace_data->dis_info;
+
+  /* See if we need to set up the disassembly func.  */
+  if (trace_data->dis_bfd != bfd)
+    {
+      trace_data->dis_bfd = bfd;
+      trace_data->disassembler = disassembler (trace_data->dis_bfd);
+      INIT_DISASSEMBLE_INFO (*info, cpu, dis_printf);
+      info->read_memory_func = dis_read;
+      info->arch = bfd_get_arch (bfd);
+      info->mach = bfd_get_mach (bfd);
+      disassemble_init_for_target (info);
+    }
+
+  info->application_data = cpu;
+
+  trace_printf (sd, cpu, "%s %s",
+		trace_idx_to_str (TRACE_DISASM_IDX),
+		TRACE_PREFIX (trace_data));
+  trace_data->disassembler (addr, info);
   trace_printf (sd, cpu, "\n");
 }
 

@@ -1,6 +1,6 @@
 /* Scheme interface to breakpoints.
 
-   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+   Copyright (C) 2008-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -184,7 +184,7 @@ bpscm_print_breakpoint_smob (SCM self, SCM port, scm_print_state *pstate)
       gdbscm_printf (port, " hit:%d", b->hit_count);
       gdbscm_printf (port, " ignore:%d", b->ignore_count);
 
-      str = event_location_to_string (b->location);
+      str = event_location_to_string (b->location.get ());
       if (str != NULL)
 	gdbscm_printf (port, " @%s", str);
     }
@@ -413,8 +413,6 @@ gdbscm_register_breakpoint_x (SCM self)
     = bpscm_get_breakpoint_smob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   struct gdb_exception except = exception_none;
   char *location, *copy;
-  struct event_location *eloc;
-  struct cleanup *cleanup;
 
   /* We only support registering breakpoints created with make-breakpoint.  */
   if (!bp_smob->is_scheme_bkpt)
@@ -425,9 +423,9 @@ gdbscm_register_breakpoint_x (SCM self)
 
   pending_breakpoint_scm = self;
   location = bp_smob->spec.location;
-  copy = location;
-  eloc = new_linespec_location (&copy);
-  cleanup = make_cleanup_delete_event_location (eloc);
+  copy = skip_spaces (location);
+  event_location_up eloc = string_to_event_location_basic (&copy,
+							   current_language);
 
   TRY
     {
@@ -438,7 +436,7 @@ gdbscm_register_breakpoint_x (SCM self)
 	case bp_breakpoint:
 	  {
 	    create_breakpoint (get_current_arch (),
-			       eloc, NULL, -1, NULL,
+			       eloc.get (), NULL, -1, NULL,
 			       0,
 			       0, bp_breakpoint,
 			       0,
@@ -474,7 +472,6 @@ gdbscm_register_breakpoint_x (SCM self)
   /* Ensure this gets reset, even if there's an error.  */
   pending_breakpoint_scm = SCM_BOOL_F;
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
-  do_cleanups (cleanup);
 
   return SCM_UNSPECIFIED;
 }
@@ -745,7 +742,7 @@ gdbscm_set_breakpoint_thread_x (SCM self, SCM newvalue)
   if (scm_is_signed_integer (newvalue, LONG_MIN, LONG_MAX))
     {
       id = scm_to_long (newvalue);
-      if (! valid_thread_id (id))
+      if (!valid_global_thread_id (id))
 	{
 	  gdbscm_out_of_range_error (FUNC_NAME, SCM_ARG2, newvalue,
 				     _("invalid thread id"));
@@ -835,7 +832,7 @@ gdbscm_breakpoint_location (SCM self)
   if (bp_smob->bp->type != bp_breakpoint)
     return SCM_BOOL_F;
 
-  str = event_location_to_string (bp_smob->bp->location);
+  str = event_location_to_string (bp_smob->bp->location.get ());
   if (! str)
     str = "";
 
@@ -851,7 +848,6 @@ gdbscm_breakpoint_expression (SCM self)
 {
   breakpoint_smob *bp_smob
     = bpscm_get_valid_breakpoint_smob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
-  char *str;
   struct watchpoint *wp;
 
   if (!is_watchpoint (bp_smob->bp))
@@ -859,7 +855,7 @@ gdbscm_breakpoint_expression (SCM self)
 
   wp = (struct watchpoint *) bp_smob->bp;
 
-  str = wp->exp_string;
+  const char *str = wp->exp_string;
   if (! str)
     str = "";
 
@@ -956,7 +952,7 @@ gdbscm_set_breakpoint_stop_x (SCM self, SCM newvalue)
 			" this breakpoint."),
 		      ext_lang_capitalized_name (extlang));
 
-      scm_dynwind_begin (0);
+      scm_dynwind_begin ((scm_t_dynwind_flags) 0);
       gdbscm_dynwind_xfree (error_text);
       gdbscm_out_of_range_error (FUNC_NAME, SCM_ARG1, self, error_text);
       /* The following line, while unnecessary, is present for completeness
@@ -978,37 +974,29 @@ gdbscm_breakpoint_commands (SCM self)
     = bpscm_get_valid_breakpoint_smob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   struct breakpoint *bp;
   long length;
-  struct ui_file *string_file;
-  struct cleanup *chain;
   SCM result;
-  char *cmdstr;
 
   bp = bp_smob->bp;
 
   if (bp->commands == NULL)
     return SCM_BOOL_F;
 
-  string_file = mem_fileopen ();
-  chain = make_cleanup_ui_file_delete (string_file);
+  string_file buf;
 
-  ui_out_redirect (current_uiout, string_file);
+  current_uiout->redirect (&buf);
   TRY
     {
       print_command_lines (current_uiout, breakpoint_commands (bp), 0);
     }
-  ui_out_redirect (current_uiout, NULL);
+  current_uiout->redirect (NULL);
   CATCH (except, RETURN_MASK_ALL)
     {
-      do_cleanups (chain);
       gdbscm_throw_gdb_exception (except);
     }
   END_CATCH
 
-  cmdstr = ui_file_xstrdup (string_file, &length);
-  make_cleanup (xfree, cmdstr);
-  result = gdbscm_scm_from_c_string (cmdstr);
+  result = gdbscm_scm_from_c_string (buf.c_str ());
 
-  do_cleanups (chain);
   return result;
 }
 
@@ -1273,14 +1261,14 @@ Set the breakpoint's \"hit\" count.  The value must be zero.\n\
 
   { "breakpoint-thread", 1, 0, 0, as_a_scm_t_subr (gdbscm_breakpoint_thread),
     "\
-Return the breakpoint's thread id or #f if there isn't one." },
+Return the breakpoint's global thread id or #f if there isn't one." },
 
   { "set-breakpoint-thread!", 2, 0, 0,
     as_a_scm_t_subr (gdbscm_set_breakpoint_thread_x),
     "\
-Set the thread id for this breakpoint.\n\
+Set the global thread id for this breakpoint.\n\
 \n\
-  Arguments: <gdb:breakpoint> thread-id" },
+  Arguments: <gdb:breakpoint> global-thread-id" },
 
   { "breakpoint-task", 1, 0, 0, as_a_scm_t_subr (gdbscm_breakpoint_task),
     "\

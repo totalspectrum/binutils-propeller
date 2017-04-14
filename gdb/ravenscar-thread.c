@@ -1,6 +1,6 @@
 /* Ada Ravenscar thread support.
 
-   Copyright (C) 2004-2015 Free Software Foundation, Inc.
+   Copyright (C) 2004-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -54,8 +54,8 @@ static const char ravenscar_runtime_initializer[] =
 
 static void ravenscar_update_thread_list (struct target_ops *ops);
 static ptid_t ravenscar_running_thread (void);
-static char *ravenscar_extra_thread_info (struct target_ops *self,
-					  struct thread_info *tp);
+static const char *ravenscar_extra_thread_info (struct target_ops *self,
+						struct thread_info *tp);
 static int ravenscar_thread_alive (struct target_ops *ops, ptid_t ptid);
 static void ravenscar_fetch_registers (struct target_ops *ops,
                                        struct regcache *regcache, int regnum);
@@ -241,7 +241,7 @@ ravenscar_running_thread (void)
     return ptid_build (ptid_get_pid (base_ptid), 0, tid);
 }
 
-static char *
+static const char *
 ravenscar_extra_thread_info (struct target_ops *self, struct thread_info *tp)
 {
   return "Ravenscar task";
@@ -254,7 +254,7 @@ ravenscar_thread_alive (struct target_ops *ops, ptid_t ptid)
   return 1;
 }
 
-static char *
+static const char *
 ravenscar_pid_to_str (struct target_ops *ops, ptid_t ptid)
 {
   static char buf[30];
@@ -268,10 +268,11 @@ ravenscar_fetch_registers (struct target_ops *ops,
                            struct regcache *regcache, int regnum)
 {
   struct target_ops *beneath = find_target_beneath (ops);
+  ptid_t ptid = regcache_get_ptid (regcache);
 
   if (!ravenscar_runtime_initialized ()
-      || ptid_equal (inferior_ptid, base_magic_null_ptid)
-      || ptid_equal (inferior_ptid, ravenscar_running_thread ()))
+      || ptid_equal (ptid, base_magic_null_ptid)
+      || ptid_equal (ptid, ravenscar_running_thread ()))
     beneath->to_fetch_registers (beneath, regcache, regnum);
   else
     {
@@ -288,10 +289,11 @@ ravenscar_store_registers (struct target_ops *ops,
                            struct regcache *regcache, int regnum)
 {
   struct target_ops *beneath = find_target_beneath (ops);
+  ptid_t ptid = regcache_get_ptid (regcache);
 
   if (!ravenscar_runtime_initialized ()
-      || ptid_equal (inferior_ptid, base_magic_null_ptid)
-      || ptid_equal (inferior_ptid, ravenscar_running_thread ()))
+      || ptid_equal (ptid, base_magic_null_ptid)
+      || ptid_equal (ptid, ravenscar_running_thread ()))
     beneath->to_store_registers (beneath, regcache, regnum);
   else
     {
@@ -308,10 +310,11 @@ ravenscar_prepare_to_store (struct target_ops *self,
 			    struct regcache *regcache)
 {
   struct target_ops *beneath = find_target_beneath (self);
+  ptid_t ptid = regcache_get_ptid (regcache);
 
   if (!ravenscar_runtime_initialized ()
-      || ptid_equal (inferior_ptid, base_magic_null_ptid)
-      || ptid_equal (inferior_ptid, ravenscar_running_thread ()))
+      || ptid_equal (ptid, base_magic_null_ptid)
+      || ptid_equal (ptid, ravenscar_running_thread ()))
     beneath->to_prepare_to_store (beneath, regcache);
   else
     {
@@ -338,7 +341,6 @@ ravenscar_mourn_inferior (struct target_ops *ops)
 static void
 ravenscar_inferior_created (struct target_ops *target, int from_tty)
 {
-  struct ravenscar_arch_ops *ops;
 
   if (!ravenscar_task_support
       || gdbarch_ravenscar_ops (target_gdbarch ()) == NULL

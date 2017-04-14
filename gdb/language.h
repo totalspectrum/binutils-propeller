@@ -1,6 +1,6 @@
 /* Source-language-related definitions for GDB.
 
-   Copyright (C) 1991-2015 Free Software Foundation, Inc.
+   Copyright (C) 1991-2017 Free Software Foundation, Inc.
 
    Contributed by the Department of Computer Science at the State University
    of New York at Buffalo.
@@ -24,6 +24,7 @@
 #define LANGUAGE_H 1
 
 #include "symtab.h"
+#include "common/function-view.h"
 
 /* Forward decls for prototypes.  */
 struct value;
@@ -164,6 +165,13 @@ struct language_defn
     /* Style of macro expansion, if any, supported by this language.  */
     enum macro_expansion la_macro_expansion;
 
+    /* A NULL-terminated array of file extensions for this language.
+       The extension must include the ".", like ".c".  If this
+       language doesn't need to provide any filename extensions, this
+       may be NULL.  */
+
+    const char *const *la_filename_extensions;
+
     /* Definitions related to expression printing, prefixifying, and
        dumping.  */
 
@@ -175,7 +183,7 @@ struct language_defn
 
     /* Parser error function.  */
 
-    void (*la_error) (char *);
+    void (*la_error) (const char *);
 
     /* Given an expression *EXPP created by prefixifying the result of
        la_parser, perform any remaining processing necessary to complete
@@ -212,9 +220,6 @@ struct language_defn
        
        TYPE is the type of the sub-object to be printed.
 
-       CONTENTS holds the bits of the value.  This holds the entire
-       enclosing object.
-
        EMBEDDED_OFFSET is the offset into the outermost object of the
        sub-object represented by TYPE.  This is the object which this
        call should print.  Note that the enclosing type is not
@@ -230,10 +235,9 @@ struct language_defn
        printing.  */
 
     void (*la_val_print) (struct type *type,
-			  const gdb_byte *contents,
 			  int embedded_offset, CORE_ADDR address,
 			  struct ui_file *stream, int recurse,
-			  const struct value *val,
+			  struct value *val,
 			  const struct value_print_options *options);
 
     /* Print a top-level value using syntax appropriate for this language.  */
@@ -267,7 +271,7 @@ struct language_defn
     /* If this is non-NULL, specifies the name that of the implicit
        local variable that refers to the current object instance.  */
 
-    char *la_name_of_this;
+    const char *la_name_of_this;
 
     /* This is a function that lookup_symbol will call when it gets to
        the part of symbol lookup where C looks up static and global
@@ -285,6 +289,22 @@ struct language_defn
     /* Return demangled language symbol, or NULL.  */
     char *(*la_demangle) (const char *mangled, int options);
 
+    /* Demangle a symbol according to this language's rules.  Unlike
+       la_demangle, this does not take any options.
+
+       *DEMANGLED will be set by this function.
+       
+       If this function returns 0, then *DEMANGLED must always be set
+       to NULL.
+
+       If this function returns 1, the implementation may set this to
+       a xmalloc'd string holding the demangled form.  However, it is
+       not required to.  The string, if any, is owned by the caller.
+
+       The resulting string should be of the form that will be
+       installed into a symbol.  */
+    int (*la_sniff_from_mangled_name) (const char *mangled, char **demangled);
+
     /* Return class name of a mangled method name or NULL.  */
     char *(*la_class_name_from_physname) (const char *physname);
 
@@ -301,7 +321,7 @@ struct language_defn
     char string_lower_bound;
 
     /* The list of characters forming word boundaries.  */
-    char *(*la_word_break_characters) (void);
+    const char *(*la_word_break_characters) (void);
 
     /* Should return a vector of all symbols which are possible
        completions for TEXT.  WORD is the entire command on which the
@@ -353,18 +373,15 @@ struct language_defn
        The caller is responsible for iterating up through superblocks
        if desired.
 
-       For each one, call CALLBACK with the symbol and the DATA
-       argument.  If CALLBACK returns zero, the iteration ends at that
-       point.
+       For each one, call CALLBACK with the symbol.  If CALLBACK
+       returns false, the iteration ends at that point.
 
        This field may not be NULL.  If the language does not need any
        special processing here, 'iterate_over_symbols' should be
        used as the definition.  */
-    void (*la_iterate_over_symbols) (const struct block *block,
-				     const char *name,
-				     domain_enum domain,
-				     symbol_found_callback_ftype *callback,
-				     void *data);
+    void (*la_iterate_over_symbols)
+      (const struct block *block, const char *name, domain_enum domain,
+       gdb::function_view<symbol_found_callback_ftype> callback);
 
     /* Various operations on varobj.  */
     const struct lang_varobj_ops *la_varobj_ops;
@@ -383,8 +400,8 @@ struct language_defn
        If 'la_get_gcc_context' is not defined, then this method is
        ignored.
 
-       This takes the user-supplied text and returns a newly malloc'd
-       bit of code to compile.  The caller owns the result.
+       This takes the user-supplied text and returns a new bit of code
+       to compile.
 
        INST is the compiler instance being used.
        INPUT is the user's input text.
@@ -393,11 +410,11 @@ struct language_defn
        parsed.
        EXPR_PC is the PC at which the expression is being parsed.  */
 
-    char *(*la_compute_program) (struct compile_instance *inst,
-				 const char *input,
-				 struct gdbarch *gdbarch,
-				 const struct block *expr_block,
-				 CORE_ADDR expr_pc);
+    std::string (*la_compute_program) (struct compile_instance *inst,
+				       const char *input,
+				       struct gdbarch *gdbarch,
+				       const struct block *expr_block,
+				       CORE_ADDR expr_pc);
 
     /* Add fields above this point, so the magic number is always last.  */
     /* Magic number for compat checking.  */
@@ -492,9 +509,6 @@ extern enum language set_language (enum language);
 #define LA_PRINT_TYPEDEF(type,new_symbol,stream) \
   (current_language->la_print_typedef(type,new_symbol,stream))
 
-#define LA_VAL_PRINT(type,valaddr,offset,addr,stream,val,recurse,options) \
-  (current_language->la_val_print(type,valaddr,offset,addr,stream, \
-				  val,recurse,options))
 #define LA_VALUE_PRINT(val,stream,options) \
   (current_language->la_value_print(val,stream,options))
 
@@ -511,9 +525,8 @@ extern enum language set_language (enum language);
 #define LA_PRINT_ARRAY_INDEX(index_value, stream, options) \
   (current_language->la_print_array_index(index_value, stream, options))
 
-#define LA_ITERATE_OVER_SYMBOLS(BLOCK, NAME, DOMAIN, CALLBACK, DATA) \
-  (current_language->la_iterate_over_symbols (BLOCK, NAME, DOMAIN, CALLBACK, \
-					      DATA))
+#define LA_ITERATE_OVER_SYMBOLS(BLOCK, NAME, DOMAIN, CALLBACK) \
+  (current_language->la_iterate_over_symbols (BLOCK, NAME, DOMAIN, CALLBACK))
 
 /* Test a character to decide whether it can be printed in literal form
    or needs to be printed in another representation.  For example,
@@ -558,12 +571,19 @@ extern CORE_ADDR skip_language_trampoline (struct frame_info *, CORE_ADDR pc);
 extern char *language_demangle (const struct language_defn *current_language, 
 				const char *mangled, int options);
 
+/* A wrapper for la_sniff_from_mangled_name.  The arguments and result
+   are as for the method.  */
+
+extern int language_sniff_from_mangled_name (const struct language_defn *lang,
+					     const char *mangled,
+					     char **demangled);
+
 /* Return class name from physname, or NULL.  */
 extern char *language_class_name_from_physname (const struct language_defn *,
 					        const char *physname);
 
 /* Splitting strings into words.  */
-extern char *default_word_break_characters (void);
+extern const char *default_word_break_characters (void);
 
 /* Print the index of an array element using the C99 syntax.  */
 extern void default_print_array_index (struct value *index_value,

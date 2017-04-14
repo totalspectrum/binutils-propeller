@@ -12,6 +12,9 @@ sinclude(libmcheck.m4)
 # This gets GDB_AC_TRANSFORM.
 sinclude(transform.m4)
 
+# This gets AM_GDB_WARNINGS.
+sinclude(warning.m4)
+
 dnl gdb/configure.in uses BFD_NEED_DECLARATION, so get its definition.
 sinclude(../bfd/bfd.m4)
 
@@ -62,18 +65,17 @@ m4_include([common/common.m4])
 dnl For libiberty_INIT.
 m4_include(libiberty.m4)
 
-dnl For --enable-build-with-cxx and COMPILER.
-m4_include(build-with-cxx.m4)
-
 dnl For GDB_AC_PTRACE.
 m4_include(ptrace.m4)
+
+m4_include(ax_cxx_compile_stdcxx.m4)
 
 ## ----------------------------------------- ##
 ## ANSIfy the C compiler whenever possible.  ##
 ## From Franc,ois Pinard                     ##
 ## ----------------------------------------- ##
 
-# Copyright (C) 1996-2015 Free Software Foundation, Inc.
+# Copyright (C) 1996-2017 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by

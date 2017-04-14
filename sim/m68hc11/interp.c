@@ -1,5 +1,5 @@
 /* interp.c -- Simulator for Motorola 68HC11/68HC12
-   Copyright (C) 1999-2015 Free Software Foundation, Inc.
+   Copyright (C) 1999-2017 Free Software Foundation, Inc.
    Written by Stephane Carrez (stcarrez@nerim.fr)
 
 This file is part of GDB, the GNU debugger.
@@ -292,50 +292,25 @@ sim_hw_configure (SIM_DESC sd)
 /* Get the memory bank parameters by looking at the global symbols
    defined by the linker.  */
 static int
-sim_get_bank_parameters (SIM_DESC sd, bfd* abfd)
+sim_get_bank_parameters (SIM_DESC sd)
 {
   sim_cpu *cpu;
-  long symsize;
-  long symbol_count, i;
   unsigned size;
-  asymbol** asymbols;
-  asymbol** current;
+  bfd_vma addr;
 
   cpu = STATE_CPU (sd, 0);
 
-  symsize = bfd_get_symtab_upper_bound (abfd);
-  if (symsize < 0)
-    {
-      sim_io_eprintf (sd, "Cannot read symbols of program");
-      return 0;
-    }
-  asymbols = (asymbol **) xmalloc (symsize);
-  symbol_count = bfd_canonicalize_symtab (abfd, asymbols);
-  if (symbol_count < 0)
-    {
-      sim_io_eprintf (sd, "Cannot read symbols of program");
-      return 0;
-    }
+  addr = trace_sym_value (sd, BFD_M68HC11_BANK_START_NAME);
+  if (addr != -1)
+    cpu->bank_start = addr;
 
-  size = 0;
-  for (i = 0, current = asymbols; i < symbol_count; i++, current++)
-    {
-      const char* name = bfd_asymbol_name (*current);
+  size = trace_sym_value (sd, BFD_M68HC11_BANK_SIZE_NAME);
+  if (size == -1)
+    size = 0;
 
-      if (strcmp (name, BFD_M68HC11_BANK_START_NAME) == 0)
-        {
-          cpu->bank_start = bfd_asymbol_value (*current);
-        }
-      else if (strcmp (name, BFD_M68HC11_BANK_SIZE_NAME) == 0)
-        {
-          size = bfd_asymbol_value (*current);
-        }
-      else if (strcmp (name, BFD_M68HC11_BANK_VIRTUAL_NAME) == 0)
-        {
-          cpu->bank_virtual = bfd_asymbol_value (*current);
-        }
-    }
-  free (asymbols);
+  addr = trace_sym_value (sd, BFD_M68HC11_BANK_VIRTUAL_NAME);
+  if (addr != -1)
+    cpu->bank_virtual = addr;
 
   cpu->bank_end = cpu->bank_start + size;
   cpu->bank_shift = 0;
@@ -387,7 +362,7 @@ sim_prepare_for_program (SIM_DESC sd, bfd* abfd)
 
       if (elf_flags & E_M68HC12_BANKS)
         {
-          if (sim_get_bank_parameters (sd, abfd) != 0)
+          if (sim_get_bank_parameters (sd) != 0)
             sim_io_eprintf (sd, "Memory bank parameters are not initialized\n");
         }
     }
@@ -413,9 +388,12 @@ m68hc11_pc_set (sim_cpu *cpu, sim_cia pc)
   cpu_set_pc (cpu, pc);
 }
 
+static int m68hc11_reg_fetch (SIM_CPU *, int, unsigned char *, int);
+static int m68hc11_reg_store (SIM_CPU *, int, unsigned char *, int);
+
 SIM_DESC
 sim_open (SIM_OPEN_KIND kind, host_callback *callback,
-          bfd *abfd, char **argv)
+	  bfd *abfd, char * const *argv)
 {
   int i;
   SIM_DESC sd;
@@ -434,10 +412,6 @@ sim_open (SIM_OPEN_KIND kind, host_callback *callback,
 
   cpu = STATE_CPU (sd, 0);
 
-  /* for compatibility */
-  current_alignment = NONSTRICT_ALIGNMENT;
-  current_target_byte_order = BIG_ENDIAN;
-
   cpu_initialize (sd, cpu);
 
   if (sim_pre_argv_init (sd, argv[0]) != SIM_RC_OK)
@@ -446,9 +420,7 @@ sim_open (SIM_OPEN_KIND kind, host_callback *callback,
       return 0;
     }
 
-  /* getopt will print the error message so we just have to exit if this fails.
-     FIXME: Hmmm...  in the case of gdb we need getopt to call
-     print_filtered.  */
+  /* The parser will print an error message for us, so we silently return.  */
   if (sim_parse_args (sd, argv) != SIM_RC_OK)
     {
       /* Uninstall the modules to avoid memory leaks,
@@ -492,27 +464,13 @@ sim_open (SIM_OPEN_KIND kind, host_callback *callback,
     {
       SIM_CPU *cpu = STATE_CPU (sd, i);
 
+      CPU_REG_FETCH (cpu) = m68hc11_reg_fetch;
+      CPU_REG_STORE (cpu) = m68hc11_reg_store;
       CPU_PC_FETCH (cpu) = m68hc11_pc_get;
       CPU_PC_STORE (cpu) = m68hc11_pc_set;
     }
 
   return sd;
-}
-
-
-void
-sim_close (SIM_DESC sd, int quitting)
-{
-  /* shut down modules */
-  sim_module_uninstall (sd);
-
-  /* Ensure that any resources allocated through the callback
-     mechanism are released: */
-  sim_io_shutdown (sd);
-
-  /* FIXME - free SD */
-  sim_state_free (sd);
-  return;
 }
 
 /* Generic implementation of sim_engine_run that works within the
@@ -564,19 +522,17 @@ sim_info (SIM_DESC sd, int verbose)
 
 SIM_RC
 sim_create_inferior (SIM_DESC sd, struct bfd *abfd,
-                     char **argv, char **env)
+                     char * const *argv, char * const *env)
 {
   return sim_prepare_for_program (sd, abfd);
 }
 
-int
-sim_fetch_register (SIM_DESC sd, int rn, unsigned char *memory, int length)
+static int
+m68hc11_reg_fetch (SIM_CPU *cpu, int rn, unsigned char *memory, int length)
 {
-  sim_cpu *cpu;
   uint16 val;
   int size = 2;
 
-  cpu = STATE_CPU (sd, 0);
   switch (rn)
     {
     case A_REGNUM:
@@ -635,13 +591,10 @@ sim_fetch_register (SIM_DESC sd, int rn, unsigned char *memory, int length)
   return size;
 }
 
-int
-sim_store_register (SIM_DESC sd, int rn, unsigned char *memory, int length)
+static int
+m68hc11_reg_store (SIM_CPU *cpu, int rn, unsigned char *memory, int length)
 {
   uint16 val;
-  sim_cpu *cpu;
-
-  cpu = STATE_CPU (sd, 0);
 
   val = *memory++;
   if (length == 2)

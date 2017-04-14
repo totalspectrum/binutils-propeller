@@ -1,6 +1,6 @@
 /* GDB commands implemented in Scheme.
 
-   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+   Copyright (C) 2008-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -291,8 +291,10 @@ cmdscm_destroyer (struct cmd_list_element *self, void *context)
 /* Called by gdb to invoke the command.  */
 
 static void
-cmdscm_function (struct cmd_list_element *command, char *args, int from_tty)
+cmdscm_function (struct cmd_list_element *command,
+		 char *args_entry, int from_tty)
 {
+  const char *args = args_entry;
   command_smob *c_smob/*obj*/ = (command_smob *) get_cmd_context (command);
   SCM arg_scm, tty_scm, result;
 
@@ -530,7 +532,7 @@ gdbscm_parse_command_name (const char *name,
       msg = xstrprintf (_("could not find command prefix '%s'"), prefix_text);
       xfree (prefix_text);
       xfree (result);
-      scm_dynwind_begin (0);
+      scm_dynwind_begin ((scm_t_dynwind_flags) 0);
       gdbscm_dynwind_xfree (msg);
       gdbscm_out_of_range_error (func_name, arg_pos,
 				 gdbscm_scm_from_c_string (name), msg);
@@ -546,7 +548,7 @@ gdbscm_parse_command_name (const char *name,
   msg = xstrprintf (_("'%s' is not a prefix command"), prefix_text);
   xfree (prefix_text);
   xfree (result);
-  scm_dynwind_begin (0);
+  scm_dynwind_begin ((scm_t_dynwind_flags) 0);
   gdbscm_dynwind_xfree (msg);
   gdbscm_out_of_range_error (func_name, arg_pos,
 			     gdbscm_scm_from_c_string (name), msg);

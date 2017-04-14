@@ -1,6 +1,6 @@
 /* Scheme interface to symbols.
 
-   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+   Copyright (C) 2008-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -622,7 +622,8 @@ gdbscm_lookup_symbol (SCM name_scm, SCM rest)
 
   TRY
     {
-      symbol = lookup_symbol (name, block, domain, &is_a_field_of_this).symbol;
+      symbol = lookup_symbol (name, block, (domain_enum) domain,
+			      &is_a_field_of_this).symbol;
     }
   CATCH (ex, RETURN_MASK_ALL)
     {
@@ -662,7 +663,7 @@ gdbscm_lookup_global_symbol (SCM name_scm, SCM rest)
 
   TRY
     {
-      symbol = lookup_global_symbol (name, NULL, domain).symbol;
+      symbol = lookup_global_symbol (name, NULL, (domain_enum) domain).symbol;
     }
   CATCH (ex, RETURN_MASK_ALL)
     {

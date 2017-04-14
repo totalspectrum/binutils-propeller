@@ -1,6 +1,6 @@
 /*  This file is part of the program GDB, the GNU debugger.
     
-    Copyright (C) 1998-2015 Free Software Foundation, Inc.
+    Copyright (C) 1998-2017 Free Software Foundation, Inc.
     Contributed by Cygnus Solutions.
     
     This program is free software; you can redistribute it and/or modify
@@ -144,7 +144,7 @@ deliver_tx3904cpu_interrupt (struct hw *me,
   address_word cia = CPU_PC_GET (cpu);
 
 #define CPU cpu
-#define SD current_state
+#define SD sd
 
   if (controller->pending_reset)
     {
@@ -190,8 +190,8 @@ deliver_tx3904cpu_interrupt (struct hw *me,
 	    }
 	} /* interrupt set */
     }
-#undef CPU cpu
-#undef SD current_state
+#undef CPU
+#undef SD
 }
 
 

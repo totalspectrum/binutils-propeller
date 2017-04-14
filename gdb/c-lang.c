@@ -1,6 +1,6 @@
 /* C language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 1992-2015 Free Software Foundation, Inc.
+   Copyright (C) 1992-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -41,8 +41,7 @@ extern void _initialize_c_language (void);
    character set name.  */
 
 static const char *
-charset_for_string_type (enum c_string_type str_type,
-			 struct gdbarch *gdbarch)
+charset_for_string_type (c_string_type str_type, struct gdbarch *gdbarch)
 {
   switch (str_type & ~C_CHAR)
     {
@@ -72,11 +71,11 @@ charset_for_string_type (enum c_string_type str_type,
    characters of this type in target BYTE_ORDER to the host character
    set.  */
 
-static enum c_string_type
+static c_string_type
 classify_type (struct type *elttype, struct gdbarch *gdbarch,
 	       const char **encoding)
 {
-  enum c_string_type result;
+  c_string_type result;
 
   /* We loop because ELTTYPE may be a typedef, and we want to
      successively peel each typedef until we reach a type we
@@ -155,7 +154,7 @@ c_emit_char (int c, struct type *type,
 void
 c_printchar (int c, struct type *type, struct ui_file *stream)
 {
-  enum c_string_type str_type;
+  c_string_type str_type;
 
   str_type = classify_type (type, get_type_arch (type), NULL);
   switch (str_type)
@@ -191,7 +190,7 @@ c_printstr (struct ui_file *stream, struct type *type,
 	    const char *user_encoding, int force_ellipses,
 	    const struct value_print_options *options)
 {
-  enum c_string_type str_type;
+  c_string_type str_type;
   const char *type_encoding;
   const char *encoding;
 
@@ -327,10 +326,10 @@ c_get_string (struct value *value, gdb_byte **buffer,
 
       err = read_string (addr, *length, width, fetchlimit,
 			 byte_order, buffer, length);
-      if (err)
+      if (err != 0)
 	{
 	  xfree (*buffer);
-	  memory_error (err, addr);
+	  memory_error (TARGET_XFER_E_IO, addr);
 	}
     }
 
@@ -357,14 +356,11 @@ c_get_string (struct value *value, gdb_byte **buffer,
 
  error:
   {
-    char *type_str;
-
-    type_str = type_to_string (type);
-    if (type_str)
+    std::string type_str = type_to_string (type);
+    if (!type_str.empty ())
       {
-	make_cleanup (xfree, type_str);
 	error (_("Trying to read string with inappropriate type `%s'."),
-	       type_str);
+	       type_str.c_str ());
       }
     else
       error (_("Trying to read string with inappropriate type."));
@@ -577,7 +573,7 @@ evaluate_subexp_c (struct type *expect_type, struct expression *exp,
 	struct obstack output;
 	struct cleanup *cleanup;
 	struct value *result;
-	enum c_string_type dest_type;
+	c_string_type dest_type;
 	const char *dest_charset;
 	int satisfy_expected = 0;
 
@@ -589,8 +585,8 @@ evaluate_subexp_c (struct type *expect_type, struct expression *exp,
 
 	++*pos;
 	limit = *pos + BYTES_TO_EXP_ELEM (oplen + 1);
-	dest_type
-	  = (enum c_string_type) longest_to_int (exp->elts[*pos].longconst);
+	dest_type = ((enum c_string_type_values)
+		     longest_to_int (exp->elts[*pos].longconst));
 	switch (dest_type & ~C_CHAR)
 	  {
 	  case C_STRING:
@@ -702,7 +698,7 @@ evaluate_subexp_c (struct type *expect_type, struct expression *exp,
 			obstack_object_size (&output));
 	      }
 	    else
-	      result = value_cstring (obstack_base (&output),
+	      result = value_cstring ((const char *) obstack_base (&output),
 				      obstack_object_size (&output),
 				      type);
 	  }
@@ -825,6 +821,11 @@ const struct exp_descriptor exp_descriptor_c =
   evaluate_subexp_c
 };
 
+static const char *c_extensions[] =
+{
+  ".c", NULL
+};
+
 const struct language_defn c_language_defn =
 {
   "c",				/* Language name */
@@ -834,9 +835,10 @@ const struct language_defn c_language_defn =
   case_sensitive_on,
   array_row_major,
   macro_expansion_c,
+  c_extensions,
   &exp_descriptor_c,
   c_parse,
-  c_error,
+  c_yyerror,
   null_post_parser,
   c_printchar,			/* Print a character constant */
   c_printstr,			/* Function to print string constant */
@@ -851,6 +853,7 @@ const struct language_defn c_language_defn =
   basic_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
   basic_lookup_transparent_type,/* lookup_transparent_type */
   NULL,				/* Language specific symbol demangler */
+  NULL,
   NULL,				/* Language specific
 				   class_name_from_physname */
   c_op_print_tab,		/* expression operators for printing */
@@ -892,6 +895,9 @@ enum cplus_primitive_types {
   cplus_primitive_type_decfloat,
   cplus_primitive_type_decdouble,
   cplus_primitive_type_declong,
+  cplus_primitive_type_char16_t,
+  cplus_primitive_type_char32_t,
+  cplus_primitive_type_wchar_t,
   nr_cplus_primitive_types
 };
 
@@ -947,10 +953,21 @@ cplus_language_arch_info (struct gdbarch *gdbarch,
     = builtin->builtin_decdouble;
   lai->primitive_type_vector [cplus_primitive_type_declong]
     = builtin->builtin_declong;
+  lai->primitive_type_vector [cplus_primitive_type_char16_t]
+    = builtin->builtin_char16;
+  lai->primitive_type_vector [cplus_primitive_type_char32_t]
+    = builtin->builtin_char32;
+  lai->primitive_type_vector [cplus_primitive_type_wchar_t]
+    = builtin->builtin_wchar;
 
   lai->bool_type_symbol = "bool";
   lai->bool_type_default = builtin->builtin_bool;
 }
+
+static const char *cplus_extensions[] =
+{
+  ".C", ".cc", ".cp", ".cpp", ".cxx", ".c++", NULL
+};
 
 const struct language_defn cplus_language_defn =
 {
@@ -961,9 +978,10 @@ const struct language_defn cplus_language_defn =
   case_sensitive_on,
   array_row_major,
   macro_expansion_c,
+  cplus_extensions,
   &exp_descriptor_c,
   c_parse,
-  c_error,
+  c_yyerror,
   null_post_parser,
   c_printchar,			/* Print a character constant */
   c_printstr,			/* Function to print string constant */
@@ -978,6 +996,7 @@ const struct language_defn cplus_language_defn =
   cp_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
   cp_lookup_transparent_type,   /* lookup_transparent_type */
   gdb_demangle,			/* Language specific symbol demangler */
+  gdb_sniff_from_mangled_name,
   cp_class_name_from_physname,  /* Language specific
 				   class_name_from_physname */
   c_op_print_tab,		/* expression operators for printing */
@@ -997,6 +1016,11 @@ const struct language_defn cplus_language_defn =
   LANG_MAGIC
 };
 
+static const char *asm_extensions[] =
+{
+  ".s", ".sx", ".S", NULL
+};
+
 const struct language_defn asm_language_defn =
 {
   "asm",			/* Language name */
@@ -1006,9 +1030,10 @@ const struct language_defn asm_language_defn =
   case_sensitive_on,
   array_row_major,
   macro_expansion_c,
+  asm_extensions,
   &exp_descriptor_c,
   c_parse,
-  c_error,
+  c_yyerror,
   null_post_parser,
   c_printchar,			/* Print a character constant */
   c_printstr,			/* Function to print string constant */
@@ -1023,6 +1048,7 @@ const struct language_defn asm_language_defn =
   basic_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
   basic_lookup_transparent_type,/* lookup_transparent_type */
   NULL,				/* Language specific symbol demangler */
+  NULL,
   NULL,				/* Language specific
 				   class_name_from_physname */
   c_op_print_tab,		/* expression operators for printing */
@@ -1056,9 +1082,10 @@ const struct language_defn minimal_language_defn =
   case_sensitive_on,
   array_row_major,
   macro_expansion_c,
+  NULL,
   &exp_descriptor_c,
   c_parse,
-  c_error,
+  c_yyerror,
   null_post_parser,
   c_printchar,			/* Print a character constant */
   c_printstr,			/* Function to print string constant */
@@ -1073,6 +1100,7 @@ const struct language_defn minimal_language_defn =
   basic_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
   basic_lookup_transparent_type,/* lookup_transparent_type */
   NULL,				/* Language specific symbol demangler */
+  NULL,
   NULL,				/* Language specific
 				   class_name_from_physname */
   c_op_print_tab,		/* expression operators for printing */

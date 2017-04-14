@@ -1,5 +1,5 @@
 /* Support for printing Ada types for GDB, the GNU debugger.
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -203,7 +203,7 @@ print_range (struct type *type, struct ui_file *stream,
    set *N past the bound and its delimiter, if any.  */
 
 static void
-print_range_bound (struct type *type, char *bounds, int *n,
+print_range_bound (struct type *type, const char *bounds, int *n,
 		   struct ui_file *stream)
 {
   LONGEST B;
@@ -230,8 +230,8 @@ print_range_bound (struct type *type, char *bounds, int *n,
   else
     {
       int bound_len;
-      char *bound = bounds + *n;
-      char *pend;
+      const char *bound = bounds + *n;
+      const char *pend;
 
       pend = strstr (bound, "__");
       if (pend == NULL)
@@ -300,7 +300,7 @@ print_range_type (struct type *raw_type, struct ui_file *stream,
   else
     {
       int prefix_len = subtype_info - name;
-      char *bounds_str;
+      const char *bounds_str;
       int n;
 
       subtype_info += 5;
@@ -363,7 +363,7 @@ static void
 print_fixed_point_type (struct type *type, struct ui_file *stream)
 {
   DOUBLEST delta = ada_delta (type);
-  DOUBLEST small = ada_fixed_to_float (type, 1.0);
+  DOUBLEST small = ada_fixed_to_float (type, 1);
 
   if (delta < 0.0)
     fprintf_filtered (stream, "delta ??");

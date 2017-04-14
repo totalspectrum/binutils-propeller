@@ -1,6 +1,6 @@
 /* GNU/Linux/Nios II specific low level interface, for the remote server for
    GDB.
-   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+   Copyright (C) 2008-2017 Free Software Foundation, Inc.
 
    Contributed by Mentor Graphics, Inc.
 
@@ -95,28 +95,6 @@ nios2_cannot_store_register (int regno)
   return 0;
 }
 
-/* Implement the get_pc linux_target_ops method.  */
-
-static CORE_ADDR
-nios2_get_pc (struct regcache *regcache)
-{
-  union nios2_register pc;
-
-  collect_register_by_name (regcache, "pc", pc.buf);
-  return pc.reg32;
-}
-
-/* Implement the set_pc linux_target_ops method.  */
-
-static void
-nios2_set_pc (struct regcache *regcache, CORE_ADDR pc)
-{
-  union nios2_register newpc;
-
-  newpc.reg32 = pc;
-  supply_register_by_name (regcache, "pc", newpc.buf);
-}
-
 /* Breakpoint support.  Also see comments on nios2_breakpoint_from_pc
    in nios2-tdep.c.  */
 
@@ -127,19 +105,21 @@ nios2_set_pc (struct regcache *regcache, CORE_ADDR pc)
 #define NIOS2_BREAKPOINT 0x003b6ffa
 #endif
 
+/* We only register the 4-byte breakpoint, even on R2 targets which also
+   support 2-byte breakpoints.  Since there is no supports_z_point_type
+   function provided, gdbserver never inserts software breakpoints itself
+   and instead relies on GDB to insert the breakpoint of the correct length
+   via a memory write.  */
 static const unsigned int nios2_breakpoint = NIOS2_BREAKPOINT;
 #define nios2_breakpoint_len 4
 
-/* Implement the breakpoint_reinsert_addr linux_target_ops method.  */
+/* Implementation of linux_target_ops method "sw_breakpoint_from_kind".  */
 
-static CORE_ADDR
-nios2_reinsert_addr (void)
+static const gdb_byte *
+nios2_sw_breakpoint_from_kind (int kind, int *size)
 {
-  union nios2_register ra;
-  struct regcache *regcache = get_thread_regcache (current_thread, 1);
-
-  collect_register_by_name (regcache, "ra", ra.buf);
-  return ra.reg32;
+  *size = nios2_breakpoint_len;
+  return (const gdb_byte *) &nios2_breakpoint;
 }
 
 /* Implement the breakpoint_at linux_target_ops method.  */
@@ -165,7 +145,7 @@ nios2_breakpoint_at (CORE_ADDR where)
 /* Fetch the thread-local storage pointer for libthread_db.  */
 
 ps_err_e
-ps_get_thread_area (const struct ps_prochandle *ph,
+ps_get_thread_area (struct ps_prochandle *ph,
                     lwpid_t lwpid, int idx, void **base)
 {
   if (ptrace (PTRACE_GET_THREAD_AREA, lwpid, NULL, base) != 0)
@@ -203,7 +183,7 @@ nios2_supply_register (struct regcache *regcache, int regno,
 static void
 nios2_fill_gregset (struct regcache *regcache, void *buf)
 {
-  union nios2_register *regset = buf;
+  union nios2_register *regset = (union nios2_register *) buf;
   int i;
 
   for (i = 1; i < nios2_num_regs; i++)
@@ -213,7 +193,7 @@ nios2_fill_gregset (struct regcache *regcache, void *buf)
 static void
 nios2_store_gregset (struct regcache *regcache, const void *buf)
 {
-  const union nios2_register *regset = buf;
+  const union nios2_register *regset = (union nios2_register *) buf;
   int i;
 
   for (i = 0; i < nios2_num_regs; i++)
@@ -225,7 +205,7 @@ static struct regset_info nios2_regsets[] =
   { PTRACE_GETREGSET, PTRACE_SETREGSET, NT_PRSTATUS,
     nios2_num_regs * 4, GENERAL_REGS,
     nios2_fill_gregset, nios2_store_gregset },
-  { 0, 0, 0, -1, -1, NULL, NULL }
+  NULL_REGSET
 };
 
 static struct regsets_info nios2_regsets_info =
@@ -261,17 +241,11 @@ struct linux_target_ops the_low_target =
   nios2_cannot_fetch_register,
   nios2_cannot_store_register,
   NULL,
-  nios2_get_pc,
-  nios2_set_pc,
-
-  /* We only register the 4-byte breakpoint, even on R2 targets which also
-     support 2-byte breakpoints.  Since there is no supports_z_point_type
-     function provided, gdbserver never inserts software breakpoints itself
-     and instead relies on GDB to insert the breakpoint of the correct length
-     via a memory write.  */
-  (const unsigned char *) &nios2_breakpoint,
-  nios2_breakpoint_len,
-  nios2_reinsert_addr,
+  linux_get_pc_32bit,
+  linux_set_pc_32bit,
+  NULL, /* breakpoint_kind_from_pc */
+  nios2_sw_breakpoint_from_kind,
+  NULL, /* get_next_pcs */
   0,
   nios2_breakpoint_at,
 };

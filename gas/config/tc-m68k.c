@@ -1,5 +1,5 @@
 /* tc-m68k.c -- Assemble for the m68k family
-   Copyright (C) 1987-2015 Free Software Foundation, Inc.
+   Copyright (C) 1987-2017 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -122,7 +122,7 @@ struct label_line
 {
   struct label_line *next;
   symbolS *label;
-  char *file;
+  const char *file;
   unsigned int line;
   int text;
 };
@@ -138,7 +138,7 @@ static struct label_line *current_label;
 /* Pointer to list holding the opcodes sorted by name.  */
 static struct m68k_opcode const ** m68k_sorted_opcodes;
 
-/* Its an arbitrary name:  This means I don't approve of it.
+/* It's an arbitrary name:  This means I don't approve of it.
    See flames below.  */
 static struct obstack robyn;
 
@@ -369,7 +369,7 @@ struct m68k_it
     }
   fragb[4];
 
-  int nrel;			/* Num of reloc strucs in use.  */
+  int nrel;			/* Num of reloc structs in use.  */
   struct
     {
       int n;
@@ -513,7 +513,7 @@ struct m68k_cpu
   unsigned long arch;	/* Architecture features.  */
   const enum m68k_register *control_regs;	/* Control regs on chip */
   const char *name;	/* Name */
-  int alias;       	/* Alias for a cannonical name.  If 1, then
+  int alias;       	/* Alias for a canonical name.  If 1, then
 			   succeeds canonical name, if -1 then
 			   succeeds canonical name, if <-1 ||>1 this is a
 			   deprecated name, and the next/previous name
@@ -1334,8 +1334,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
 #undef F
 #undef MAP
 
-  reloc = (arelent *) xmalloc (sizeof (arelent));
-  reloc->sym_ptr_ptr = (asymbol **) xmalloc (sizeof (asymbol *));
+  reloc = XNEW (arelent);
+  reloc->sym_ptr_ptr = XNEW (asymbol *);
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
 #ifndef OBJ_ELF
@@ -1469,7 +1469,7 @@ m68k_ip (char *instring)
       char *old = input_line_pointer;
       *old = '\n';
       input_line_pointer = p;
-      /* Ahh - it's a motorola style psuedo op.  */
+      /* Ahh - it's a motorola style pseudo op.  */
       mote_pseudo_table[opcode->m_opnum].poc_handler
 	(mote_pseudo_table[opcode->m_opnum].poc_val);
       input_line_pointer = old;
@@ -1504,7 +1504,7 @@ m68k_ip (char *instring)
   opsfound = opP - &the_ins.operands[0];
 
   /* This ugly hack is to support the floating pt opcodes in their
-     standard form.  Essentially, we fake a first enty of type COP#1 */
+     standard form.  Essentially, we fake a first entry of type COP#1 */
   if (opcode->m_operands[0] == 'I')
     {
       int n;
@@ -2348,7 +2348,7 @@ m68k_ip (char *instring)
 	      const struct m68k_cpu *cpu;
 	      int any = 0;
 	      size_t space = 400;
-	      char *buf = xmalloc (space + 1);
+	      char *buf = XNEWVEC (char, space + 1);
 	      size_t len;
 	      int paren = 1;
 
@@ -2470,7 +2470,7 @@ m68k_ip (char *instring)
       int use_pl = 0;
 
       /* This switch is a doozy.
-	 Watch the first step; its a big one! */
+	 Watch the first step; it's a big one! */
       switch (s[0])
 	{
 
@@ -2794,7 +2794,7 @@ m68k_ip (char *instring)
 		    default:
 		      abort ();
 		    }
-		  /* IF its simple,
+		  /* IF it's simple,
 		     GET US OUT OF HERE! */
 
 		  /* Must be INDEX, with an index register.  Address
@@ -3003,7 +3003,7 @@ m68k_ip (char *instring)
 				TAB (ABSTOPCREL, SZ_UNDEF));
 		      break;
 		    }
-		  /* Fall through into long.  */
+		  /* Fall through.  */
 		case SIZE_LONG:
 		  if (isvar (&opP->disp))
 		    add_fix ('l', &opP->disp, 0, 0);
@@ -3109,6 +3109,7 @@ m68k_ip (char *instring)
 	      break;
 	    case '3':
 	      tmpreg &= 0xFF;
+	      /* Fall through.  */
 	    case '8':
 	    case 'C':
 	    case 'j':
@@ -3734,7 +3735,7 @@ m68k_ip (char *instring)
 	}
     }
 
-  /* By the time whe get here (FINALLY) the_ins contains the complete
+  /* By the time when get here (FINALLY) the_ins contains the complete
      instruction, ready to be emitted. . .  */
 }
 
@@ -3923,7 +3924,7 @@ install_gen_operand (int mode, int val)
   switch (mode)
     {
     case '/':  /* Special for mask loads for mac/msac insns with
-		  possible mask; trailing_ampersend set in bit 8.  */
+		  possible mask; trailing_ampersand set in bit 8.  */
       the_ins.opcode[0] |= (val & 0x3f);
       the_ins.opcode[1] |= (((val & 0x100) >> 8) << 5);
       break;
@@ -4431,7 +4432,7 @@ md_assemble (char *str)
 	      n = 4;
 	      break;
 	    default:
-	      as_fatal (_("Don't know how to figure width of %c in md_assemble()"),
+	      as_fatal (_("Don't know how to figure out width of %c in md_assemble()"),
 			the_ins.reloc[m].wid);
 	    }
 
@@ -4596,13 +4597,10 @@ md_begin (void)
 	m68k_rel32 = 0;
     }
 
-  /* First sort the opcode table into alphabetical order to seperate
+  /* First sort the opcode table into alphabetical order to separate
      the order that the assembler wants to see the opcodes from the
      order that the disassembler wants to see them.  */
-  m68k_sorted_opcodes = xmalloc (m68k_numopcodes * sizeof (* m68k_sorted_opcodes));
-  if (!m68k_sorted_opcodes)
-    as_fatal (_("Internal Error:  Can't allocate m68k_sorted_opcodes of size %d"),
-	      m68k_numopcodes * ((int) sizeof (* m68k_sorted_opcodes)));
+  m68k_sorted_opcodes = XNEWVEC (const struct m68k_opcode *, m68k_numopcodes);
 
   for (i = m68k_numopcodes; i--;)
     m68k_sorted_opcodes[i] = m68k_opcodes + i;
@@ -4615,7 +4613,7 @@ md_begin (void)
   obstack_begin (&robyn, 4000);
   for (i = 0; i < m68k_numopcodes; i++)
     {
-      hack = slak = obstack_alloc (&robyn, sizeof (struct m68k_incant));
+      hack = slak = XOBNEW (&robyn, struct m68k_incant);
       do
 	{
 	  ins = m68k_sorted_opcodes[i];
@@ -4645,7 +4643,7 @@ md_begin (void)
 	  if (i + 1 != m68k_numopcodes
 	      && !strcmp (ins->name, m68k_sorted_opcodes[i + 1]->name))
 	    {
-	      slak->m_next = obstack_alloc (&robyn, sizeof (struct m68k_incant));
+	      slak->m_next = XOBNEW (&robyn, struct m68k_incant);
 	      i++;
 	    }
 	  else
@@ -4762,7 +4760,7 @@ md_begin (void)
 
     while (mote_pseudo_table[n].poc_name)
       {
-	hack = obstack_alloc (&robyn, sizeof (struct m68k_incant));
+	hack = XOBNEW (&robyn, struct m68k_incant);
 	hash_insert (op_hash,
 		     mote_pseudo_table[n].poc_name, (char *) hack);
 	hack->m_operands = 0;
@@ -4789,10 +4787,10 @@ m68k_frob_label (symbolS *sym)
 {
   struct label_line *n;
 
-  n = (struct label_line *) xmalloc (sizeof *n);
+  n = XNEW (struct label_line);
   n->next = labels;
   n->label = sym;
-  as_where (&n->file, &n->line);
+  n->file = as_where (&n->line);
   n->text = 0;
   labels = n;
   current_label = n;
@@ -4879,7 +4877,7 @@ m68k_mri_mode_change (int on)
     }
 }
 
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
   return ieee_md_atof (type, litP, sizeP, TRUE);
@@ -5480,7 +5478,7 @@ md_create_long_jump (char *ptr, addressT from_addr, addressT to_addr,
 
 #endif
 
-/* Different values of OK tell what its OK to return.  Things that
+/* Different values of OK tell what it's OK to return.  Things that
    aren't OK are an error (what a shock, no?)
 
    0:  Everything is OK
@@ -6105,7 +6103,7 @@ s_save (int ignore ATTRIBUTE_UNUSED)
 {
   struct save_opts *s;
 
-  s = (struct save_opts *) xmalloc (sizeof (struct save_opts));
+  s = XNEW (struct save_opts);
   s->abspcadd = m68k_abspcadd;
   s->symbols_case_sensitive = symbols_case_sensitive;
   s->keep_locals = flag_keep_locals;
@@ -6225,7 +6223,7 @@ mri_control_label (void)
 {
   char *n;
 
-  n = (char *) xmalloc (20);
+  n = XNEWVEC (char, 20);
   sprintf (n, "%smc%d", FAKE_LABEL_NAME, mri_control_index);
   ++mri_control_index;
   return n;
@@ -6238,7 +6236,7 @@ push_mri_control (enum mri_control_type type)
 {
   struct mri_control_info *n;
 
-  n = (struct mri_control_info *) xmalloc (sizeof (struct mri_control_info));
+  n = XNEW (struct mri_control_info);
 
   n->type = type;
   n->else_seen = 0;
@@ -6517,9 +6515,9 @@ build_mri_control_operand (int qual, int cc, char *leftstart, char *leftstop,
 
   if (leftstart != NULL)
     {
-      buf = (char *) xmalloc (20
-			      + (leftstop - leftstart)
-			      + (rightstop - rightstart));
+      buf = XNEWVEC (char, (20
+			    + (leftstop - leftstart)
+			    + (rightstop - rightstart)));
       s = buf;
       *s++ = 'c';
       *s++ = 'm';
@@ -6537,7 +6535,7 @@ build_mri_control_operand (int qual, int cc, char *leftstart, char *leftstop,
       free (buf);
     }
 
-  buf = (char *) xmalloc (20 + strlen (truelab));
+  buf = XNEWVEC (char, 20 + strlen (truelab));
   s = buf;
   *s++ = 'b';
   *s++ = cc >> 8;
@@ -6786,7 +6784,7 @@ s_mri_else (int qual)
 
   mri_control_stack->else_seen = 1;
 
-  buf = (char *) xmalloc (20 + strlen (mri_control_stack->bottom));
+  buf = XNEWVEC (char, 20 + strlen (mri_control_stack->bottom));
   q[0] = TOLOWER (qual);
   q[1] = '\0';
   sprintf (buf, "bra%s %s", q, mri_control_stack->bottom);
@@ -6857,7 +6855,7 @@ s_mri_break (int extent)
       return;
     }
 
-  buf = (char *) xmalloc (20 + strlen (n->bottom));
+  buf = XNEWVEC (char, 20 + strlen (n->bottom));
   ex[0] = TOLOWER (extent);
   ex[1] = '\0';
   sprintf (buf, "bra%s %s", ex, n->bottom);
@@ -6895,7 +6893,7 @@ s_mri_next (int extent)
       return;
     }
 
-  buf = (char *) xmalloc (20 + strlen (n->next));
+  buf = XNEWVEC (char, 20 + strlen (n->next));
   ex[0] = TOLOWER (extent);
   ex[1] = '\0';
   sprintf (buf, "bra%s %s", ex, n->next);
@@ -7069,7 +7067,7 @@ s_mri_for (int qual)
   /* We have fully parsed the FOR operands.  Now build the loop.  */
   n = push_mri_control (mri_for);
 
-  buf = (char *) xmalloc (50 + (input_line_pointer - varstart));
+  buf = XNEWVEC (char, 50 + (input_line_pointer - varstart));
 
   /* Move init,var.  */
   s = buf;
@@ -7303,7 +7301,7 @@ s_mri_endw (int ignore ATTRIBUTE_UNUSED)
       return;
     }
 
-  buf = (char *) xmalloc (20 + strlen (mri_control_stack->next));
+  buf = XNEWVEC (char, 20 + strlen (mri_control_stack->next));
   sprintf (buf, "bra %s", mri_control_stack->next);
   mri_assemble (buf);
   free (buf);
@@ -7540,7 +7538,7 @@ struct option md_longopts[] = {
 size_t md_longopts_size = sizeof (md_longopts);
 
 int
-md_parse_option (int c, char *arg)
+md_parse_option (int c, const char *arg)
 {
   switch (c)
     {
@@ -7584,7 +7582,7 @@ md_parse_option (int c, char *arg)
 	char *n, *t;
 	const char *s;
 
-	n = (char *) xmalloc (strlen (m68k_comment_chars) + 1);
+	n = XNEWVEC (char, strlen (m68k_comment_chars) + 1);
 	t = n;
 	for (s = m68k_comment_chars; *s != '\0'; s++)
 	  if (*s != '|')
@@ -7733,7 +7731,7 @@ md_show_usage (FILE *stream)
 "), default_cpu);
   for (i = 0; m68k_extensions[i].name; i++)
     fprintf (stream, _("\
--m[no-]%-16s enable/disable%s architecture extension\n\
+-m[no-]%-16s enable/disable %s architecture extension\n\
 "), m68k_extensions[i].name,
 	     m68k_extensions[i].alias > 0 ? " ColdFire"
 	     : m68k_extensions[i].alias < 0 ? " m68k" : "");
@@ -7888,7 +7886,7 @@ md_section_align (segT segment ATTRIBUTE_UNUSED, valueT size)
   int align;
 
   align = bfd_get_section_alignment (stdoutput, segment);
-  size = ((size + (1 << align) - 1) & ((valueT) -1 << align));
+  size = ((size + (1 << align) - 1) & (-((valueT) 1 << align)));
 #endif
 
   return size;
@@ -8098,7 +8096,7 @@ m68k_elf_cons (int nbytes /* 4=.long */)
 #endif
 
 int
-tc_m68k_regname_to_dw2regnum (char *regname)
+tc_m68k_regname_to_dw2regnum (const char *regname)
 {
   unsigned int regnum;
   static const char *const regnames[] =

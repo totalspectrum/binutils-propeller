@@ -1,6 +1,6 @@
 /* Find a variable's value in memory, for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -169,8 +169,7 @@ extract_long_unsigned_integer (const gdb_byte *addr, int orig_len,
 CORE_ADDR
 extract_typed_address (const gdb_byte *buf, struct type *type)
 {
-  if (TYPE_CODE (type) != TYPE_CODE_PTR
-      && TYPE_CODE (type) != TYPE_CODE_REF)
+  if (TYPE_CODE (type) != TYPE_CODE_PTR && !TYPE_IS_REFERENCE (type))
     internal_error (__FILE__, __LINE__,
 		    _("extract_typed_address: "
 		    "type is not a pointer or reference"));
@@ -242,8 +241,7 @@ store_unsigned_integer (gdb_byte *addr, int len,
 void
 store_typed_address (gdb_byte *buf, struct type *type, CORE_ADDR addr)
 {
-  if (TYPE_CODE (type) != TYPE_CODE_PTR
-      && TYPE_CODE (type) != TYPE_CODE_REF)
+  if (TYPE_CODE (type) != TYPE_CODE_PTR && !TYPE_IS_REFERENCE (type))
     internal_error (__FILE__, __LINE__,
 		    _("store_typed_address: "
 		    "type is not a pointer or reference"));
@@ -283,17 +281,23 @@ value_of_register_lazy (struct frame_info *frame, int regnum)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
   struct value *reg_val;
+  struct frame_info *next_frame;
 
   gdb_assert (regnum < (gdbarch_num_regs (gdbarch)
 			+ gdbarch_num_pseudo_regs (gdbarch)));
 
-  /* We should have a valid (i.e. non-sentinel) frame.  */
-  gdb_assert (frame_id_p (get_frame_id (frame)));
+  gdb_assert (frame != NULL);
+
+  next_frame = get_next_frame_sentinel_okay (frame);
+
+  /* We should have a valid next frame.  */
+  gdb_assert (frame_id_p (get_frame_id (next_frame)));
 
   reg_val = allocate_value_lazy (register_type (gdbarch, regnum));
   VALUE_LVAL (reg_val) = lval_register;
   VALUE_REGNUM (reg_val) = regnum;
-  VALUE_FRAME_ID (reg_val) = get_frame_id (frame);
+  VALUE_NEXT_FRAME_ID (reg_val) = get_frame_id (next_frame);
+
   return reg_val;
 }
 
@@ -337,14 +341,13 @@ address_to_signed_pointer (struct gdbarch *gdbarch, struct type *type,
   store_signed_integer (buf, TYPE_LENGTH (type), byte_order, addr);
 }
 
-/* Will calling read_var_value or locate_var_value on SYM end
-   up caring what frame it is being evaluated relative to?  SYM must
-   be non-NULL.  */
-int
-symbol_read_needs_frame (struct symbol *sym)
+/* See value.h.  */
+
+enum symbol_needs_kind
+symbol_read_needs (struct symbol *sym)
 {
   if (SYMBOL_COMPUTED_OPS (sym) != NULL)
-    return SYMBOL_COMPUTED_OPS (sym)->read_needs_frame (sym);
+    return SYMBOL_COMPUTED_OPS (sym)->get_symbol_read_needs (sym);
 
   switch (SYMBOL_CLASS (sym))
     {
@@ -358,7 +361,7 @@ symbol_read_needs_frame (struct symbol *sym)
     case LOC_REF_ARG:
     case LOC_REGPARM_ADDR:
     case LOC_LOCAL:
-      return 1;
+      return SYMBOL_NEEDS_FRAME;
 
     case LOC_UNDEF:
     case LOC_CONST:
@@ -374,9 +377,17 @@ symbol_read_needs_frame (struct symbol *sym)
     case LOC_CONST_BYTES:
     case LOC_UNRESOLVED:
     case LOC_OPTIMIZED_OUT:
-      return 0;
+      return SYMBOL_NEEDS_NONE;
     }
-  return 1;
+  return SYMBOL_NEEDS_FRAME;
+}
+
+/* See value.h.  */
+
+int
+symbol_read_needs_frame (struct symbol *sym)
+{
+  return symbol_read_needs (sym) == SYMBOL_NEEDS_FRAME;
 }
 
 /* Private data to be used with minsym_lookup_iterator_cb.  */
@@ -435,6 +446,7 @@ follow_static_link (struct frame_info *frame,
       /* If we don't know how to compute FRAME's base address, don't give up:
 	 maybe the frame we are looking for is upper in the stace frame.  */
       if (framefunc != NULL
+	  && SYMBOL_BLOCK_OPS (framefunc) != NULL
 	  && SYMBOL_BLOCK_OPS (framefunc)->get_frame_base != NULL
 	  && (SYMBOL_BLOCK_OPS (framefunc)->get_frame_base (framefunc, frame)
 	      == upper_frame_base))
@@ -574,6 +586,7 @@ default_read_var_value (struct symbol *var, const struct block *var_block,
   struct value *v;
   struct type *type = SYMBOL_TYPE (var);
   CORE_ADDR addr;
+  enum symbol_needs_kind sym_need;
 
   /* Call check_typedef on our type to make sure that, if TYPE is
      a TYPE_CODE_TYPEDEF, its length is set to the length of the target type
@@ -582,8 +595,11 @@ default_read_var_value (struct symbol *var, const struct block *var_block,
      set the returned value type description correctly.  */
   check_typedef (type);
 
-  if (symbol_read_needs_frame (var))
+  sym_need = symbol_read_needs (var);
+  if (sym_need == SYMBOL_NEEDS_FRAME)
     gdb_assert (frame != NULL);
+  else if (sym_need == SYMBOL_NEEDS_REGISTERS && !target_has_registers)
+    error (_("Cannot read `%s' without registers"), SYMBOL_PRINT_NAME (var));
 
   if (frame != NULL)
     frame = get_hosting_frame (var, var_block, frame);
@@ -803,9 +819,17 @@ default_value_from_register (struct gdbarch *gdbarch, struct type *type,
 {
   int len = TYPE_LENGTH (type);
   struct value *value = allocate_value (type);
+  struct frame_info *frame;
 
   VALUE_LVAL (value) = lval_register;
-  VALUE_FRAME_ID (value) = frame_id;
+  frame = frame_find_by_id (frame_id);
+
+  if (frame == NULL)
+    frame_id = null_frame_id;
+  else
+    frame_id = get_frame_id (get_next_frame_sentinel_okay (frame));
+
+  VALUE_NEXT_FRAME_ID (value) = frame_id;
   VALUE_REGNUM (value) = regnum;
 
   /* Any structure stored in more than one register will always be
@@ -834,8 +858,8 @@ void
 read_frame_register_value (struct value *value, struct frame_info *frame)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
-  int offset = 0;
-  int reg_offset = value_offset (value);
+  LONGEST offset = 0;
+  LONGEST reg_offset = value_offset (value);
   int regnum = VALUE_REGNUM (value);
   int len = type_length_units (check_typedef (value_type (value)));
 
@@ -890,7 +914,7 @@ value_from_register (struct type *type, int regnum, struct frame_info *frame)
          including the location.  */
       v = allocate_value (type);
       VALUE_LVAL (v) = lval_register;
-      VALUE_FRAME_ID (v) = get_frame_id (frame);
+      VALUE_NEXT_FRAME_ID (v) = get_frame_id (get_next_frame_sentinel_okay (frame));
       VALUE_REGNUM (v) = regnum;
       ok = gdbarch_register_to_value (gdbarch, frame, regnum, type1,
 				      value_contents_raw (v), &optim,
@@ -927,12 +951,18 @@ address_from_register (int regnum, struct frame_info *frame)
   struct type *type = builtin_type (gdbarch)->builtin_data_ptr;
   struct value *value;
   CORE_ADDR result;
+  int regnum_max_excl = (gdbarch_num_regs (gdbarch)
+			 + gdbarch_num_pseudo_regs (gdbarch));
+
+  if (regnum < 0 || regnum >= regnum_max_excl)
+    error (_("Invalid register #%d, expecting 0 <= # < %d"), regnum,
+	   regnum_max_excl);
 
   /* This routine may be called during early unwinding, at a time
      where the ID of FRAME is not yet known.  Calling value_from_register
      would therefore abort in get_frame_id.  However, since we only need
      a temporary value that is never used as lvalue, we actually do not
-     really need to set its VALUE_FRAME_ID.  Therefore, we re-implement
+     really need to set its VALUE_NEXT_FRAME_ID.  Therefore, we re-implement
      the core of value_from_register, but use the null_frame_id.  */
 
   /* Some targets require a special conversion routine even for plain

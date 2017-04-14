@@ -1,6 +1,6 @@
 /* Serial interface for local (hardwired) serial ports on Un*x like systems
 
-   Copyright (C) 1992-2015 Free Software Foundation, Inc.
+   Copyright (C) 1992-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -31,6 +31,7 @@
 #include "gdb_select.h"
 #include "gdbcmd.h"
 #include "filestuff.h"
+#include "gdb_termios.h"
 
 #ifdef HAVE_TERMIOS
 
@@ -78,9 +79,6 @@ struct hardwire_ttystate
 
 static int hardwire_open (struct serial *scb, const char *name);
 static void hardwire_raw (struct serial *scb);
-static int wait_for (struct serial *scb, int timeout);
-static int hardwire_readchar (struct serial *scb, int timeout);
-static int do_hardwire_readchar (struct serial *scb, int timeout);
 static int rate_to_code (int rate);
 static int hardwire_setbaudrate (struct serial *scb, int rate);
 static int hardwire_setparity (struct serial *scb, int parity);
@@ -441,228 +439,10 @@ hardwire_raw (struct serial *scb)
   state.sgttyb.sg_flags &= ~(CBREAK | ECHO);
 #endif
 
-  scb->current_timeout = 0;
-
   if (set_tty_state (scb, &state))
     fprintf_unfiltered (gdb_stderr, "set_tty_state failed: %s\n",
 			safe_strerror (errno));
 }
-
-/* Wait for input on scb, with timeout seconds.  Returns 0 on success,
-   otherwise SERIAL_TIMEOUT or SERIAL_ERROR.
-
-   For termio{s}, we actually just setup VTIME if necessary, and let the
-   timeout occur in the read() in hardwire_read().  */
-
-/* FIXME: cagney/1999-09-16: Don't replace this with the equivalent
-   ser_base*() until the old TERMIOS/SGTTY/... timer code has been
-   flushed. .  */
-
-/* NOTE: cagney/1999-09-30: Much of the code below is dead.  The only
-   possible values of the TIMEOUT parameter are ONE and ZERO.
-   Consequently all the code that tries to handle the possability of
-   an overflowed timer is unnecessary.  */
-
-static int
-wait_for (struct serial *scb, int timeout)
-{
-#ifdef HAVE_SGTTY
-  while (1)
-    {
-      struct timeval tv;
-      fd_set readfds;
-      int numfds;
-
-      /* NOTE: Some OS's can scramble the READFDS when the select()
-         call fails (ex the kernel with Red Hat 5.2).  Initialize all
-         arguments before each call.  */
-
-      tv.tv_sec = timeout;
-      tv.tv_usec = 0;
-
-      FD_ZERO (&readfds);
-      FD_SET (scb->fd, &readfds);
-
-      if (timeout >= 0)
-	numfds = gdb_select (scb->fd + 1, &readfds, 0, 0, &tv);
-      else
-	numfds = gdb_select (scb->fd + 1, &readfds, 0, 0, 0);
-
-      if (numfds <= 0)
-	if (numfds == 0)
-	  return SERIAL_TIMEOUT;
-	else if (errno == EINTR)
-	  continue;
-	else
-	  return SERIAL_ERROR;	/* Got an error from select or poll.  */
-
-      return 0;
-    }
-#endif /* HAVE_SGTTY */
-
-#if defined HAVE_TERMIO || defined HAVE_TERMIOS
-  if (timeout == scb->current_timeout)
-    return 0;
-
-  scb->current_timeout = timeout;
-
-  {
-    struct hardwire_ttystate state;
-
-    if (get_tty_state (scb, &state))
-      fprintf_unfiltered (gdb_stderr, "get_tty_state failed: %s\n",
-			  safe_strerror (errno));
-
-#ifdef HAVE_TERMIOS
-    if (timeout < 0)
-      {
-	/* No timeout.  */
-	state.termios.c_cc[VTIME] = 0;
-	state.termios.c_cc[VMIN] = 1;
-      }
-    else
-      {
-	state.termios.c_cc[VMIN] = 0;
-	state.termios.c_cc[VTIME] = timeout * 10;
-	if (state.termios.c_cc[VTIME] != timeout * 10)
-	  {
-
-	    /* If c_cc is an 8-bit signed character, we can't go 
-	       bigger than this.  If it is always unsigned, we could use
-	       25.  */
-
-	    scb->current_timeout = 12;
-	    state.termios.c_cc[VTIME] = scb->current_timeout * 10;
-	    scb->timeout_remaining = timeout - scb->current_timeout;
-	  }
-      }
-#endif
-
-#ifdef HAVE_TERMIO
-    if (timeout < 0)
-      {
-	/* No timeout.  */
-	state.termio.c_cc[VTIME] = 0;
-	state.termio.c_cc[VMIN] = 1;
-      }
-    else
-      {
-	state.termio.c_cc[VMIN] = 0;
-	state.termio.c_cc[VTIME] = timeout * 10;
-	if (state.termio.c_cc[VTIME] != timeout * 10)
-	  {
-	    /* If c_cc is an 8-bit signed character, we can't go 
-	       bigger than this.  If it is always unsigned, we could use
-	       25.  */
-
-	    scb->current_timeout = 12;
-	    state.termio.c_cc[VTIME] = scb->current_timeout * 10;
-	    scb->timeout_remaining = timeout - scb->current_timeout;
-	  }
-      }
-#endif
-
-    if (set_tty_state (scb, &state))
-      fprintf_unfiltered (gdb_stderr, "set_tty_state failed: %s\n",
-			  safe_strerror (errno));
-
-    return 0;
-  }
-#endif /* HAVE_TERMIO || HAVE_TERMIOS */
-}
-
-/* Read a character with user-specified timeout.  TIMEOUT is number of
-   seconds to wait, or -1 to wait forever.  Use timeout of 0 to effect
-   a poll.  Returns char if successful.  Returns SERIAL_TIMEOUT if
-   timeout expired, EOF if line dropped dead, or SERIAL_ERROR for any
-   other error (see errno in that case).  */
-
-/* FIXME: cagney/1999-09-16: Don't replace this with the equivalent
-   ser_base*() until the old TERMIOS/SGTTY/... timer code has been
-   flushed.  */
-
-/* NOTE: cagney/1999-09-16: This function is not identical to
-   ser_base_readchar() as part of replacing it with ser_base*()
-   merging will be required - this code handles the case where read()
-   times out due to no data while ser_base_readchar() doesn't expect
-   that.  */
-
-static int
-do_hardwire_readchar (struct serial *scb, int timeout)
-{
-  int status, delta;
-  int detach = 0;
-
-  if (timeout > 0)
-    timeout++;
-
-  /* We have to be able to keep the GUI alive here, so we break the
-     original timeout into steps of 1 second, running the "keep the
-     GUI alive" hook each time through the loop.
-
-     Also, timeout = 0 means to poll, so we just set the delta to 0,
-     so we will only go through the loop once.  */
-
-  delta = (timeout == 0 ? 0 : 1);
-  while (1)
-    {
-
-      /* N.B. The UI may destroy our world (for instance by calling
-         remote_stop,) in which case we want to get out of here as
-         quickly as possible.  It is not safe to touch scb, since
-         someone else might have freed it.  The
-         deprecated_ui_loop_hook signals that we should exit by
-         returning 1.  */
-
-      if (deprecated_ui_loop_hook)
-	detach = deprecated_ui_loop_hook (0);
-
-      if (detach)
-	return SERIAL_TIMEOUT;
-
-      scb->timeout_remaining = (timeout < 0 ? timeout : timeout - delta);
-      status = wait_for (scb, delta);
-
-      if (status < 0)
-	return status;
-
-      status = read (scb->fd, scb->buf, BUFSIZ);
-
-      if (status <= 0)
-	{
-	  if (status == 0)
-	    {
-	      /* Zero characters means timeout (it could also be EOF, but
-	         we don't (yet at least) distinguish).  */
-	      if (scb->timeout_remaining > 0)
-		{
-		  timeout = scb->timeout_remaining;
-		  continue;
-		}
-	      else if (scb->timeout_remaining < 0)
-		continue;
-	      else
-		return SERIAL_TIMEOUT;
-	    }
-	  else if (errno == EINTR)
-	    continue;
-	  else
-	    return SERIAL_ERROR;	/* Got an error from read.  */
-	}
-
-      scb->bufcnt = status;
-      scb->bufcnt--;
-      scb->bufp = scb->buf;
-      return *scb->bufp++;
-    }
-}
-
-static int
-hardwire_readchar (struct serial *scb, int timeout)
-{
-  return generic_readchar (scb, timeout, do_hardwire_readchar);
-}
-
 
 #ifndef B19200
 #define B19200 EXTA
@@ -956,10 +736,7 @@ static const struct serial_ops hardwire_ops =
   hardwire_open,
   hardwire_close,
   NULL,
-  /* FIXME: Don't replace this with the equivalent ser_base*() until
-     the old TERMIOS/SGTTY/... timer code has been flushed.  cagney
-     1999-09-16.  */
-  hardwire_readchar,
+  ser_base_readchar,
   ser_base_write,
   hardwire_flush_output,
   hardwire_flush_input,
@@ -1002,21 +779,11 @@ when debugging using remote targets."),
 int
 ser_unix_read_prim (struct serial *scb, size_t count)
 {
-  int status;
-
-  while (1)
-    {
-      status = read (scb->fd, scb->buf, count);
-      if (status != -1 || errno != EINTR)
-	break;
-    }
-  return status;
+  return read (scb->fd, scb->buf, count);
 }
 
 int
 ser_unix_write_prim (struct serial *scb, const void *buf, size_t len)
 {
-  /* ??? Historically, GDB has not retried calls to "write" that
-     result in EINTR.  */
   return write (scb->fd, buf, len);
 }

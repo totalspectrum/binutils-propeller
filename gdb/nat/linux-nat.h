@@ -1,6 +1,6 @@
 /* Code for native debugging support for GNU/Linux (LWP layer).
 
-   Copyright (C) 2000-2015 Free Software Foundation, Inc.
+   Copyright (C) 2000-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,6 +24,11 @@
 
 struct lwp_info;
 struct arch_lwp_info;
+
+/* This is the kernel's hard limit.  Not to be confused with SIGRTMIN.  */
+#ifndef __SIGRTMIN
+#define __SIGRTMIN 32
+#endif
 
 /* Unlike other extended result codes, WSTOPSIG (status) on
    PTRACE_O_TRACESYSGOOD syscall events doesn't return SIGTRAP, but
@@ -79,5 +84,10 @@ extern enum target_stop_reason lwp_stop_reason (struct lwp_info *lwp);
    client.  */
 
 extern void linux_stop_lwp (struct lwp_info *lwp);
+
+/* Return nonzero if we are single-stepping this LWP at the ptrace
+   level.  */
+
+extern int lwp_is_stepping (struct lwp_info *lwp);
 
 #endif /* LINUX_NAT_H */

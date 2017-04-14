@@ -1,6 +1,6 @@
 /* Linux-dependent part of branch trace support for GDB, and GDBserver.
 
-   Copyright (C) 2013-2015 Free Software Foundation, Inc.
+   Copyright (C) 2013-2017 Free Software Foundation, Inc.
 
    Contributed by Intel Corp. <markus.t.metzger@intel.com>
 
@@ -103,11 +103,6 @@ perf_event_new_data (const struct perf_event_buffer *pev)
   return *pev->data_head != pev->last_head;
 }
 
-/* Try to determine the size of a pointer in bits for the OS.
-
-   This is the same as the size of a pointer for the inferior process
-   except when a 32-bit inferior is running on a 64-bit OS.  */
-
 /* Copy the last SIZE bytes from PEV ending at DATA_HEAD and return a pointer
    to the memory holding the copy.
    The caller is responsible for freeing the memory.  */
@@ -124,10 +119,24 @@ perf_event_read (const struct perf_event_buffer *pev, __u64 data_head,
   if (size == 0)
     return NULL;
 
+  /* We should never ask for more data than the buffer can hold.  */
+  buffer_size = pev->size;
+  gdb_assert (size <= buffer_size);
+
+  /* If we ask for more data than we seem to have, we wrap around and read
+     data from the end of the buffer.  This is already handled by the %
+     BUFFER_SIZE operation, below.  Here, we just need to make sure that we
+     don't underflow.
+
+     Note that this is perfectly OK for perf event buffers where data_head
+     doesn'grow indefinitely and instead wraps around to remain within the
+     buffer's boundaries.  */
+  if (data_head < size)
+    data_head += buffer_size;
+
   gdb_assert (size <= data_head);
   data_tail = data_head - size;
 
-  buffer_size = pev->size;
   begin = pev->mem;
   start = begin + data_tail % buffer_size;
   stop = begin + data_head % buffer_size;
@@ -158,10 +167,7 @@ perf_event_read_all (struct perf_event_buffer *pev, gdb_byte **data,
   __u64 data_head;
 
   data_head = *pev->data_head;
-
   size = pev->size;
-  if (data_head < size)
-    size = (size_t) data_head;
 
   *data = perf_event_read (pev, data_head, size);
   *psize = size;
@@ -461,7 +467,7 @@ kernel_supports_bts (void)
     }
 }
 
-/* Check whether the kernel supports Intel(R) Processor Trace.  */
+/* Check whether the kernel supports Intel Processor Trace.  */
 
 static int
 kernel_supports_pt (void)
@@ -618,7 +624,7 @@ linux_supports_bts (void)
   return cached > 0;
 }
 
-/* Check whether the linux target supports Intel(R) Processor Trace.  */
+/* Check whether the linux target supports Intel Processor Trace.  */
 
 static int
 linux_supports_pt (void)
@@ -779,7 +785,7 @@ linux_enable_bts (ptid_t ptid, const struct btrace_config_bts *conf)
 
 #if defined (PERF_ATTR_SIZE_VER5)
 
-/* Enable branch tracing in Intel(R) Processor Trace format.  */
+/* Enable branch tracing in Intel Processor Trace format.  */
 
 static struct btrace_target_info *
 linux_enable_pt (ptid_t ptid, const struct btrace_config_pt *conf)
@@ -820,8 +826,9 @@ linux_enable_pt (ptid_t ptid, const struct btrace_config_pt *conf)
     goto err;
 
   /* Allocate the configuration page. */
-  header = mmap (NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
-		 pt->file, 0);
+  header = ((struct perf_event_mmap_page *)
+	    mmap (NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
+		  pt->file, 0));
   if (header == MAP_FAILED)
     goto err_file;
 
@@ -862,8 +869,9 @@ linux_enable_pt (ptid_t ptid, const struct btrace_config_pt *conf)
       header->aux_size = data_size;
       length = size;
 
-      pt->pt.mem = mmap (NULL, length, PROT_READ, MAP_SHARED, pt->file,
-			 header->aux_offset);
+      pt->pt.mem = ((const uint8_t *)
+		    mmap (NULL, length, PROT_READ, MAP_SHARED, pt->file,
+			  header->aux_offset));
       if (pt->pt.mem != MAP_FAILED)
 	break;
     }
@@ -936,7 +944,7 @@ linux_disable_bts (struct btrace_tinfo_bts *tinfo)
   return BTRACE_ERR_NONE;
 }
 
-/* Disable Intel(R) Processor Trace tracing.  */
+/* Disable Intel Processor Trace tracing.  */
 
 static enum btrace_error
 linux_disable_pt (struct btrace_tinfo_pt *tinfo)
@@ -1071,7 +1079,7 @@ linux_read_bts (struct btrace_data_bts *btrace,
   return BTRACE_ERR_NONE;
 }
 
-/* Fill in the Intel(R) Processor Trace configuration information.  */
+/* Fill in the Intel Processor Trace configuration information.  */
 
 static void
 linux_fill_btrace_pt_config (struct btrace_data_pt_config *conf)
@@ -1079,7 +1087,7 @@ linux_fill_btrace_pt_config (struct btrace_data_pt_config *conf)
   conf->cpu = btrace_this_cpu ();
 }
 
-/* Read branch trace data in Intel(R) Processor Trace format for the thread
+/* Read branch trace data in Intel Processor Trace format for the thread
    given by TINFO into BTRACE using the TYPE reading method.  */
 
 static enum btrace_error
@@ -1133,7 +1141,7 @@ linux_read_btrace (struct btrace_data *btrace,
       return linux_read_bts (&btrace->variant.bts, tinfo, type);
 
     case BTRACE_FORMAT_PT:
-      /* We read btrace in Intel(R) Processor Trace format.  */
+      /* We read btrace in Intel Processor Trace format.  */
       btrace->format = BTRACE_FORMAT_PT;
       btrace->variant.pt.data = NULL;
       btrace->variant.pt.size = 0;

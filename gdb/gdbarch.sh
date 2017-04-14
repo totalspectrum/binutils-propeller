@@ -2,7 +2,7 @@
 
 # Architecture commands for GDB, the GNU debugger.
 #
-# Copyright (C) 1998-2015 Free Software Foundation, Inc.
+# Copyright (C) 1998-2017 Free Software Foundation, Inc.
 #
 # This file is part of GDB.
 #
@@ -383,6 +383,17 @@ v:const struct floatformat **:double_format:::::floatformats_ieee_double::pforma
 v:int:long_double_bit:::8 * sizeof (long double):8*TARGET_CHAR_BIT::0
 v:const struct floatformat **:long_double_format:::::floatformats_ieee_double::pformat (gdbarch->long_double_format)
 
+# The ABI default bit-size for "wchar_t".  wchar_t is a built-in type
+# starting with C++11.
+v:int:wchar_bit:::8 * sizeof (wchar_t):4*TARGET_CHAR_BIT::0
+# One if \`wchar_t' is signed, zero if unsigned.
+v:int:wchar_signed:::1:-1:1
+
+# Returns the floating-point format to be used for values of length LENGTH.
+# NAME, if non-NULL, is the type name, which may be used to distinguish
+# different target formats of the same length.
+m:const struct floatformat **:floatformat_for_type:const char *name, int length:name, length:0:default_floatformat_for_type::0
+
 # For most targets, a pointer on the target and its representation as an
 # address in GDB have the same size and "look the same".  For such a
 # target, you need only set gdbarch_ptr_bit and gdbarch_addr_bit
@@ -446,6 +457,12 @@ M:int:ax_pseudo_register_collect:struct agent_expr *ax, int reg:ax, reg
 # Return -1 if something goes wrong, 0 otherwise.
 M:int:ax_pseudo_register_push_stack:struct agent_expr *ax, int reg:ax, reg
 
+# Some targets/architectures can do extra processing/display of
+# segmentation faults.  E.g., Intel MPX boundary faults.
+# Call the architecture dependent function to handle the fault.
+# UIOUT is the output stream where the handler will place information.
+M:void:handle_segmentation_fault:struct ui_out *uiout:uiout
+
 # GDB's standard (or well known) register numbers.  These can map onto
 # a real register or a pseudo (computed) register or not be defined at
 # all (-1).
@@ -461,6 +478,7 @@ m:int:ecoff_reg_to_regnum:int ecoff_regnr:ecoff_regnr::no_op_reg_to_regnum::0
 # Convert from an sdb register number to an internal gdb register number.
 m:int:sdb_reg_to_regnum:int sdb_regnr:sdb_regnr::no_op_reg_to_regnum::0
 # Provide a default mapping from a DWARF2 register number to a gdb REGNUM.
+# Return -1 for bad REGNUM.  Note: Several targets get this wrong.
 m:int:dwarf2_reg_to_regnum:int dwarf2_regnr:dwarf2_regnr::no_op_reg_to_regnum::0
 m:const char *:register_name:int regnr:regnr::0
 
@@ -477,6 +495,9 @@ v:int:deprecated_fp_regnum:::-1:-1::0
 M:CORE_ADDR:push_dummy_call:struct value *function, struct regcache *regcache, CORE_ADDR bp_addr, int nargs, struct value **args, CORE_ADDR sp, int struct_return, CORE_ADDR struct_addr:function, regcache, bp_addr, nargs, args, sp, struct_return, struct_addr
 v:int:call_dummy_location::::AT_ENTRY_POINT::0
 M:CORE_ADDR:push_dummy_code:CORE_ADDR sp, CORE_ADDR funaddr, struct value **args, int nargs, struct type *value_type, CORE_ADDR *real_pc, CORE_ADDR *bp_addr, struct regcache *regcache:sp, funaddr, args, nargs, value_type, real_pc, bp_addr, regcache
+
+# Return true if the code of FRAME is writable.
+m:int:code_of_frame_writable:struct frame_info *frame:frame::default_code_of_frame_writable::0
 
 m:void:print_registers_info:struct ui_file *file, struct frame_info *frame, int regnum, int all:file, frame, regnum, all::default_print_registers_info::0
 m:void:print_float_info:struct ui_file *file, struct frame_info *frame, const char *args:file, frame, args::default_print_float_info::0
@@ -544,11 +565,21 @@ M:CORE_ADDR:skip_main_prologue:CORE_ADDR ip:ip
 M:CORE_ADDR:skip_entrypoint:CORE_ADDR ip:ip
 
 f:int:inner_than:CORE_ADDR lhs, CORE_ADDR rhs:lhs, rhs:0:0
-m:const gdb_byte *:breakpoint_from_pc:CORE_ADDR *pcptr, int *lenptr:pcptr, lenptr::0:
-# Return the adjusted address and kind to use for Z0/Z1 packets.
-# KIND is usually the memory length of the breakpoint, but may have a
-# different target-specific meaning.
-m:void:remote_breakpoint_from_pc:CORE_ADDR *pcptr, int *kindptr:pcptr, kindptr:0:default_remote_breakpoint_from_pc::0
+m:const gdb_byte *:breakpoint_from_pc:CORE_ADDR *pcptr, int *lenptr:pcptr, lenptr:0:default_breakpoint_from_pc::0
+
+# Return the breakpoint kind for this target based on *PCPTR.
+m:int:breakpoint_kind_from_pc:CORE_ADDR *pcptr:pcptr::0:
+
+# Return the software breakpoint from KIND.  KIND can have target
+# specific meaning like the Z0 kind parameter.
+# SIZE is set to the software breakpoint's length in memory.
+m:const gdb_byte *:sw_breakpoint_from_kind:int kind, int *size:kind, size::NULL::0
+
+# Return the breakpoint kind for this target based on the current
+# processor state (e.g. the current instruction mode on ARM) and the
+# *PCPTR.  In default, it is gdbarch->breakpoint_kind_from_pc.
+m:int:breakpoint_kind_from_current_state:struct regcache *regcache, CORE_ADDR *pcptr:regcache, pcptr:0:default_breakpoint_kind_from_current_state::0
+
 M:CORE_ADDR:adjust_breakpoint_address:CORE_ADDR bpaddr:bpaddr
 m:int:memory_insert_breakpoint:struct bp_target_info *bp_tgt:bp_tgt:0:default_memory_insert_breakpoint::0
 m:int:memory_remove_breakpoint:struct bp_target_info *bp_tgt:bp_tgt:0:default_memory_remove_breakpoint::0
@@ -598,16 +629,18 @@ m:CORE_ADDR:addr_bits_remove:CORE_ADDR addr:addr::core_addr_identity::0
 # indicates if the target needs software single step.  An ISA method to
 # implement it.
 #
-# FIXME/cagney/2001-01-18: This should be replaced with something that inserts
-# breakpoints using the breakpoint system instead of blatting memory directly
-# (as with rs6000).
-#
 # FIXME/cagney/2001-01-18: The logic is backwards.  It should be asking if the
 # target can single step.  If not, then implement single step using breakpoints.
 #
-# A return value of 1 means that the software_single_step breakpoints
-# were inserted; 0 means they were not.
-F:int:software_single_step:struct frame_info *frame:frame
+# Return a vector of addresses on which the software single step
+# breakpoints should be inserted.  NULL means software single step is
+# not used.
+# Multiple breakpoints may be inserted for some instructions such as
+# conditional branch.  However, each implementation must always evaluate
+# the condition and only put the breakpoint at the branch destination if
+# the condition is true, so that we ensure forward progress when stepping
+# past a conditional branch to self.
+F:VEC (CORE_ADDR) *:software_single_step:struct regcache *regcache:regcache
 
 # Return non-zero if the processor is executing a delay slot and a
 # further single-step is needed before the instruction finishes.
@@ -718,7 +751,10 @@ M:ULONGEST:core_xfer_shared_libraries:gdb_byte *readbuf, ULONGEST offset, ULONGE
 M:ULONGEST:core_xfer_shared_libraries_aix:gdb_byte *readbuf, ULONGEST offset, ULONGEST len:readbuf, offset, len
 
 # How the core target converts a PTID from a core file to a string.
-M:char *:core_pid_to_str:ptid_t ptid:ptid
+M:const char *:core_pid_to_str:ptid_t ptid:ptid
+
+# How the core target extracts the name of a thread from a core file.
+M:const char *:core_thread_name:struct thread_info *thr:thr
 
 # BFD target to use when generating a core file.
 V:const char *:gcore_bfd_target:::0:0:::pstring (gdbarch->gcore_bfd_target)
@@ -1024,6 +1060,12 @@ m:int:has_shared_address_space:void:::default_has_shared_address_space::0
 # True if a fast tracepoint can be set at an address.
 m:int:fast_tracepoint_valid_at:CORE_ADDR addr, char **msg:addr, msg::default_fast_tracepoint_valid_at::0
 
+# Guess register state based on tracepoint location.  Used for tracepoints
+# where no registers have been collected, but there's only one location,
+# allowing us to guess the PC value, and perhaps some other registers.
+# On entry, regcache has all registers marked as unavailable.
+m:void:guess_tracepoint_registers:struct regcache *regcache, CORE_ADDR addr:regcache, addr::default_guess_tracepoint_registers::0
+
 # Return the "auto" target charset.
 f:const char *:auto_charset:void::default_auto_charset:default_auto_charset::0
 # Return the "auto" target wide charset.
@@ -1090,6 +1132,10 @@ m:int:insn_is_jump:CORE_ADDR addr:addr::default_insn_is_jump::0
 # Return 1 if an entry was read into *TYPEP and *VALP.
 M:int:auxv_parse:gdb_byte **readptr, gdb_byte *endptr, CORE_ADDR *typep, CORE_ADDR *valp:readptr, endptr, typep, valp
 
+# Print the description of a single auxv entry described by TYPE and VAL
+# to FILE.
+m:void:print_auxv_entry:struct ui_file *file, CORE_ADDR type, CORE_ADDR val:file, type, val::default_print_auxv_entry::0
+
 # Find the address range of the current inferior's vsyscall/vDSO, and
 # write it to *RANGE.  If the vsyscall's length can't be determined, a
 # range with zero length is returned.  Returns true if the vsyscall is
@@ -1122,6 +1168,10 @@ m:const char *:gnu_triplet_regexp:void:::default_gnu_triplet_regexp::0
 # architecture.  This corresponds to the number of 8-bit bytes associated to
 # each address in memory.
 m:int:addressable_memory_unit_size:void:::default_addressable_memory_unit_size::0
+
+# Functions for allowing a target to modify its disassembler options.
+v:char **:disassembler_options:::0:0::0:pstring_ptr (gdbarch->disassembler_options)
+v:const disasm_options_t *:valid_disassembler_options:::0:0::0:host_address_to_string (gdbarch->valid_disassembler_options)
 
 EOF
 }
@@ -1176,7 +1226,7 @@ cat <<EOF
 
 /* Dynamic architecture support for GDB, the GNU debugger.
 
-   Copyright (C) 1998-2015 Free Software Foundation, Inc.
+   Copyright (C) 1998-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -1184,12 +1234,12 @@ cat <<EOF
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 3 of the License, or
    (at your option) any later version.
-  
+
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
    GNU General Public License for more details.
-  
+
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
@@ -1219,6 +1269,7 @@ cat <<EOF
 #define GDBARCH_H
 
 #include "frame.h"
+#include "dis-asm.h"
 
 struct floatformat;
 struct ui_file;
@@ -1237,7 +1288,6 @@ struct target_desc;
 struct objfile;
 struct symbol;
 struct displaced_step_closure;
-struct core_regset_section;
 struct syscall;
 struct agent_expr;
 struct axs_value;
@@ -1247,6 +1297,8 @@ struct ravenscar_arch_ops;
 struct elf_internal_linux_prpsinfo;
 struct mem_range;
 struct syscalls_info;
+struct thread_info;
+struct ui_out;
 
 #include "regcache.h"
 
@@ -1429,7 +1481,7 @@ struct gdbarch_info
   bfd *abfd;
 
   /* Use default: NULL (ZERO).  */
-  struct gdbarch_tdep_info *tdep_info;
+  void *tdep_info;
 
   /* Use default: GDB_OSABI_UNINITIALIZED (-1).  */
   enum gdb_osabi osabi;
@@ -1595,6 +1647,7 @@ cat <<EOF
 #include "observer.h"
 #include "regcache.h"
 #include "objfiles.h"
+#include "auxv.h"
 
 /* Static function declarations */
 
@@ -1631,10 +1684,18 @@ pstring (const char *string)
   return string;
 }
 
+static const char *
+pstring_ptr (char **string)
+{
+  if (string == NULL || *string == NULL)
+    return "(null)";
+  return *string;
+}
+
 /* Helper function to print a list of strings, represented as "const
    char *const *".  The list is printed comma-separated.  */
 
-static char *
+static const char *
 pstring_list (const char *const *list)
 {
   static char ret[100];
@@ -1833,18 +1894,13 @@ cat <<EOF
 static void
 verify_gdbarch (struct gdbarch *gdbarch)
 {
-  struct ui_file *log;
-  struct cleanup *cleanups;
-  long length;
-  char *buf;
+  string_file log;
 
-  log = mem_fileopen ();
-  cleanups = make_cleanup_ui_file_delete (log);
   /* fundamental */
   if (gdbarch->byte_order == BFD_ENDIAN_UNKNOWN)
-    fprintf_unfiltered (log, "\n\tbyte-order");
+    log.puts ("\n\tbyte-order");
   if (gdbarch->bfd_arch_info == NULL)
-    fprintf_unfiltered (log, "\n\tbfd_arch_info");
+    log.puts ("\n\tbfd_arch_info");
   /* Check those that need to be defined for the given multi-arch level.  */
 EOF
 function_list | while do_read
@@ -1873,22 +1929,19 @@ do
 	elif [ -n "${invalid_p}" ]
 	then
 	    printf "  if (${invalid_p})\n"
-	    printf "    fprintf_unfiltered (log, \"\\\\n\\\\t${function}\");\n"
+	    printf "    log.puts (\"\\\\n\\\\t${function}\");\n"
 	elif [ -n "${predefault}" ]
 	then
 	    printf "  if (gdbarch->${function} == ${predefault})\n"
-	    printf "    fprintf_unfiltered (log, \"\\\\n\\\\t${function}\");\n"
+	    printf "    log.puts (\"\\\\n\\\\t${function}\");\n"
 	fi
     fi
 done
 cat <<EOF
-  buf = ui_file_xstrdup (log, &length);
-  make_cleanup (xfree, buf);
-  if (length > 0)
+  if (!log.empty ())
     internal_error (__FILE__, __LINE__,
                     _("verify_gdbarch: the following are invalid ...%s"),
-                    buf);
-  do_cleanups (cleanups);
+                    log.c_str ());
 }
 EOF
 

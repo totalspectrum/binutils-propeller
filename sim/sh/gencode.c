@@ -35,6 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "libiberty.h"
 
 #define MAX_NR_STUFF 42
 
@@ -405,11 +406,11 @@ static op tab[] =
   },
 
   { "", "nm", "dmuls.l <REG_M>,<REG_N>", "0011nnnnmmmm1101",
-    "dmul (1/*signed*/, R[n], R[m]);",
+    "dmul_s (R[n], R[m]);",
   },
 
   { "", "nm", "dmulu.l <REG_M>,<REG_N>", "0011nnnnmmmm0101",
-    "dmul (0/*unsigned*/, R[n], R[m]);",
+    "dmul_u (R[n], R[m]);",
   },
 
   { "n", "n", "dt <REG_N>", "0100nnnn00010000",
@@ -1426,7 +1427,7 @@ static op tab[] =
   },
 
   { "", "", "sleep", "0000000000011011",
-    "nip += trap (0xc3, &R0, PC, memory, maskl, maskw, endianw);",
+    "nip += trap (sd, 0xc3, &R0, PC, memory, maskl, maskw, endianw);",
   },
 
   { "n", "", "stc <CREG_M>,<REG_N>", "0000nnnnmmmm0010",
@@ -1524,7 +1525,7 @@ static op tab[] =
     "long imm = 0xff & i;",
     "RAISE_EXCEPTION_IF_IN_DELAY_SLOT ();",
     "if (i < 20 || i == 33 || i == 34 || i == 0xc3)",
-    "  nip += trap (i, &R0, PC, memory, maskl, maskw, endianw);",
+    "  nip += trap (sd, i, &R0, PC, memory, maskl, maskw, endianw);",
 #if 0
     "else {",
     /* SH-[12] */
@@ -2595,7 +2596,7 @@ conflict_warn (int val, int i)
   fprintf (stderr, "Warning: opcode table conflict: 0x%04x (idx %d && %d)\n",
 	   val, i, table[val]);
 
-  for (ix = sizeof (tab) / sizeof (tab[0]); ix >= 0; ix--)
+  for (ix = ARRAY_SIZE (tab); ix >= 0; ix--)
     if (tab[ix].index == i || tab[ix].index == j)
       {
 	key = ((tab[ix].code[0] - '0') << 3) + 
@@ -2607,7 +2608,7 @@ conflict_warn (int val, int i)
 	  fprintf (stderr, "  %s -- %s\n", tab[ix].code, tab[ix].name);
       }
 
-  for (ix = sizeof (movsxy_tab) / sizeof (movsxy_tab[0]); ix >= 0; ix--)
+  for (ix = ARRAY_SIZE (movsxy_tab); ix >= 0; ix--)
     if (movsxy_tab[ix].index == i || movsxy_tab[ix].index == j)
       {
 	key = ((movsxy_tab[ix].code[0] - '0') << 3) + 
@@ -2620,7 +2621,7 @@ conflict_warn (int val, int i)
 		   movsxy_tab[ix].code, movsxy_tab[ix].name);
       }
 
-  for (ix = sizeof (ppi_tab) / sizeof (ppi_tab[0]); ix >= 0; ix--)
+  for (ix = ARRAY_SIZE (ppi_tab); ix >= 0; ix--)
     if (ppi_tab[ix].index == i || ppi_tab[ix].index == j)
       {
 	key = ((ppi_tab[ix].code[0] - '0') << 3) + 

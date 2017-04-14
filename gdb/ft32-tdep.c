@@ -1,6 +1,6 @@
 /* Target-dependent code for FT32.
 
-   Copyright (C) 2009-2015 Free Software Foundation, Inc.
+   Copyright (C) 2009-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -37,8 +37,11 @@
 #include "dis-asm.h"
 #include "record.h"
 
+#include "opcode/ft32.h"
+
 #include "ft32-tdep.h"
 #include "gdb/sim-ft32.h"
+#include <algorithm>
 
 #define RAM_BIAS  0x800000  /* Bias added to RAM addresses.  */
 
@@ -75,17 +78,10 @@ ft32_frame_align (struct gdbarch *gdbarch, CORE_ADDR sp)
   return sp & ~1;
 }
 
-/* Implement the "breakpoint_from_pc" gdbarch method.  */
 
-static const unsigned char *
-ft32_breakpoint_from_pc (struct gdbarch *gdbarch,
-			 CORE_ADDR *pcptr, int *lenptr)
-{
-  static const gdb_byte breakpoint[] = { 0x02, 0x00, 0x34, 0x00 };
+constexpr gdb_byte ft32_break_insn[] = { 0x02, 0x00, 0x34, 0x00 };
 
-  *lenptr = sizeof (breakpoint);
-  return breakpoint;
-}
+typedef BP_MANIPULATION (ft32_break_insn) ft32_breakpoint;
 
 /* FT32 register names.  */
 
@@ -153,11 +149,6 @@ ft32_store_return_value (struct type *type, struct regcache *regcache,
 
    Returns the address of the first instruction after the prologue.  */
 
-#define IS_PUSH(inst)   (((inst) & 0xfff00000) == 0x84000000)
-#define PUSH_REG(inst)  (FT32_R0_REGNUM + (((inst) >> 15) & 0x1f))
-#define IS_LINK(inst)   (((inst) & 0xffff0000) == 0x95d00000)
-#define LINK_SIZE(inst) ((inst) & 0xffff)
-
 static CORE_ADDR
 ft32_analyze_prologue (CORE_ADDR start_addr, CORE_ADDR end_addr,
 		       struct ft32_frame_cache *cache,
@@ -165,27 +156,68 @@ ft32_analyze_prologue (CORE_ADDR start_addr, CORE_ADDR end_addr,
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   CORE_ADDR next_addr;
-  ULONGEST inst, inst2;
-  LONGEST offset;
-  int regnum;
+  ULONGEST inst;
+  int regnum, pushreg;
+  struct bound_minimal_symbol msymbol;
+  const int first_saved_reg = 13;	/* The first saved register.  */
+  /* PROLOGS are addresses of the subroutine prologs, PROLOGS[n]
+     is the address of __prolog_$rN.
+     __prolog_$rN pushes registers from 13 through n inclusive.
+     So for example CALL __prolog_$r15 is equivalent to:
+       PUSH $r13 
+       PUSH $r14 
+       PUSH $r15 
+     Note that PROLOGS[0] through PROLOGS[12] are unused.  */
+  CORE_ADDR prologs[32];
 
   cache->saved_regs[FT32_PC_REGNUM] = 0;
   cache->framesize = 0;
 
+  for (regnum = first_saved_reg; regnum < 32; regnum++)
+    {
+      char prolog_symbol[32];
+
+      snprintf (prolog_symbol, sizeof (prolog_symbol), "__prolog_$r%02d",
+		regnum);
+      msymbol = lookup_minimal_symbol (prolog_symbol, NULL, NULL);
+      if (msymbol.minsym)
+	prologs[regnum] = BMSYMBOL_VALUE_ADDRESS (msymbol);
+      else
+	prologs[regnum] = 0;
+    }
+
   if (start_addr >= end_addr)
-      return end_addr;
+    return end_addr;
 
   cache->established = 0;
-  for (next_addr = start_addr; next_addr < end_addr; )
+  for (next_addr = start_addr; next_addr < end_addr;)
     {
       inst = read_memory_unsigned_integer (next_addr, 4, byte_order);
 
-      if (IS_PUSH (inst))
+      if (FT32_IS_PUSH (inst))
 	{
-	  regnum = PUSH_REG (inst);
+	  pushreg = FT32_PUSH_REG (inst);
 	  cache->framesize += 4;
-	  cache->saved_regs[regnum] = cache->framesize;
+	  cache->saved_regs[FT32_R0_REGNUM + pushreg] = cache->framesize;
 	  next_addr += 4;
+	}
+      else if (FT32_IS_CALL (inst))
+	{
+	  for (regnum = first_saved_reg; regnum < 32; regnum++)
+	    {
+	      if ((4 * (inst & 0x3ffff)) == prologs[regnum])
+		{
+		  for (pushreg = first_saved_reg; pushreg <= regnum;
+		       pushreg++)
+		    {
+		      cache->framesize += 4;
+		      cache->saved_regs[FT32_R0_REGNUM + pushreg] =
+			cache->framesize;
+		    }
+		  next_addr += 4;
+		}
+	    }
+	  break;
 	}
       else
 	break;
@@ -193,7 +225,8 @@ ft32_analyze_prologue (CORE_ADDR start_addr, CORE_ADDR end_addr,
   for (regnum = FT32_R0_REGNUM; regnum < FT32_PC_REGNUM; regnum++)
     {
       if (cache->saved_regs[regnum] != REG_UNAVAIL)
-	cache->saved_regs[regnum] = cache->framesize - cache->saved_regs[regnum];
+	cache->saved_regs[regnum] =
+	  cache->framesize - cache->saved_regs[regnum];
     }
   cache->saved_regs[FT32_PC_REGNUM] = cache->framesize;
 
@@ -201,7 +234,7 @@ ft32_analyze_prologue (CORE_ADDR start_addr, CORE_ADDR end_addr,
   if (next_addr < end_addr)
     {
       inst = read_memory_unsigned_integer (next_addr, 4, byte_order);
-      if (IS_LINK (inst))
+      if (FT32_IS_LINK (inst))
 	{
 	  cache->established = 1;
 	  for (regnum = FT32_R0_REGNUM; regnum < FT32_PC_REGNUM; regnum++)
@@ -211,7 +244,7 @@ ft32_analyze_prologue (CORE_ADDR start_addr, CORE_ADDR end_addr,
 	    }
 	  cache->saved_regs[FT32_PC_REGNUM] = cache->framesize + 4;
 	  cache->saved_regs[FT32_FP_REGNUM] = 0;
-	  cache->framesize += LINK_SIZE (inst);
+	  cache->framesize += FT32_LINK_SIZE (inst);
 	  next_addr += 4;
 	}
     }
@@ -235,7 +268,7 @@ ft32_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
       CORE_ADDR post_prologue_pc
 	= skip_prologue_using_sal (gdbarch, func_addr);
       if (post_prologue_pc != 0)
-	return max (pc, post_prologue_pc);
+	return std::max (pc, post_prologue_pc);
       else
 	{
 	  /* Can't determine prologue from the symbol table, need to examine
@@ -571,9 +604,8 @@ ft32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
      be defined.  */
   void_type = arch_type (gdbarch, TYPE_CODE_VOID, 1, "void");
   func_void_type = make_function_type (void_type, NULL);
-  tdep->pc_type = arch_type (gdbarch, TYPE_CODE_PTR, 4, NULL);
-  TYPE_TARGET_TYPE (tdep->pc_type) = func_void_type;
-  TYPE_UNSIGNED (tdep->pc_type) = 1;
+  tdep->pc_type = arch_pointer_type (gdbarch, 4 * TARGET_CHAR_BIT, NULL,
+				     func_void_type);
   TYPE_INSTANCE_FLAGS (tdep->pc_type) |= TYPE_INSTANCE_FLAG_ADDRESS_CLASS_1;
 
   set_gdbarch_read_pc (gdbarch, ft32_read_pc);
@@ -592,7 +624,8 @@ ft32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   set_gdbarch_skip_prologue (gdbarch, ft32_skip_prologue);
   set_gdbarch_inner_than (gdbarch, core_addr_lessthan);
-  set_gdbarch_breakpoint_from_pc (gdbarch, ft32_breakpoint_from_pc);
+  set_gdbarch_breakpoint_kind_from_pc (gdbarch, ft32_breakpoint::kind_from_pc);
+  set_gdbarch_sw_breakpoint_from_kind (gdbarch, ft32_breakpoint::bp_from_kind);
   set_gdbarch_frame_align (gdbarch, ft32_frame_align);
 
   frame_base_set_default (gdbarch, &ft32_frame_base);

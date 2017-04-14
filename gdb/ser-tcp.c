@@ -1,6 +1,6 @@
 /* Serial interface for raw TCP connections on Un*x like systems.
 
-   Copyright (C) 1992-2015 Free Software Foundation, Inc.
+   Copyright (C) 1992-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -54,6 +54,7 @@
 
 #include <signal.h>
 #include "gdb_select.h"
+#include <algorithm>
 
 #ifndef HAVE_SOCKLEN_T
 typedef int socklen_t;
@@ -155,7 +156,8 @@ wait_for_connect (struct serial *scb, unsigned int *polls)
 int
 net_open (struct serial *scb, const char *name)
 {
-  char *port_str, hostname[100];
+  char hostname[100];
+  const char *port_str;
   int n, port, tmp;
   int use_udp;
   struct hostent *hostent;
@@ -182,7 +184,7 @@ net_open (struct serial *scb, const char *name)
     error (_("net_open: No colon in host name!"));  /* Shouldn't ever
 						       happen.  */
 
-  tmp = min (port_str - name, (int) sizeof hostname - 1);
+  tmp = std::min (port_str - name, (ptrdiff_t) sizeof hostname - 1);
   strncpy (hostname, name, tmp);	/* Don't want colon.  */
   hostname[tmp] = '\000';	/* Tie off host name.  */
   port = atoi (port_str + 1);
@@ -279,10 +281,10 @@ net_open (struct serial *scb, const char *name)
 
     len = sizeof (err);
     /* On Windows, the fourth parameter to getsockopt is a "char *";
-       on UNIX systems it is generally "void *".  The cast to "void *"
-       is OK everywhere, since in C "void *" can be implicitly
-       converted to any pointer type.  */
-    res = getsockopt (scb->fd, SOL_SOCKET, SO_ERROR, (void *) &err, &len);
+       on UNIX systems it is generally "void *".  The cast to "char *"
+       is OK everywhere, since in C++ any data pointer type can be
+       implicitly converted to "void *".  */
+    res = getsockopt (scb->fd, SOL_SOCKET, SO_ERROR, (char *) &err, &len);
     if (res < 0 || err)
       {
 	/* Maybe the target still isn't ready to accept the connection.  */
@@ -341,13 +343,17 @@ net_read_prim (struct serial *scb, size_t count)
   /* Need to cast to silence -Wpointer-sign on MinGW, as Winsock's
      'recv' takes 'char *' as second argument, while 'scb->buf' is
      'unsigned char *'.  */
-  return recv (scb->fd, (void *) scb->buf, count, 0);
+  return recv (scb->fd, (char *) scb->buf, count, 0);
 }
 
 int
 net_write_prim (struct serial *scb, const void *buf, size_t count)
 {
-  return send (scb->fd, buf, count, 0);
+  /* On Windows, the second parameter to send is a "const char *"; on
+     UNIX systems it is generally "const void *".  The cast to "const
+     char *" is OK everywhere, since in C++ any data pointer type can
+     be implicitly converted to "const void *".  */
+  return send (scb->fd, (const char *) buf, count, 0);
 }
 
 int

@@ -1,6 +1,6 @@
 /* Branch trace support for GDB, the GNU debugger.
 
-   Copyright (C) 2013-2015 Free Software Foundation, Inc.
+   Copyright (C) 2013-2017 Free Software Foundation, Inc.
 
    Contributed by Intel Corp. <markus.t.metzger@intel.com>.
 
@@ -60,7 +60,7 @@ enum btrace_format
      Actually, the format is a sequence of blocks derived from BTS.  */
   BTRACE_FORMAT_BTS,
 
-  /* Branch trace is in Intel(R) Processor Trace format.  */
+  /* Branch trace is in Intel Processor Trace format.  */
   BTRACE_FORMAT_PT
 };
 
@@ -103,7 +103,7 @@ struct btrace_config_bts
   unsigned int size;
 };
 
-/* An Intel(R) Processor Trace configuration.  */
+/* An Intel Processor Trace configuration.  */
 
 struct btrace_config_pt
 {
@@ -129,7 +129,7 @@ struct btrace_config
   /* The BTS format configuration.  */
   struct btrace_config_bts bts;
 
-  /* The Intel(R) Processor Trace format configuration.  */
+  /* The Intel Processor Trace format configuration.  */
   struct btrace_config_pt pt;
 };
 
@@ -148,7 +148,7 @@ struct btrace_data_pt_config
   struct btrace_cpu cpu;
 };
 
-/* Branch trace in Intel(R) Processor Trace format.  */
+/* Branch trace in Intel Processor Trace format.  */
 struct btrace_data_pt
 {
   /* Some configuration information to go with the data.  */
@@ -213,6 +213,9 @@ enum btrace_error
 
 /* Return a string representation of FORMAT.  */
 extern const char *btrace_format_string (enum btrace_format format);
+
+/* Return an abbreviation string representation of FORMAT.  */
+extern const char *btrace_format_short_string (enum btrace_format format);
 
 /* Initialize DATA.  */
 extern void btrace_data_init (struct btrace_data *data);

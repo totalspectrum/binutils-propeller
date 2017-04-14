@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script
 dnl
-dnl   Copyright (C) 2012-2015 Free Software Foundation, Inc.
+dnl   Copyright (C) 2012-2017 Free Software Foundation, Inc.
 dnl
 dnl This file is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
@@ -143,6 +143,29 @@ case "${got_handling}" in
   *)  AC_MSG_ERROR(bad value ${got_handling} for --enable-got option) ;;
 esac
 
+# PR gas/19109
+# Decide the default method for compressing debug sections.
+ac_default_compressed_debug_sections=unset
+# Provide a configure time option to override our default.
+AC_ARG_ENABLE(compressed_debug_sections,
+	      AS_HELP_STRING([--enable-compressed-debug-sections={all,ld,none}],
+	      [compress debug sections by default])],
+[case ,"${enableval}", in
+  ,yes, | ,all, | *,ld,*) ac_default_compressed_debug_sections=yes ;;
+  ,no, | ,none,)  ac_default_compressed_debug_sections=no ;;
+esac])dnl
+
+# Decide if -z relro should be enabled in ELF linker by default.
+ac_default_ld_z_relro=unset
+# Provide a configure time option to override our default.
+AC_ARG_ENABLE(relro,
+	      AS_HELP_STRING([--enable-relro],
+	      [enable -z relro in ELF linker by default]),
+[case "${enableval}" in
+  yes)  ac_default_ld_z_relro=1 ;;
+  no)  ac_default_ld_z_relro=0 ;;
+esac])dnl
+
 AM_BINUTILS_WARNINGS
 
 AM_LC_MESSAGES
@@ -167,7 +190,7 @@ fi
 
 # host-specific stuff:
 
-ALL_LINGUAS="fr sv tr es da vi zh_CN zh_TW ga fi id bg it uk"
+ALL_LINGUAS="fr sv tr es da vi zh_CN zh_TW ga fi id bg it uk sr"
 ZW_GNU_GETTEXT_SISTER_DIR
 AM_PO_SUBDIRS
 
@@ -183,10 +206,6 @@ ACX_PROG_CMP_IGNORE_INITIAL
 . ${srcdir}/configure.host
 
 AC_SUBST(HDEFINES)
-AC_SUBST(HOSTING_CRT0)
-AC_SUBST(HOSTING_SCRT0)
-AC_SUBST(HOSTING_LIBS)
-AC_SUBST(HOSTING_SLIBS)
 AC_SUBST(NATIVE_LIB_DIRS)
 
 AC_CHECK_HEADERS(string.h strings.h stdlib.h unistd.h elf-hints.h limits.h locale.h sys/param.h)
@@ -203,23 +222,11 @@ AC_SEARCH_LIBS([dlopen], [dl])
 AM_CONDITIONAL([ENABLE_PLUGINS], [test x$plugins = xyes])
 
 AC_ARG_ENABLE(initfini-array,
-	[  --enable-initfini-array	use .init_array/.fini_array sections],
-	[], [
-AC_CACHE_CHECK(for .preinit_array/.init_array/.fini_array support,
-		 gcc_cv_initfini_array, [dnl
-  if test "x${build}" = "x${target}" ; then
-    AC_RUN_IFELSE([AC_LANG_SOURCE([
-static int x = -1;
-int main (void) { return x; }
-int foo (void) { x = 0; }
-int (*fp) (void) __attribute__ ((section (".init_array"))) = foo;])],
-	     [gcc_cv_initfini_array=yes], [gcc_cv_initfini_array=no],
-	     [gcc_cv_initfini_array=no])
-   else
-     gcc_cv_initfini_array=no
-   fi])
-  enable_initfini_array=$gcc_cv_initfini_array
-])
+[  --disable-initfini-array do not use .init_array/.fini_array sections],
+[case "${enableval}" in
+ yes|no) ;;
+ *) AC_MSG_ERROR([invalid --enable-initfini-array argument]) ;;
+ esac], [enable_initfini_array=yes])
 AC_SUBST(enable_initfini_array)
 if test $enable_initfini_array = yes; then
   AC_DEFINE(HAVE_INITFINI_ARRAY, 1,
@@ -371,6 +378,17 @@ do
 
   fi
 done
+
+if test x$ac_default_compressed_debug_sections = xyes ; then
+  AC_DEFINE(DEFAULT_FLAG_COMPRESS_DEBUG, 1, [Define if you want compressed debug sections by default.])
+fi
+
+if test "${ac_default_ld_z_relro}" = unset; then
+  ac_default_ld_z_relro=0
+fi
+AC_DEFINE_UNQUOTED(DEFAULT_LD_Z_RELRO,
+  $ac_default_ld_z_relro,
+  [Define to 1 if you want to enable -z relro in ELF linker by default.])
 
 AC_SUBST(elf_list_options)
 AC_SUBST(elf_shlib_list_options)

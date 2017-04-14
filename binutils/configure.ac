@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl
-dnl   Copyright (C) 2012-2015 Free Software Foundation, Inc.
+dnl   Copyright (C) 2012-2017 Free Software Foundation, Inc.
 dnl
 dnl This file is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
@@ -89,7 +89,7 @@ fi
 AC_PROG_YACC
 AM_PROG_LEX
 
-ALL_LINGUAS="bg da es fi fr id it ja ro ru rw sk sv tr uk vi zh_CN zh_TW hr"
+ALL_LINGUAS="bg da es fi fr id it ja ro ru rw sk sv tr uk vi zh_CN zh_TW hr ca"
 ZW_GNU_GETTEXT_SISTER_DIR
 AM_PO_SUBDIRS
 
@@ -198,7 +198,7 @@ if test $bu_cv_header_utime_h = yes; then
   AC_DEFINE(HAVE_GOOD_UTIME_H, 1, [Does <utime.h> define struct utimbuf?])
 fi
 
-AC_CHECK_DECLS([environ, fprintf, getc_unlocked, getenv,
+AC_CHECK_DECLS([asprintf, environ, fprintf, getc_unlocked, getenv,
 		sbrk, snprintf, stpcpy, strnlen, strstr, vsnprintf])
 
 # Link in zlib if we can.  This allows us to read compressed debug

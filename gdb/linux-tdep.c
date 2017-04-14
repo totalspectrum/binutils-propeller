@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux, architecture independent.
 
-   Copyright (C) 2009-2015 Free Software Foundation, Inc.
+   Copyright (C) 2009-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -37,6 +37,7 @@
 #include "infcall.h"
 #include "gdbcmd.h"
 #include "gdb_regex.h"
+#include "common/enum-flags.h"
 
 #include <ctype.h>
 
@@ -46,7 +47,7 @@
    Documentation/filesystems/proc.txt, inside the Linux kernel
    tree.  */
 
-enum filterflags
+enum filter_flag
   {
     COREFILTER_ANON_PRIVATE = 1 << 0,
     COREFILTER_ANON_SHARED = 1 << 1,
@@ -56,6 +57,7 @@ enum filterflags
     COREFILTER_HUGETLB_PRIVATE = 1 << 5,
     COREFILTER_HUGETLB_SHARED = 1 << 6,
   };
+DEF_ENUM_FLAGS_TYPE (enum filter_flag, filter_flags);
 
 /* This struct is used to map flags found in the "VmFlags:" field (in
    the /proc/<PID>/smaps file).  */
@@ -241,14 +243,14 @@ get_linux_inferior_data (void)
   return info;
 }
 
-/* This function is suitable for architectures that don't
-   extend/override the standard siginfo structure.  */
+/* See linux-tdep.h.  */
 
-static struct type *
-linux_get_siginfo_type (struct gdbarch *gdbarch)
+struct type *
+linux_get_siginfo_type_with_fields (struct gdbarch *gdbarch,
+				    linux_siginfo_extra_fields extra_fields)
 {
   struct linux_gdbarch_data *linux_gdbarch_data;
-  struct type *int_type, *uint_type, *long_type, *void_ptr_type;
+  struct type *int_type, *uint_type, *long_type, *void_ptr_type, *short_type;
   struct type *uid_type, *pid_type;
   struct type *sigval_type, *clock_type;
   struct type *siginfo_type, *sifields_type;
@@ -264,6 +266,8 @@ linux_get_siginfo_type (struct gdbarch *gdbarch)
 				 1, "unsigned int");
   long_type = arch_integer_type (gdbarch, gdbarch_long_bit (gdbarch),
 				 0, "long");
+  short_type = arch_integer_type (gdbarch, gdbarch_long_bit (gdbarch),
+				 0, "short");
   void_ptr_type = lookup_pointer_type (builtin_type (gdbarch)->builtin_void);
 
   /* sival_t */
@@ -339,6 +343,18 @@ linux_get_siginfo_type (struct gdbarch *gdbarch)
   /* _sigfault */
   type = arch_composite_type (gdbarch, NULL, TYPE_CODE_STRUCT);
   append_composite_type_field (type, "si_addr", void_ptr_type);
+
+  /* Additional bound fields for _sigfault in case they were requested.  */
+  if ((extra_fields & LINUX_SIGINFO_FIELD_ADDR_BND) != 0)
+    {
+      struct type *sigfault_bnd_fields;
+
+      append_composite_type_field (type, "_addr_lsb", short_type);
+      sigfault_bnd_fields = arch_composite_type (gdbarch, NULL, TYPE_CODE_STRUCT);
+      append_composite_type_field (sigfault_bnd_fields, "_lower", void_ptr_type);
+      append_composite_type_field (sigfault_bnd_fields, "_upper", void_ptr_type);
+      append_composite_type_field (type, "_addr_bnd", sigfault_bnd_fields);
+    }
   append_composite_type_field (sifields_type, "_sigfault", type);
 
   /* _sigpoll */
@@ -362,6 +378,15 @@ linux_get_siginfo_type (struct gdbarch *gdbarch)
   return siginfo_type;
 }
 
+/* This function is suitable for architectures that don't
+   extend/override the standard siginfo structure.  */
+
+static struct type *
+linux_get_siginfo_type (struct gdbarch *gdbarch)
+{
+  return linux_get_siginfo_type_with_fields (gdbarch, 0);
+}
+
 /* Return true if the target is running on uClinux instead of normal
    Linux kernel.  */
 
@@ -382,7 +407,7 @@ linux_has_shared_address_space (struct gdbarch *gdbarch)
 
 /* This is how we want PTIDs from core files to be printed.  */
 
-static char *
+static const char *
 linux_core_pid_to_str (struct gdbarch *gdbarch, ptid_t ptid)
 {
   static char buf[80];
@@ -599,7 +624,7 @@ mapping_is_anonymous_p (const char *filename)
      This should work OK enough, however.  */
 
 static int
-dump_mapping_p (enum filterflags filterflags, const struct smaps_vmflags *v,
+dump_mapping_p (filter_flags filterflags, const struct smaps_vmflags *v,
 		int maybe_private_p, int mapping_anon_p, int mapping_file_p,
 		const char *filename)
 {
@@ -1120,10 +1145,10 @@ linux_find_memory_regions_full (struct gdbarch *gdbarch,
   /* Default dump behavior of coredump_filter (0x33), according to
      Documentation/filesystems/proc.txt from the Linux kernel
      tree.  */
-  enum filterflags filterflags = (COREFILTER_ANON_PRIVATE
-				  | COREFILTER_ANON_SHARED
-				  | COREFILTER_ELF_HEADERS
-				  | COREFILTER_HUGETLB_PRIVATE);
+  filter_flags filterflags = (COREFILTER_ANON_PRIVATE
+			      | COREFILTER_ANON_SHARED
+			      | COREFILTER_ELF_HEADERS
+			      | COREFILTER_HUGETLB_PRIVATE);
 
   /* We need to know the real target PID to access /proc.  */
   if (current_inferior ()->fake_pid_p)
@@ -1139,7 +1164,10 @@ linux_find_memory_regions_full (struct gdbarch *gdbarch,
 							coredumpfilter_name);
       if (coredumpfilterdata != NULL)
 	{
-	  sscanf (coredumpfilterdata, "%x", &filterflags);
+	  unsigned int flags;
+
+	  sscanf (coredumpfilterdata, "%x", &flags);
+	  filterflags = (enum filter_flag) flags;
 	  xfree (coredumpfilterdata);
 	}
     }
@@ -1340,18 +1368,6 @@ find_signalled_thread (struct thread_info *info, void *data)
     return 1;
 
   return 0;
-}
-
-static enum gdb_signal
-find_stop_signal (void)
-{
-  struct thread_info *info =
-    iterate_over_threads (find_signalled_thread, NULL);
-
-  if (info)
-    return info->suspend.stop_signal;
-  else
-    return GDB_SIGNAL_0;
 }
 
 /* Generate corefile notes for SPU contexts.  */
@@ -1558,7 +1574,8 @@ linux_collect_regset_section_cb (const char *sect_name, int size,
 				 const char *human_name, void *cb_data)
 {
   char *buf;
-  struct linux_collect_regset_section_cb_data *data = cb_data;
+  struct linux_collect_regset_section_cb_data *data
+    = (struct linux_collect_regset_section_cb_data *) cb_data;
 
   if (data->abort_iteration)
     return;
@@ -1655,62 +1672,49 @@ linux_get_siginfo_data (struct gdbarch *gdbarch, LONGEST *size)
 struct linux_corefile_thread_data
 {
   struct gdbarch *gdbarch;
-  int pid;
   bfd *obfd;
   char *note_data;
   int *note_size;
   enum gdb_signal stop_signal;
 };
 
-/* Called by gdbthread.c once per thread.  Records the thread's
-   register state for the corefile note section.  */
+/* Records the thread's register state for the corefile note
+   section.  */
 
-static int
-linux_corefile_thread_callback (struct thread_info *info, void *data)
+static void
+linux_corefile_thread (struct thread_info *info,
+		       struct linux_corefile_thread_data *args)
 {
-  struct linux_corefile_thread_data *args
-    = (struct linux_corefile_thread_data *) data;
+  struct cleanup *old_chain;
+  struct regcache *regcache;
+  gdb_byte *siginfo_data;
+  LONGEST siginfo_size = 0;
 
-  /* It can be current thread
-     which cannot be removed by update_thread_list.  */
-  if (info->state == THREAD_EXITED)
-    return 0;
+  regcache = get_thread_arch_regcache (info->ptid, args->gdbarch);
 
-  if (ptid_get_pid (info->ptid) == args->pid)
-    {
-      struct cleanup *old_chain;
-      struct regcache *regcache;
-      gdb_byte *siginfo_data;
-      LONGEST siginfo_size = 0;
+  old_chain = save_inferior_ptid ();
+  inferior_ptid = info->ptid;
+  target_fetch_registers (regcache, -1);
+  siginfo_data = linux_get_siginfo_data (args->gdbarch, &siginfo_size);
+  do_cleanups (old_chain);
 
-      regcache = get_thread_arch_regcache (info->ptid, args->gdbarch);
+  old_chain = make_cleanup (xfree, siginfo_data);
 
-      old_chain = save_inferior_ptid ();
-      inferior_ptid = info->ptid;
-      target_fetch_registers (regcache, -1);
-      siginfo_data = linux_get_siginfo_data (args->gdbarch, &siginfo_size);
-      do_cleanups (old_chain);
+  args->note_data = linux_collect_thread_registers
+    (regcache, info->ptid, args->obfd, args->note_data,
+     args->note_size, args->stop_signal);
 
-      old_chain = make_cleanup (xfree, siginfo_data);
+  /* Don't return anything if we got no register information above,
+     such a core file is useless.  */
+  if (args->note_data != NULL)
+    if (siginfo_data != NULL)
+      args->note_data = elfcore_write_note (args->obfd,
+					    args->note_data,
+					    args->note_size,
+					    "CORE", NT_SIGINFO,
+					    siginfo_data, siginfo_size);
 
-      args->note_data = linux_collect_thread_registers
-	(regcache, info->ptid, args->obfd, args->note_data,
-	 args->note_size, args->stop_signal);
-
-      /* Don't return anything if we got no register information above,
-         such a core file is useless.  */
-      if (args->note_data != NULL)
-	if (siginfo_data != NULL)
-	  args->note_data = elfcore_write_note (args->obfd,
-						args->note_data,
-						args->note_size,
-						"CORE", NT_SIGINFO,
-						siginfo_data, siginfo_size);
-
-      do_cleanups (old_chain);
-    }
-
-  return !args->note_data;
+  do_cleanups (old_chain);
 }
 
 /* Fill the PRPSINFO structure with information about the process being
@@ -1753,7 +1757,6 @@ linux_fill_prpsinfo (struct elf_internal_linux_prpsinfo *p)
   int n_fields = 0;
   /* Cleanups.  */
   struct cleanup *c;
-  int i;
 
   gdb_assert (p != NULL);
 
@@ -1785,7 +1788,7 @@ linux_fill_prpsinfo (struct elf_internal_linux_prpsinfo *p)
 
   psargs = xstrdup (fname);
   if (infargs != NULL)
-    psargs = reconcat (psargs, psargs, " ", infargs, NULL);
+    psargs = reconcat (psargs, psargs, " ", infargs, (char *) NULL);
 
   make_cleanup (xfree, psargs);
 
@@ -1926,6 +1929,7 @@ linux_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
   char *note_data = NULL;
   gdb_byte *auxv;
   int auxv_len;
+  struct thread_info *curr_thr, *signalled_thr, *thr;
 
   if (! gdbarch_iterate_over_regset_sections_p (gdbarch))
     return NULL;
@@ -1962,13 +1966,37 @@ linux_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
     }
   END_CATCH
 
+  /* Like the kernel, prefer dumping the signalled thread first.
+     "First thread" is what tools use to infer the signalled thread.
+     In case there's more than one signalled thread, prefer the
+     current thread, if it is signalled.  */
+  curr_thr = inferior_thread ();
+  if (curr_thr->suspend.stop_signal != GDB_SIGNAL_0)
+    signalled_thr = curr_thr;
+  else
+    {
+      signalled_thr = iterate_over_threads (find_signalled_thread, NULL);
+      if (signalled_thr == NULL)
+	signalled_thr = curr_thr;
+    }
+
   thread_args.gdbarch = gdbarch;
-  thread_args.pid = ptid_get_pid (inferior_ptid);
   thread_args.obfd = obfd;
   thread_args.note_data = note_data;
   thread_args.note_size = note_size;
-  thread_args.stop_signal = find_stop_signal ();
-  iterate_over_threads (linux_corefile_thread_callback, &thread_args);
+  thread_args.stop_signal = signalled_thr->suspend.stop_signal;
+
+  linux_corefile_thread (signalled_thr, &thread_args);
+  ALL_NON_EXITED_THREADS (thr)
+    {
+      if (thr == signalled_thr)
+	continue;
+      if (ptid_get_pid (thr->ptid) != ptid_get_pid (inferior_ptid))
+	continue;
+
+      linux_corefile_thread (thr, &thread_args);
+    }
+
   note_data = thread_args.note_data;
   if (!note_data)
     return NULL;
@@ -2249,39 +2277,95 @@ linux_gdb_signal_to_target (struct gdbarch *gdbarch,
   return -1;
 }
 
-/* Rummage through mappings to find a mapping's size.  */
-
-static int
-find_mapping_size (CORE_ADDR vaddr, unsigned long size,
-		   int read, int write, int exec, int modified,
-		   void *data)
-{
-  struct mem_range *range = (struct mem_range *) data;
-
-  if (vaddr == range->start)
-    {
-      range->length = size;
-      return 1;
-    }
-  return 0;
-}
-
 /* Helper for linux_vsyscall_range that does the real work of finding
    the vsyscall's address range.  */
 
 static int
 linux_vsyscall_range_raw (struct gdbarch *gdbarch, struct mem_range *range)
 {
+  char filename[100];
+  long pid;
+  char *data;
+
   if (target_auxv_search (&current_target, AT_SYSINFO_EHDR, &range->start) <= 0)
     return 0;
 
-  /* This is installed by linux_init_abi below, so should always be
-     available.  */
-  gdb_assert (gdbarch_find_memory_regions_p (target_gdbarch ()));
+  /* It doesn't make sense to access the host's /proc when debugging a
+     core file.  Instead, look for the PT_LOAD segment that matches
+     the vDSO.  */
+  if (!target_has_execution)
+    {
+      Elf_Internal_Phdr *phdrs;
+      long phdrs_size;
+      int num_phdrs, i;
 
-  range->length = 0;
-  gdbarch_find_memory_regions (gdbarch, find_mapping_size, range);
-  return 1;
+      phdrs_size = bfd_get_elf_phdr_upper_bound (core_bfd);
+      if (phdrs_size == -1)
+	return 0;
+
+      phdrs = (Elf_Internal_Phdr *) alloca (phdrs_size);
+      num_phdrs = bfd_get_elf_phdrs (core_bfd, phdrs);
+      if (num_phdrs == -1)
+	return 0;
+
+      for (i = 0; i < num_phdrs; i++)
+	if (phdrs[i].p_type == PT_LOAD
+	    && phdrs[i].p_vaddr == range->start)
+	  {
+	    range->length = phdrs[i].p_memsz;
+	    return 1;
+	  }
+
+      return 0;
+    }
+
+  /* We need to know the real target PID to access /proc.  */
+  if (current_inferior ()->fake_pid_p)
+    return 0;
+
+  pid = current_inferior ()->pid;
+
+  /* Note that reading /proc/PID/task/PID/maps (1) is much faster than
+     reading /proc/PID/maps (2).  The later identifies thread stacks
+     in the output, which requires scanning every thread in the thread
+     group to check whether a VMA is actually a thread's stack.  With
+     Linux 4.4 on an Intel i7-4810MQ @ 2.80GHz, with an inferior with
+     a few thousand threads, (1) takes a few miliseconds, while (2)
+     takes several seconds.  Also note that "smaps", what we read for
+     determining core dump mappings, is even slower than "maps".  */
+  xsnprintf (filename, sizeof filename, "/proc/%ld/task/%ld/maps", pid, pid);
+  data = target_fileio_read_stralloc (NULL, filename);
+  if (data != NULL)
+    {
+      struct cleanup *cleanup = make_cleanup (xfree, data);
+      char *line;
+      char *saveptr = NULL;
+
+      for (line = strtok_r (data, "\n", &saveptr);
+	   line != NULL;
+	   line = strtok_r (NULL, "\n", &saveptr))
+	{
+	  ULONGEST addr, endaddr;
+	  const char *p = line;
+
+	  addr = strtoulst (p, &p, 16);
+	  if (addr == range->start)
+	    {
+	      if (*p == '-')
+		p++;
+	      endaddr = strtoulst (p, &p, 16);
+	      range->length = endaddr - addr;
+	      do_cleanups (cleanup);
+	      return 1;
+	    }
+	}
+
+      do_cleanups (cleanup);
+    }
+  else
+    warning (_("unable to open /proc file '%s'"), filename);
+
+  return 0;
 }
 
 /* Implementation of the "vsyscall_range" gdbarch hook.  Handles
@@ -2397,7 +2481,8 @@ linux_displaced_step_location (struct gdbarch *gdbarch)
      location.  The auxiliary vector gets us the PowerPC-side entry
      point address instead.  */
   if (target_auxv_search (&current_target, AT_ENTRY, &addr) <= 0)
-    error (_("Cannot find AT_ENTRY auxiliary vector entry."));
+    throw_error (NOT_SUPPORTED_ERROR,
+		 _("Cannot find AT_ENTRY auxiliary vector entry."));
 
   /* Make certain that the address points at real code, and not a
      function descriptor.  */

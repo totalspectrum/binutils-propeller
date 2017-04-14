@@ -3,7 +3,7 @@
 
 /* Dynamic architecture support for GDB, the GNU debugger.
 
-   Copyright (C) 1998-2015 Free Software Foundation, Inc.
+   Copyright (C) 1998-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -11,12 +11,12 @@
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 3 of the License, or
    (at your option) any later version.
-  
+
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
    GNU General Public License for more details.
-  
+
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
@@ -36,6 +36,7 @@
 #define GDBARCH_H
 
 #include "frame.h"
+#include "dis-asm.h"
 
 struct floatformat;
 struct ui_file;
@@ -54,7 +55,6 @@ struct target_desc;
 struct objfile;
 struct symbol;
 struct displaced_step_closure;
-struct core_regset_section;
 struct syscall;
 struct agent_expr;
 struct axs_value;
@@ -64,6 +64,8 @@ struct ravenscar_arch_ops;
 struct elf_internal_linux_prpsinfo;
 struct mem_range;
 struct syscalls_info;
+struct thread_info;
+struct ui_out;
 
 #include "regcache.h"
 
@@ -186,6 +188,25 @@ extern void set_gdbarch_long_double_bit (struct gdbarch *gdbarch, int long_doubl
 extern const struct floatformat ** gdbarch_long_double_format (struct gdbarch *gdbarch);
 extern void set_gdbarch_long_double_format (struct gdbarch *gdbarch, const struct floatformat ** long_double_format);
 
+/* The ABI default bit-size for "wchar_t".  wchar_t is a built-in type
+   starting with C++11. */
+
+extern int gdbarch_wchar_bit (struct gdbarch *gdbarch);
+extern void set_gdbarch_wchar_bit (struct gdbarch *gdbarch, int wchar_bit);
+
+/* One if `wchar_t' is signed, zero if unsigned. */
+
+extern int gdbarch_wchar_signed (struct gdbarch *gdbarch);
+extern void set_gdbarch_wchar_signed (struct gdbarch *gdbarch, int wchar_signed);
+
+/* Returns the floating-point format to be used for values of length LENGTH.
+   NAME, if non-NULL, is the type name, which may be used to distinguish
+   different target formats of the same length. */
+
+typedef const struct floatformat ** (gdbarch_floatformat_for_type_ftype) (struct gdbarch *gdbarch, const char *name, int length);
+extern const struct floatformat ** gdbarch_floatformat_for_type (struct gdbarch *gdbarch, const char *name, int length);
+extern void set_gdbarch_floatformat_for_type (struct gdbarch *gdbarch, gdbarch_floatformat_for_type_ftype *floatformat_for_type);
+
 /* For most targets, a pointer on the target and its representation as an
    address in GDB have the same size and "look the same".  For such a
    target, you need only set gdbarch_ptr_bit and gdbarch_addr_bit
@@ -300,6 +321,17 @@ typedef int (gdbarch_ax_pseudo_register_push_stack_ftype) (struct gdbarch *gdbar
 extern int gdbarch_ax_pseudo_register_push_stack (struct gdbarch *gdbarch, struct agent_expr *ax, int reg);
 extern void set_gdbarch_ax_pseudo_register_push_stack (struct gdbarch *gdbarch, gdbarch_ax_pseudo_register_push_stack_ftype *ax_pseudo_register_push_stack);
 
+/* Some targets/architectures can do extra processing/display of
+   segmentation faults.  E.g., Intel MPX boundary faults.
+   Call the architecture dependent function to handle the fault.
+   UIOUT is the output stream where the handler will place information. */
+
+extern int gdbarch_handle_segmentation_fault_p (struct gdbarch *gdbarch);
+
+typedef void (gdbarch_handle_segmentation_fault_ftype) (struct gdbarch *gdbarch, struct ui_out *uiout);
+extern void gdbarch_handle_segmentation_fault (struct gdbarch *gdbarch, struct ui_out *uiout);
+extern void set_gdbarch_handle_segmentation_fault (struct gdbarch *gdbarch, gdbarch_handle_segmentation_fault_ftype *handle_segmentation_fault);
+
 /* GDB's standard (or well known) register numbers.  These can map onto
    a real register or a pseudo (computed) register or not be defined at
    all (-1).
@@ -335,7 +367,8 @@ typedef int (gdbarch_sdb_reg_to_regnum_ftype) (struct gdbarch *gdbarch, int sdb_
 extern int gdbarch_sdb_reg_to_regnum (struct gdbarch *gdbarch, int sdb_regnr);
 extern void set_gdbarch_sdb_reg_to_regnum (struct gdbarch *gdbarch, gdbarch_sdb_reg_to_regnum_ftype *sdb_reg_to_regnum);
 
-/* Provide a default mapping from a DWARF2 register number to a gdb REGNUM. */
+/* Provide a default mapping from a DWARF2 register number to a gdb REGNUM.
+   Return -1 for bad REGNUM.  Note: Several targets get this wrong. */
 
 typedef int (gdbarch_dwarf2_reg_to_regnum_ftype) (struct gdbarch *gdbarch, int dwarf2_regnr);
 extern int gdbarch_dwarf2_reg_to_regnum (struct gdbarch *gdbarch, int dwarf2_regnr);
@@ -381,6 +414,12 @@ extern int gdbarch_push_dummy_code_p (struct gdbarch *gdbarch);
 typedef CORE_ADDR (gdbarch_push_dummy_code_ftype) (struct gdbarch *gdbarch, CORE_ADDR sp, CORE_ADDR funaddr, struct value **args, int nargs, struct type *value_type, CORE_ADDR *real_pc, CORE_ADDR *bp_addr, struct regcache *regcache);
 extern CORE_ADDR gdbarch_push_dummy_code (struct gdbarch *gdbarch, CORE_ADDR sp, CORE_ADDR funaddr, struct value **args, int nargs, struct type *value_type, CORE_ADDR *real_pc, CORE_ADDR *bp_addr, struct regcache *regcache);
 extern void set_gdbarch_push_dummy_code (struct gdbarch *gdbarch, gdbarch_push_dummy_code_ftype *push_dummy_code);
+
+/* Return true if the code of FRAME is writable. */
+
+typedef int (gdbarch_code_of_frame_writable_ftype) (struct gdbarch *gdbarch, struct frame_info *frame);
+extern int gdbarch_code_of_frame_writable (struct gdbarch *gdbarch, struct frame_info *frame);
+extern void set_gdbarch_code_of_frame_writable (struct gdbarch *gdbarch, gdbarch_code_of_frame_writable_ftype *code_of_frame_writable);
 
 typedef void (gdbarch_print_registers_info_ftype) (struct gdbarch *gdbarch, struct ui_file *file, struct frame_info *frame, int regnum, int all);
 extern void gdbarch_print_registers_info (struct gdbarch *gdbarch, struct ui_file *file, struct frame_info *frame, int regnum, int all);
@@ -523,13 +562,27 @@ typedef const gdb_byte * (gdbarch_breakpoint_from_pc_ftype) (struct gdbarch *gdb
 extern const gdb_byte * gdbarch_breakpoint_from_pc (struct gdbarch *gdbarch, CORE_ADDR *pcptr, int *lenptr);
 extern void set_gdbarch_breakpoint_from_pc (struct gdbarch *gdbarch, gdbarch_breakpoint_from_pc_ftype *breakpoint_from_pc);
 
-/* Return the adjusted address and kind to use for Z0/Z1 packets.
-   KIND is usually the memory length of the breakpoint, but may have a
-   different target-specific meaning. */
+/* Return the breakpoint kind for this target based on *PCPTR. */
 
-typedef void (gdbarch_remote_breakpoint_from_pc_ftype) (struct gdbarch *gdbarch, CORE_ADDR *pcptr, int *kindptr);
-extern void gdbarch_remote_breakpoint_from_pc (struct gdbarch *gdbarch, CORE_ADDR *pcptr, int *kindptr);
-extern void set_gdbarch_remote_breakpoint_from_pc (struct gdbarch *gdbarch, gdbarch_remote_breakpoint_from_pc_ftype *remote_breakpoint_from_pc);
+typedef int (gdbarch_breakpoint_kind_from_pc_ftype) (struct gdbarch *gdbarch, CORE_ADDR *pcptr);
+extern int gdbarch_breakpoint_kind_from_pc (struct gdbarch *gdbarch, CORE_ADDR *pcptr);
+extern void set_gdbarch_breakpoint_kind_from_pc (struct gdbarch *gdbarch, gdbarch_breakpoint_kind_from_pc_ftype *breakpoint_kind_from_pc);
+
+/* Return the software breakpoint from KIND.  KIND can have target
+   specific meaning like the Z0 kind parameter.
+   SIZE is set to the software breakpoint's length in memory. */
+
+typedef const gdb_byte * (gdbarch_sw_breakpoint_from_kind_ftype) (struct gdbarch *gdbarch, int kind, int *size);
+extern const gdb_byte * gdbarch_sw_breakpoint_from_kind (struct gdbarch *gdbarch, int kind, int *size);
+extern void set_gdbarch_sw_breakpoint_from_kind (struct gdbarch *gdbarch, gdbarch_sw_breakpoint_from_kind_ftype *sw_breakpoint_from_kind);
+
+/* Return the breakpoint kind for this target based on the current
+   processor state (e.g. the current instruction mode on ARM) and the
+   *PCPTR.  In default, it is gdbarch->breakpoint_kind_from_pc. */
+
+typedef int (gdbarch_breakpoint_kind_from_current_state_ftype) (struct gdbarch *gdbarch, struct regcache *regcache, CORE_ADDR *pcptr);
+extern int gdbarch_breakpoint_kind_from_current_state (struct gdbarch *gdbarch, struct regcache *regcache, CORE_ADDR *pcptr);
+extern void set_gdbarch_breakpoint_kind_from_current_state (struct gdbarch *gdbarch, gdbarch_breakpoint_kind_from_current_state_ftype *breakpoint_kind_from_current_state);
 
 extern int gdbarch_adjust_breakpoint_address_p (struct gdbarch *gdbarch);
 
@@ -633,20 +686,22 @@ extern void set_gdbarch_addr_bits_remove (struct gdbarch *gdbarch, gdbarch_addr_
    indicates if the target needs software single step.  An ISA method to
    implement it.
   
-   FIXME/cagney/2001-01-18: This should be replaced with something that inserts
-   breakpoints using the breakpoint system instead of blatting memory directly
-   (as with rs6000).
-  
    FIXME/cagney/2001-01-18: The logic is backwards.  It should be asking if the
    target can single step.  If not, then implement single step using breakpoints.
   
-   A return value of 1 means that the software_single_step breakpoints
-   were inserted; 0 means they were not. */
+   Return a vector of addresses on which the software single step
+   breakpoints should be inserted.  NULL means software single step is
+   not used.
+   Multiple breakpoints may be inserted for some instructions such as
+   conditional branch.  However, each implementation must always evaluate
+   the condition and only put the breakpoint at the branch destination if
+   the condition is true, so that we ensure forward progress when stepping
+   past a conditional branch to self. */
 
 extern int gdbarch_software_single_step_p (struct gdbarch *gdbarch);
 
-typedef int (gdbarch_software_single_step_ftype) (struct frame_info *frame);
-extern int gdbarch_software_single_step (struct gdbarch *gdbarch, struct frame_info *frame);
+typedef VEC (CORE_ADDR) * (gdbarch_software_single_step_ftype) (struct regcache *regcache);
+extern VEC (CORE_ADDR) * gdbarch_software_single_step (struct gdbarch *gdbarch, struct regcache *regcache);
 extern void set_gdbarch_software_single_step (struct gdbarch *gdbarch, gdbarch_software_single_step_ftype *software_single_step);
 
 /* Return non-zero if the processor is executing a delay slot and a
@@ -862,9 +917,17 @@ extern void set_gdbarch_core_xfer_shared_libraries_aix (struct gdbarch *gdbarch,
 
 extern int gdbarch_core_pid_to_str_p (struct gdbarch *gdbarch);
 
-typedef char * (gdbarch_core_pid_to_str_ftype) (struct gdbarch *gdbarch, ptid_t ptid);
-extern char * gdbarch_core_pid_to_str (struct gdbarch *gdbarch, ptid_t ptid);
+typedef const char * (gdbarch_core_pid_to_str_ftype) (struct gdbarch *gdbarch, ptid_t ptid);
+extern const char * gdbarch_core_pid_to_str (struct gdbarch *gdbarch, ptid_t ptid);
 extern void set_gdbarch_core_pid_to_str (struct gdbarch *gdbarch, gdbarch_core_pid_to_str_ftype *core_pid_to_str);
+
+/* How the core target extracts the name of a thread from a core file. */
+
+extern int gdbarch_core_thread_name_p (struct gdbarch *gdbarch);
+
+typedef const char * (gdbarch_core_thread_name_ftype) (struct gdbarch *gdbarch, struct thread_info *thr);
+extern const char * gdbarch_core_thread_name (struct gdbarch *gdbarch, struct thread_info *thr);
+extern void set_gdbarch_core_thread_name (struct gdbarch *gdbarch, gdbarch_core_thread_name_ftype *core_thread_name);
 
 /* BFD target to use when generating a core file. */
 
@@ -1318,6 +1381,15 @@ typedef int (gdbarch_fast_tracepoint_valid_at_ftype) (struct gdbarch *gdbarch, C
 extern int gdbarch_fast_tracepoint_valid_at (struct gdbarch *gdbarch, CORE_ADDR addr, char **msg);
 extern void set_gdbarch_fast_tracepoint_valid_at (struct gdbarch *gdbarch, gdbarch_fast_tracepoint_valid_at_ftype *fast_tracepoint_valid_at);
 
+/* Guess register state based on tracepoint location.  Used for tracepoints
+   where no registers have been collected, but there's only one location,
+   allowing us to guess the PC value, and perhaps some other registers.
+   On entry, regcache has all registers marked as unavailable. */
+
+typedef void (gdbarch_guess_tracepoint_registers_ftype) (struct gdbarch *gdbarch, struct regcache *regcache, CORE_ADDR addr);
+extern void gdbarch_guess_tracepoint_registers (struct gdbarch *gdbarch, struct regcache *regcache, CORE_ADDR addr);
+extern void set_gdbarch_guess_tracepoint_registers (struct gdbarch *gdbarch, gdbarch_guess_tracepoint_registers_ftype *guess_tracepoint_registers);
+
 /* Return the "auto" target charset. */
 
 typedef const char * (gdbarch_auto_charset_ftype) (void);
@@ -1427,6 +1499,13 @@ typedef int (gdbarch_auxv_parse_ftype) (struct gdbarch *gdbarch, gdb_byte **read
 extern int gdbarch_auxv_parse (struct gdbarch *gdbarch, gdb_byte **readptr, gdb_byte *endptr, CORE_ADDR *typep, CORE_ADDR *valp);
 extern void set_gdbarch_auxv_parse (struct gdbarch *gdbarch, gdbarch_auxv_parse_ftype *auxv_parse);
 
+/* Print the description of a single auxv entry described by TYPE and VAL
+   to FILE. */
+
+typedef void (gdbarch_print_auxv_entry_ftype) (struct gdbarch *gdbarch, struct ui_file *file, CORE_ADDR type, CORE_ADDR val);
+extern void gdbarch_print_auxv_entry (struct gdbarch *gdbarch, struct ui_file *file, CORE_ADDR type, CORE_ADDR val);
+extern void set_gdbarch_print_auxv_entry (struct gdbarch *gdbarch, gdbarch_print_auxv_entry_ftype *print_auxv_entry);
+
 /* Find the address range of the current inferior's vsyscall/vDSO, and
    write it to *RANGE.  If the vsyscall's length can't be determined, a
    range with zero length is returned.  Returns true if the vsyscall is
@@ -1477,6 +1556,14 @@ extern void set_gdbarch_gnu_triplet_regexp (struct gdbarch *gdbarch, gdbarch_gnu
 typedef int (gdbarch_addressable_memory_unit_size_ftype) (struct gdbarch *gdbarch);
 extern int gdbarch_addressable_memory_unit_size (struct gdbarch *gdbarch);
 extern void set_gdbarch_addressable_memory_unit_size (struct gdbarch *gdbarch, gdbarch_addressable_memory_unit_size_ftype *addressable_memory_unit_size);
+
+/* Functions for allowing a target to modify its disassembler options. */
+
+extern char ** gdbarch_disassembler_options (struct gdbarch *gdbarch);
+extern void set_gdbarch_disassembler_options (struct gdbarch *gdbarch, char ** disassembler_options);
+
+extern const disasm_options_t * gdbarch_valid_disassembler_options (struct gdbarch *gdbarch);
+extern void set_gdbarch_valid_disassembler_options (struct gdbarch *gdbarch, const disasm_options_t * valid_disassembler_options);
 
 /* Definition for an unknown syscall, used basically in error-cases.  */
 #define UNKNOWN_SYSCALL (-1)
@@ -1561,7 +1648,7 @@ struct gdbarch_info
   bfd *abfd;
 
   /* Use default: NULL (ZERO).  */
-  struct gdbarch_tdep_info *tdep_info;
+  void *tdep_info;
 
   /* Use default: GDB_OSABI_UNINITIALIZED (-1).  */
   enum gdb_osabi osabi;

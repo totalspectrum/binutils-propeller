@@ -1,5 +1,5 @@
 /* Generic target-file-type support for the BFD library.
-   Copyright (C) 1990-2015 Free Software Foundation, Inc.
+   Copyright (C) 1990-2017 Free Software Foundation, Inc.
    Written by Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -291,7 +291,7 @@ BFD_JUMP_TABLE macros.
 .  bfd_boolean (*_bfd_copy_private_bfd_data) (bfd *, bfd *);
 .  {* Called to merge BFD general private data from one object file
 .     to a common output file when linking.  *}
-.  bfd_boolean (*_bfd_merge_private_bfd_data) (bfd *, bfd *);
+.  bfd_boolean (*_bfd_merge_private_bfd_data) (bfd *, struct bfd_link_info *);
 .  {* Called to initialize BFD private section data from one object file
 .     to another.  *}
 .#define bfd_init_private_section_data(ibfd, isec, obfd, osec, link_info) \
@@ -452,6 +452,7 @@ BFD_JUMP_TABLE macros.
 .  NAME##_bfd_copy_link_hash_symbol_type, \
 .  NAME##_bfd_final_link, \
 .  NAME##_bfd_link_split_section, \
+.  NAME##_bfd_link_check_relocs, \
 .  NAME##_bfd_gc_sections, \
 .  NAME##_bfd_lookup_section_flags, \
 .  NAME##_bfd_merge_sections, \
@@ -492,6 +493,9 @@ BFD_JUMP_TABLE macros.
 .
 .  {* Should this section be split up into smaller pieces during linking.  *}
 .  bfd_boolean (*_bfd_link_split_section) (bfd *, struct bfd_section *);
+.
+.  {* Check the relocations in the bfd for validity.  *}
+.  bfd_boolean (* _bfd_link_check_relocs)(bfd *, struct bfd_link_info *);
 .
 .  {* Remove sections that are not referenced from the output.  *}
 .  bfd_boolean (*_bfd_gc_sections) (bfd *, struct bfd_link_info *);
@@ -568,7 +572,10 @@ to find an alternative output format that is suitable.
 extern const bfd_target aarch64_elf32_be_vec;
 extern const bfd_target aarch64_elf32_le_vec;
 extern const bfd_target aarch64_elf64_be_vec;
+extern const bfd_target aarch64_elf64_be_cloudabi_vec;
 extern const bfd_target aarch64_elf64_le_vec;
+extern const bfd_target aarch64_elf64_le_cloudabi_vec;
+extern const bfd_target aarch64_mach_o_vec;
 extern const bfd_target alpha_ecoff_le_vec;
 extern const bfd_target alpha_elf64_vec;
 extern const bfd_target alpha_elf64_fbsd_vec;
@@ -596,6 +603,7 @@ extern const bfd_target arm_elf32_symbian_be_vec;
 extern const bfd_target arm_elf32_symbian_le_vec;
 extern const bfd_target arm_elf32_vxworks_be_vec;
 extern const bfd_target arm_elf32_vxworks_le_vec;
+extern const bfd_target arm_mach_o_vec;
 extern const bfd_target arm_pe_be_vec;
 extern const bfd_target arm_pe_le_vec;
 extern const bfd_target arm_pe_epoc_be_vec;
@@ -792,6 +800,9 @@ extern const bfd_target powerpc_pei_vec;
 extern const bfd_target powerpc_pei_le_vec;
 extern const bfd_target powerpc_xcoff_vec;
 extern const bfd_target propeller_elf32_vec;
+extern const bfd_target pru_elf32_vec;
+extern const bfd_target riscv_elf32_vec;
+extern const bfd_target riscv_elf64_vec;
 extern const bfd_target rl78_elf32_vec;
 extern const bfd_target rs6000_xcoff64_vec;
 extern const bfd_target rs6000_xcoff64_aix_vec;
@@ -883,6 +894,8 @@ extern const bfd_target vax_aout_nbsd_vec;
 extern const bfd_target vax_elf32_vec;
 extern const bfd_target visium_elf32_vec;
 extern const bfd_target w65_coff_vec;
+extern const bfd_target wasm_vec;
+extern const bfd_target wasm32_elf32_vec;
 extern const bfd_target we32k_coff_vec;
 extern const bfd_target x86_64_coff_vec;
 extern const bfd_target x86_64_elf32_vec;
@@ -949,7 +962,10 @@ static const bfd_target * const _bfd_target_vector[] =
 	&aarch64_elf32_be_vec,
 	&aarch64_elf32_le_vec,
 	&aarch64_elf64_be_vec,
+	&aarch64_elf64_be_cloudabi_vec,
 	&aarch64_elf64_le_vec,
+	&aarch64_elf64_le_cloudabi_vec,
+	&aarch64_mach_o_vec,
 #endif
 
 #ifdef BFD64
@@ -995,6 +1011,7 @@ static const bfd_target * const _bfd_target_vector[] =
 	&arm_elf32_symbian_le_vec,
 	&arm_elf32_vxworks_be_vec,
 	&arm_elf32_vxworks_le_vec,
+	&arm_mach_o_vec,
 	&arm_pe_be_vec,
 	&arm_pe_le_vec,
 	&arm_pe_epoc_be_vec,
@@ -1292,6 +1309,12 @@ static const bfd_target * const _bfd_target_vector[] =
 	&powerpc_xcoff_vec,
 #endif
 
+	&pru_elf32_vec,
+
+#ifdef BFD64
+	&riscv_elf32_vec,
+	&riscv_elf64_vec,
+#endif
 	&rl78_elf32_vec,
 
 #ifdef BFD64
@@ -1400,6 +1423,9 @@ static const bfd_target * const _bfd_target_vector[] =
 	&visium_elf32_vec,
 
 	&w65_coff_vec,
+
+        &wasm_vec,
+        &wasm32_elf32_vec,
 
 	&we32k_coff_vec,
 
@@ -1804,29 +1830,28 @@ bfd_target_list (void)
 
 /*
 FUNCTION
-	bfd_seach_for_target
+	bfd_iterate_over_targets
 
 SYNOPSIS
-	const bfd_target *bfd_search_for_target
-	  (int (*search_func) (const bfd_target *, void *),
-	   void *);
+	const bfd_target *bfd_iterate_over_targets
+	  (int (*func) (const bfd_target *, void *),
+	   void *data);
 
 DESCRIPTION
-	Return a pointer to the first transfer vector in the list of
-	transfer vectors maintained by BFD that produces a non-zero
-	result when passed to the function @var{search_func}.  The
-	parameter @var{data} is passed, unexamined, to the search
-	function.
+	Call @var{func} for each target in the list of BFD target
+	vectors, passing @var{data} to @var{func}.  Stop iterating if
+	@var{func} returns a non-zero result, and return that target
+	vector.  Return NULL if @var{func} always returns zero.
 */
 
 const bfd_target *
-bfd_search_for_target (int (*search_func) (const bfd_target *, void *),
-		       void *data)
+bfd_iterate_over_targets (int (*func) (const bfd_target *, void *),
+			  void *data)
 {
-  const bfd_target * const *target;
+  const bfd_target *const *target;
 
-  for (target = bfd_target_vector; *target != NULL; target ++)
-    if (search_func (*target, data))
+  for (target = bfd_target_vector; *target != NULL; ++target)
+    if (func (*target, data))
       return *target;
 
   return NULL;
@@ -1867,7 +1892,7 @@ bfd_flavour_name (enum bfd_flavour flavour)
     case bfd_target_msdos_flavour: return "MSDOS";
     case bfd_target_ovax_flavour: return "Ovax";
     case bfd_target_evax_flavour: return "Evax";
-    case bfd_target_mmo_flavour: return "MMO";
+    case bfd_target_mmo_flavour: return "mmo";
     case bfd_target_mach_o_flavour: return "MACH_O";
     case bfd_target_pef_flavour: return "PEF";
     case bfd_target_pef_xlib_flavour: return "PEF_XLIB";

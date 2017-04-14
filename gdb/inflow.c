@@ -1,5 +1,5 @@
 /* Low level interface to ptrace, for GDB when running under Unix.
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -31,6 +31,7 @@
 
 #include "inflow.h"
 #include "gdbcmd.h"
+#include "gdb_termios.h"
 
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
@@ -74,13 +75,17 @@ struct terminal_info
 };
 
 /* Our own tty state, which we restore every time we need to deal with
-   the terminal.  This is only set once, when GDB first starts.  The
-   settings of flags which readline saves and restores and
+   the terminal.  This is set once, when GDB first starts, and then
+   whenever we enter/leave TUI mode (gdb_save_tty_state).  The
+   settings of flags which readline saves and restores are
    unimportant.  */
 static struct terminal_info our_terminal_info;
 
-/* Snapshot of our own tty state taken during initialization of GDB.
-   This is used as the initial tty state given to each new inferior.  */
+/* Snapshot of the initial tty state taken during initialization of
+   GDB, before readline/ncurses have had a chance to change it.  This
+   is used as the initial tty state given to each new spawned
+   inferior.  Unlike our_terminal_info, this is only ever set
+   once.  */
 static serial_ttystate initial_gdb_ttystate;
 
 static struct terminal_info *get_inflow_inferior_data (struct inferior *);
@@ -136,80 +141,35 @@ gdb_getpgrp (void)
 }
 #endif
 
-enum gdb_has_a_terminal_flag_enum
-  {
-    yes, no, have_not_checked
-  }
-gdb_has_a_terminal_flag = have_not_checked;
-
-/* The value of the "interactive-mode" setting.  */
-static enum auto_boolean interactive_mode = AUTO_BOOLEAN_AUTO;
-
-/* Implement the "show interactive-mode" option.  */
-
-static void
-show_interactive_mode (struct ui_file *file, int from_tty,
-                       struct cmd_list_element *c,
-                       const char *value)
-{
-  if (interactive_mode == AUTO_BOOLEAN_AUTO)
-    fprintf_filtered (file, "Debugger's interactive mode "
-		            "is %s (currently %s).\n",
-                      value, gdb_has_a_terminal () ? "on" : "off");
-  else
-    fprintf_filtered (file, "Debugger's interactive mode is %s.\n", value);
-}
-
-/* Set the initial tty state that is to be inherited by new inferiors.  */
+/* See terminal.h.  */
 
 void
 set_initial_gdb_ttystate (void)
 {
+  /* Note we can't do any of this in _initialize_inflow because at
+     that point stdin_serial has not been created yet.  */
+
   initial_gdb_ttystate = serial_get_tty_state (stdin_serial);
-}
 
-/* Does GDB have a terminal (on stdin)?  */
-int
-gdb_has_a_terminal (void)
-{
-  if (interactive_mode != AUTO_BOOLEAN_AUTO)
-    return interactive_mode == AUTO_BOOLEAN_TRUE;
-
-  switch (gdb_has_a_terminal_flag)
+  if (initial_gdb_ttystate != NULL)
     {
-    case yes:
-      return 1;
-    case no:
-      return 0;
-    case have_not_checked:
-      /* Get all the current tty settings (including whether we have a
-         tty at all!).  Can't do this in _initialize_inflow because
-         serial_fdopen() won't work until the serial_ops_list is
-         initialized.  */
-
+      our_terminal_info.ttystate
+	= serial_copy_tty_state (stdin_serial, initial_gdb_ttystate);
 #ifdef F_GETFL
       our_terminal_info.tflags = fcntl (0, F_GETFL, 0);
 #endif
-
-      gdb_has_a_terminal_flag = no;
-      if (stdin_serial != NULL)
-	{
-	  our_terminal_info.ttystate = serial_get_tty_state (stdin_serial);
-
-	  if (our_terminal_info.ttystate != NULL)
-	    {
-	      gdb_has_a_terminal_flag = yes;
 #ifdef PROCESS_GROUP_TYPE
-	      our_terminal_info.process_group = gdb_getpgrp ();
+      our_terminal_info.process_group = gdb_getpgrp ();
 #endif
-	    }
-	}
-
-      return gdb_has_a_terminal_flag == yes;
-    default:
-      /* "Can't happen".  */
-      return 0;
     }
+}
+
+/* Does GDB have a terminal (on stdin)?  */
+
+static int
+gdb_has_a_terminal (void)
+{
+  return initial_gdb_ttystate != NULL;
 }
 
 /* Macro for printing errors from ioctl operations */
@@ -412,14 +372,14 @@ child_terminal_ours_1 (int output_only)
 
   if (tinfo->run_terminal != NULL || gdb_has_a_terminal () == 0)
     return;
-
+  else
     {
 #ifdef SIGTTOU
       /* Ignore this signal since it will happen when we try to set the
          pgrp.  */
       sighandler_t osigttou = NULL;
 #endif
-      int result;
+      int result ATTRIBUTE_UNUSED;
 
 #ifdef SIGTTOU
       if (job_control)
@@ -898,20 +858,6 @@ _initialize_inflow (void)
 {
   add_info ("terminal", term_info,
 	    _("Print inferior's saved terminal status."));
-
-  add_setshow_auto_boolean_cmd ("interactive-mode", class_support,
-                                &interactive_mode, _("\
-Set whether GDB's standard input is a terminal."), _("\
-Show whether GDB's standard input is a terminal."), _("\
-If on, GDB assumes that standard input is a terminal.  In practice, it\n\
-means that GDB should wait for the user to answer queries associated to\n\
-commands entered at the command prompt.  If off, GDB assumes that standard\n\
-input is not a terminal, and uses the default answer to all queries.\n\
-If auto (the default), determine which mode to use based on the standard\n\
-input settings."),
-                        NULL,
-                        show_interactive_mode,
-                        &setlist, &showlist);
 
   terminal_is_ours = 1;
 

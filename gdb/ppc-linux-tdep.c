@@ -1,6 +1,6 @@
 /* Target-dependent code for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -222,8 +222,6 @@ ppc_linux_memory_remove_breakpoint (struct gdbarch *gdbarch,
 
   /* Determine appropriate breakpoint contents and size for this address.  */
   bp = gdbarch_breakpoint_from_pc (gdbarch, &addr, &bplen);
-  if (bp == NULL)
-    error (_("Software breakpoints not implemented for this target."));
 
   /* Make sure we see the memory breakpoints.  */
   cleanup = make_show_memory_breakpoints_cleanup (1);
@@ -1352,7 +1350,7 @@ ppu2spu_sniffer (const struct frame_unwind *self,
       info.bfd_arch_info = bfd_lookup_arch (bfd_arch_spu, bfd_mach_spu);
       info.byte_order = BFD_ENDIAN_BIG;
       info.osabi = GDB_OSABI_LINUX;
-      info.tdep_info = (struct gdbarch_tdep_info *) &data.id;
+      info.tdep_info = &data.id;
       data.gdbarch = gdbarch_find_by_info (info);
       if (!data.gdbarch)
 	return 0;
@@ -1423,8 +1421,8 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_flock = 32;
       record_tdep->size_oldold_utsname = 45;
       record_tdep->size_ustat = 32;
-      record_tdep->size_old_sigaction = 152;
-      record_tdep->size_old_sigset_t = 128;
+      record_tdep->size_old_sigaction = 32;
+      record_tdep->size_old_sigset_t = 8;
       record_tdep->size_rlimit = 16;
       record_tdep->size_rusage = 144;
       record_tdep->size_timeval = 16;
@@ -1432,8 +1430,7 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_old_gid_t = 4;
       record_tdep->size_old_uid_t = 4;
       record_tdep->size_fd_set = 128;
-      record_tdep->size_dirent = 280;
-      record_tdep->size_dirent64 = 280;
+      record_tdep->size_old_dirent = 280;
       record_tdep->size_statfs = 120;
       record_tdep->size_statfs64 = 120;
       record_tdep->size_sockaddr = 16;
@@ -1456,9 +1453,9 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_pollfd = 8;
       record_tdep->size_NFS_FHSIZE = 32;
       record_tdep->size_knfsd_fh = 132;
-      record_tdep->size_TASK_COMM_LEN = 32;
-      record_tdep->size_sigaction = 152;
-      record_tdep->size_sigset_t = 128;
+      record_tdep->size_TASK_COMM_LEN = 16;
+      record_tdep->size_sigaction = 32;
+      record_tdep->size_sigset_t = 8;
       record_tdep->size_siginfo_t = 128;
       record_tdep->size_cap_user_data_t = 8;
       record_tdep->size_stack_t = 24;
@@ -1473,7 +1470,6 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_epoll_event = 16;
       record_tdep->size_itimerspec = 32;
       record_tdep->size_mq_attr = 64;
-      record_tdep->size_siginfo = 128;
       record_tdep->size_termios = 44;
       record_tdep->size_pid_t = 4;
       record_tdep->size_winsize = 8;
@@ -1481,6 +1477,7 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_serial_icounter_struct = 80;
       record_tdep->size_size_t = 8;
       record_tdep->size_iovec = 16;
+      record_tdep->size_time_t = 8;
     }
   else if (wordsize == 4)
     {
@@ -1491,8 +1488,8 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_flock = 16;
       record_tdep->size_oldold_utsname = 45;
       record_tdep->size_ustat = 20;
-      record_tdep->size_old_sigaction = 152;
-      record_tdep->size_old_sigset_t = 128;
+      record_tdep->size_old_sigaction = 16;
+      record_tdep->size_old_sigset_t = 4;
       record_tdep->size_rlimit = 8;
       record_tdep->size_rusage = 72;
       record_tdep->size_timeval = 8;
@@ -1500,8 +1497,7 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_old_gid_t = 4;
       record_tdep->size_old_uid_t = 4;
       record_tdep->size_fd_set = 128;
-      record_tdep->size_dirent = 268;
-      record_tdep->size_dirent64 = 280;
+      record_tdep->size_old_dirent = 268;
       record_tdep->size_statfs = 64;
       record_tdep->size_statfs64 = 88;
       record_tdep->size_sockaddr = 16;
@@ -1524,9 +1520,9 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_pollfd = 8;
       record_tdep->size_NFS_FHSIZE = 32;
       record_tdep->size_knfsd_fh = 132;
-      record_tdep->size_TASK_COMM_LEN = 32;
-      record_tdep->size_sigaction = 140;
-      record_tdep->size_sigset_t = 128;
+      record_tdep->size_TASK_COMM_LEN = 16;
+      record_tdep->size_sigaction = 20;
+      record_tdep->size_sigset_t = 8;
       record_tdep->size_siginfo_t = 128;
       record_tdep->size_cap_user_data_t = 4;
       record_tdep->size_stack_t = 12;
@@ -1541,7 +1537,6 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_epoll_event = 16;
       record_tdep->size_itimerspec = 16;
       record_tdep->size_mq_attr = 32;
-      record_tdep->size_siginfo = 128;
       record_tdep->size_termios = 44;
       record_tdep->size_pid_t = 4;
       record_tdep->size_winsize = 8;
@@ -1549,6 +1544,7 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
       record_tdep->size_serial_icounter_struct = 80;
       record_tdep->size_size_t = 4;
       record_tdep->size_iovec = 8;
+      record_tdep->size_time_t = 4;
     }
   else
     internal_error (__FILE__, __LINE__, _("unexpected wordsize"));
@@ -1630,6 +1626,25 @@ ppc_init_linux_record_tdep (struct linux_record_tdep *record_tdep,
   record_tdep->ioctl_FIOQSIZE = 0x40086680;
 }
 
+/* Return a floating-point format for a floating-point variable of
+   length LEN in bits.  If non-NULL, NAME is the name of its type.
+   If no suitable type is found, return NULL.  */
+
+const struct floatformat **
+ppc_floatformat_for_type (struct gdbarch *gdbarch,
+                          const char *name, int len)
+{
+  if (len == 128 && name)
+    if (strcmp (name, "__float128") == 0
+        || strcmp (name, "_Float128") == 0
+        || strcmp (name, "_Float64x") == 0
+        || strcmp (name, "complex _Float128") == 0
+        || strcmp (name, "complex _Float64x") == 0)
+      return floatformats_ia64_quad;
+
+  return default_floatformat_for_type (gdbarch, name, len);
+}
+
 static void
 ppc_linux_init_abi (struct gdbarch_info info,
                     struct gdbarch *gdbarch)
@@ -1652,6 +1667,9 @@ ppc_linux_init_abi (struct gdbarch_info info,
      size of type actually used in each case.  */
   set_gdbarch_long_double_bit (gdbarch, 16 * TARGET_CHAR_BIT);
   set_gdbarch_long_double_format (gdbarch, floatformats_ibm_long_double);
+
+  /* Support for floating-point data type variants.  */
+  set_gdbarch_floatformat_for_type (gdbarch, ppc_floatformat_for_type);
 
   /* Handle inferior calls during interrupted system calls.  */
   set_gdbarch_write_pc (gdbarch, ppc_linux_write_pc);

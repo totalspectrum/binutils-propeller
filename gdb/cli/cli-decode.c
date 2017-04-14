@@ -1,6 +1,6 @@
 /* Handle lists of commands, their decoding and documentation, for GDB.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -23,6 +23,7 @@
 #include "ui-out.h"
 #include "cli/cli-cmds.h"
 #include "cli/cli-decode.h"
+#include "common/gdb_optional.h"
 
 /* Prototypes for local functions.  */
 
@@ -253,6 +254,7 @@ add_cmd (const char *name, enum command_class theclass, cmd_cfunc_ftype *fun,
   c->user_commands = NULL;
   c->cmd_pointer = NULL;
   c->alias_chain = NULL;
+  c->suppress_notification = NULL;
 
   return c;
 }
@@ -855,7 +857,7 @@ delete_cmd (const char *name, struct cmd_list_element **list,
 struct cmd_list_element *
 add_info (const char *name, cmd_cfunc_ftype *fun, const char *doc)
 {
-  return add_cmd (name, no_class, fun, doc, &infolist);
+  return add_cmd (name, class_info, fun, doc, &infolist);
 }
 
 /* Add an alias to the list of info subcommands.  */
@@ -883,7 +885,22 @@ add_com_alias (const char *name, const char *oldname, enum command_class theclas
 {
   return add_alias_cmd (name, oldname, theclass, abbrev_flag, &cmdlist);
 }
-
+
+/* Add an element with a suppress notification to the list of commands.  */
+
+struct cmd_list_element *
+add_com_suppress_notification (const char *name, enum command_class theclass,
+			       cmd_cfunc_ftype *fun, const char *doc,
+			       int *suppress_notification)
+{
+  struct cmd_list_element *element;
+
+  element = add_cmd (name, theclass, fun, doc, &cmdlist);
+  element->suppress_notification = suppress_notification;
+
+  return element;
+}
+
 /* Recursively walk the commandlist structures, and print out the
    documentation of commands that match our regex in either their
    name, or their documentation.
@@ -1175,7 +1192,7 @@ print_help_for_command (struct cmd_list_element *c, const char *prefix,
  * all sublists of LIST.
  * PREFIX is the prefix to print before each command name.
  * STREAM is the stream upon which the output should be written.
- * CLASS should be:
+ * THECLASS should be:
  *      A non-negative class number to list only commands in that
  * class.
  *      ALL_COMMANDS to list all commands in list.
@@ -1192,15 +1209,18 @@ help_cmd_list (struct cmd_list_element *list, enum command_class theclass,
   struct cmd_list_element *c;
 
   for (c = list; c; c = c->next)
-    {      
+    {
       if (c->abbrev_flag == 0
+	  && !c->cmd_deprecated
 	  && (theclass == all_commands
 	      || (theclass == all_classes && c->func == NULL)
 	      || (theclass == c->theclass && c->func != NULL)))
 	{
 	  print_help_for_command (c, prefix, recurse, stream);
 	}
-      else if (c->abbrev_flag == 0 && recurse
+      else if (c->abbrev_flag == 0
+	       && recurse
+	       && !c->cmd_deprecated
 	       && theclass == class_user && c->prefixlist != NULL)
 	/* User-defined commands may be subcommands.  */
 	help_cmd_list (*c->prefixlist, theclass, c->prefixname,
@@ -1236,7 +1256,9 @@ find_cmd (const char *command, int len, struct cmd_list_element *clist,
   return found;
 }
 
-static int
+/* Return the length of command name in TEXT.  */
+
+int
 find_command_name_length (const char *text)
 {
   const char *p = text;
@@ -1312,7 +1334,7 @@ valid_user_defined_cmd_name_p (const char *name)
    if no prefix command was ever found.  For example, in the case of "info a",
    "info" matches without ambiguity, but "a" could be "args" or "address", so
    *RESULT_LIST is set to the cmd_list_element for "info".  So in this case
-   RESULT_LIST should not be interpeted as a pointer to the beginning of a
+   RESULT_LIST should not be interpreted as a pointer to the beginning of a
    list; it simply points to a specific command.  In the case of an ambiguous
    return *TEXT is advanced past the last non-ambiguous prefix (e.g.
    "info t" can be "info types" or "info target"; upon return *TEXT has been
@@ -1358,19 +1380,6 @@ lookup_cmd_1 (const char **text, struct cmd_list_element *clist,
   found = 0;
   nfound = 0;
   found = find_cmd (command, len, clist, ignore_help_classes, &nfound);
-
-  /* We didn't find the command in the entered case, so lower case it
-     and search again.  */
-  if (!found || nfound == 0)
-    {
-      for (tmp = 0; tmp < len; tmp++)
-	{
-	  char x = command[tmp];
-
-	  command[tmp] = isupper (x) ? tolower (x) : x;
-	}
-      found = find_cmd (command, len, clist, ignore_help_classes, &nfound);
-    }
 
   /* If nothing matches, we have a simple failure.  */
   if (nfound == 0)
@@ -1471,7 +1480,8 @@ undef_cmd_error (const char *cmdtype, const char *q)
    the function field of the struct cmd_list_element is 0).  */
 
 struct cmd_list_element *
-lookup_cmd (const char **line, struct cmd_list_element *list, char *cmdtype,
+lookup_cmd (const char **line, struct cmd_list_element *list,
+	    const char *cmdtype,
 	    int allow_unknown, int ignore_help_classes)
 {
   struct cmd_list_element *last_list = 0;
@@ -1712,20 +1722,6 @@ lookup_cmd_composition (const char *text,
       nfound = 0;
       *cmd = find_cmd (command, len, cur_list, 1, &nfound);
       
-      /* We didn't find the command in the entered case, so lower case
-	 it and search again.
-      */
-      if (!*cmd || nfound == 0)
-	{
-	  for (tmp = 0; tmp < len; tmp++)
-	    {
-	      char x = command[tmp];
-
-	      command[tmp] = isupper (x) ? tolower (x) : x;
-	    }
-	  *cmd = find_cmd (command, len, cur_list, 1, &nfound);
-	}
-      
       if (*cmd == CMD_LIST_AMBIGUOUS)
 	{
 	  return 0;              /* ambiguous */
@@ -1882,7 +1878,14 @@ void
 cmd_func (struct cmd_list_element *cmd, char *args, int from_tty)
 {
   if (cmd_func_p (cmd))
-    (*cmd->func) (cmd, args, from_tty);
+    {
+      gdb::optional<scoped_restore_tmpl<int>> restore_suppress;
+
+      if (cmd->suppress_notification != NULL)
+	restore_suppress.emplace (cmd->suppress_notification, 1);
+
+      (*cmd->func) (cmd, args, from_tty);
+    }
   else
     error (_("Invalid command"));
 }

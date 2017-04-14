@@ -1,6 +1,6 @@
 /* Perform an inferior function call, for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -61,10 +61,9 @@
 
    Unfortunately, on certain older platforms, the debug info doesn't
    indicate reliably how each function was defined.  A function type's
-   TYPE_FLAG_PROTOTYPED flag may be clear, even if the function was
-   defined in prototype style.  When calling a function whose
-   TYPE_FLAG_PROTOTYPED flag is clear, GDB consults this flag to
-   decide what to do.
+   TYPE_PROTOTYPED flag may be clear, even if the function was defined
+   in prototype style.  When calling a function whose TYPE_PROTOTYPED
+   flag is clear, GDB consults this flag to decide what to do.
 
    For modern targets, it is proper to assume that, if the prototype
    flag is clear, that can be trusted: `float' arguments should be
@@ -158,10 +157,11 @@ value_arg_coerce (struct gdbarch *gdbarch, struct value *arg,
   switch (TYPE_CODE (type))
     {
     case TYPE_CODE_REF:
+    case TYPE_CODE_RVALUE_REF:
       {
 	struct value *new_value;
 
-	if (TYPE_CODE (arg_type) == TYPE_CODE_REF)
+	if (TYPE_IS_REFERENCE (arg_type))
 	  return value_cast_pointers (type, arg, 0);
 
 	/* Cast the value to the reference's target type, and then
@@ -169,7 +169,7 @@ value_arg_coerce (struct gdbarch *gdbarch, struct value *arg,
 	   if the value was not previously in memory - in some cases
 	   we should clearly be allowing this, but how?  */
 	new_value = value_cast (TYPE_TARGET_TYPE (type), arg);
-	new_value = value_ref (new_value);
+	new_value = value_ref (new_value, TYPE_CODE (type));
 	return new_value;
       }
     case TYPE_CODE_INT:
@@ -464,9 +464,14 @@ struct call_thread_fsm
   /* The called function's return value.  This is extracted from the
      target before the dummy frame is popped.  */
   struct value *return_value;
+
+  /* The top level that started the infcall (and is synchronously
+     waiting for it to end).  */
+  struct ui *waiting_ui;
 };
 
-static int call_thread_fsm_should_stop (struct thread_fsm *self);
+static int call_thread_fsm_should_stop (struct thread_fsm *self,
+					struct thread_info *thread);
 static int call_thread_fsm_should_notify_stop (struct thread_fsm *self);
 
 /* call_thread_fsm's vtable.  */
@@ -484,14 +489,15 @@ static struct thread_fsm_ops call_thread_fsm_ops =
 /* Allocate a new call_thread_fsm object.  */
 
 static struct call_thread_fsm *
-new_call_thread_fsm (struct gdbarch *gdbarch, struct value *function,
+new_call_thread_fsm (struct ui *waiting_ui, struct interp *cmd_interp,
+		     struct gdbarch *gdbarch, struct value *function,
 		     struct type *value_type,
 		     int struct_return_p, CORE_ADDR struct_addr)
 {
   struct call_thread_fsm *sm;
 
   sm = XCNEW (struct call_thread_fsm);
-  thread_fsm_ctor (&sm->thread_fsm, &call_thread_fsm_ops);
+  thread_fsm_ctor (&sm->thread_fsm, &call_thread_fsm_ops, cmd_interp);
 
   sm->return_meta_info.gdbarch = gdbarch;
   sm->return_meta_info.function = function;
@@ -499,13 +505,16 @@ new_call_thread_fsm (struct gdbarch *gdbarch, struct value *function,
   sm->return_meta_info.struct_return_p = struct_return_p;
   sm->return_meta_info.struct_addr = struct_addr;
 
+  sm->waiting_ui = waiting_ui;
+
   return sm;
 }
 
 /* Implementation of should_stop method for infcalls.  */
 
 static int
-call_thread_fsm_should_stop (struct thread_fsm *self)
+call_thread_fsm_should_stop (struct thread_fsm *self,
+			     struct thread_info *thread)
 {
   struct call_thread_fsm *f = (struct call_thread_fsm *) self;
 
@@ -520,7 +529,9 @@ call_thread_fsm_should_stop (struct thread_fsm *self)
       f->return_value = get_call_return_value (&f->return_meta_info);
 
       /* Break out of wait_sync_command_done.  */
-      async_enable_stdin ();
+      scoped_restore save_ui = make_scoped_restore (&current_ui, f->waiting_ui);
+      target_terminal_ours ();
+      f->waiting_ui->prompt_state = PROMPT_NEEDED;
     }
 
   return 1;
@@ -558,15 +569,17 @@ run_inferior_call (struct call_thread_fsm *sm,
   struct gdb_exception caught_error = exception_none;
   int saved_in_infcall = call_thread->control.in_infcall;
   ptid_t call_thread_ptid = call_thread->ptid;
-  int saved_sync_execution = sync_execution;
+  enum prompt_state saved_prompt_state = current_ui->prompt_state;
   int was_running = call_thread->state == THREAD_RUNNING;
-  int saved_interpreter_async = interpreter_async;
+  int saved_ui_async = current_ui->async;
 
   /* Infcalls run synchronously, in the foreground.  */
-  sync_execution = 1;
+  current_ui->prompt_state = PROMPT_BLOCKED;
   /* So that we don't print the prompt prematurely in
      fetch_inferior_event.  */
-  interpreter_async = 0;
+  current_ui->async = 0;
+
+  delete_file_handler (current_ui->input_fd);
 
   call_thread->control.in_infcall = 1;
 
@@ -596,12 +609,16 @@ run_inferior_call (struct call_thread_fsm *sm,
     }
   END_CATCH
 
-  /* If GDB was previously in sync execution mode, then ensure that it
-     remains so.  normal_stop calls async_enable_stdin, so reset it
-     again here.  In other cases, stdin will be re-enabled by
+  /* If GDB has the prompt blocked before, then ensure that it remains
+     so.  normal_stop calls async_enable_stdin, so reset the prompt
+     state again here.  In other cases, stdin will be re-enabled by
      inferior_event_handler, when an exception is thrown.  */
-  sync_execution = saved_sync_execution;
-  interpreter_async = saved_interpreter_async;
+  current_ui->prompt_state = saved_prompt_state;
+  if (current_ui->prompt_state == PROMPT_BLOCKED)
+    delete_file_handler (current_ui->input_fd);
+  else
+    ui_register_input_event_handler (current_ui);
+  current_ui->async = saved_ui_async;
 
   /* At this point the current thread may have changed.  Refresh
      CALL_THREAD as it could be invalid if its thread has exited.  */
@@ -1120,7 +1137,8 @@ call_function_by_hand_dummy (struct value *function,
        not report the stop to the user, and captures the return value
        before the dummy frame is popped.  run_inferior_call registers
        it with the thread ASAP.  */
-    sm = new_call_thread_fsm (gdbarch, function,
+    sm = new_call_thread_fsm (current_ui, command_interp (),
+			      gdbarch, function,
 			      values_type,
 			      struct_return || hidden_first_param_p,
 			      struct_addr);
@@ -1151,7 +1169,7 @@ call_function_by_hand_dummy (struct value *function,
 
 	    /* Clean up / destroy the call FSM, and restore the
 	       original one.  */
-	    thread_fsm_clean_up (tp->thread_fsm);
+	    thread_fsm_clean_up (tp->thread_fsm, tp);
 	    thread_fsm_delete (tp->thread_fsm);
 	    tp->thread_fsm = saved_sm;
 

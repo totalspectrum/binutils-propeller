@@ -1,6 +1,6 @@
 /* Top level stuff for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -44,6 +44,8 @@
 #include <signal.h>
 #include "event-top.h"
 #include "infrun.h"
+#include "signals-state-save-restore.h"
+#include <vector>
 
 /* The selected interpreter.  This will be used as a set command
    variable, so it should always be malloc'ed - since
@@ -68,10 +70,6 @@ static int gdb_datadir_provided = 0;
    the possibly relocated path to python's lib directory.  */
 char *python_libdir = 0;
 
-struct ui_file *gdb_stdout;
-struct ui_file *gdb_stderr;
-struct ui_file *gdb_stdlog;
-struct ui_file *gdb_stdin;
 /* Target IO streams.  */
 struct ui_file *gdb_stdtargin;
 struct ui_file *gdb_stdtarg;
@@ -232,7 +230,7 @@ get_init_files (const char **system_gdbinit,
 	      for (p = tmp_sys_gdbinit; IS_DIR_SEPARATOR (*p); ++p)
 		continue;
 	      relocated_sysgdbinit = concat (gdb_datadir, SLASH_STRING, p,
-					     NULL);
+					     (char *) NULL);
 	      xfree (tmp_sys_gdbinit);
 	    }
 	  else
@@ -297,7 +295,9 @@ setup_alternate_signal_stack (void)
 #ifdef HAVE_SIGALTSTACK
   stack_t ss;
 
-  ss.ss_sp = xmalloc (SIGSTKSZ);
+  /* FreeBSD versions older than 11.0 use char * for ss_sp instead of
+     void *.  This cast works with both types.  */
+  ss.ss_sp = (char *) xmalloc (SIGSTKSZ);
   ss.ss_size = SIGSTKSZ;
   ss.ss_flags = 0;
 
@@ -311,11 +311,19 @@ setup_alternate_signal_stack (void)
 static int
 captured_command_loop (void *data)
 {
+  struct ui *ui = current_ui;
+
   /* Top-level execution commands can be run in the background from
      here on.  */
-  interpreter_async = 1;
+  current_ui->async = 1;
 
-  current_interp_command_loop ();
+  /* Give the interpreter a chance to print a prompt, if necessary  */
+  if (ui->prompt_state != PROMPT_BLOCKED)
+    interp_pre_command_loop (top_level_interpreter ());
+
+  /* Now it's time to start the event loop.  */
+  start_event_loop ();
+
   /* FIXME: cagney/1999-11-05: A correct command_loop() implementaton
      would clean things up (restoring the cleanup chain) to the state
      they were just prior to the call.  Technically, this means that
@@ -328,7 +336,7 @@ captured_command_loop (void *data)
      error) we try to quit.  If the quit is aborted, catch_errors()
      which called this catch the signal and restart the command
      loop.  */
-  quit_command (NULL, instream == stdin);
+  quit_command (NULL, ui->instream == ui->stdin_stream);
   return 1;
 }
 
@@ -363,7 +371,7 @@ catch_command_errors (catch_command_errors_ftype *command,
 {
   TRY
     {
-      int was_sync = sync_execution;
+      int was_sync = current_ui->prompt_state == PROMPT_BLOCKED;
 
       command (arg, from_tty);
 
@@ -390,7 +398,7 @@ catch_command_errors_const (catch_command_errors_const_ftype *command,
 {
   TRY
     {
-      int was_sync = sync_execution;
+      int was_sync = current_ui->prompt_state == PROMPT_BLOCKED;
 
       command (arg, from_tty);
 
@@ -403,6 +411,20 @@ catch_command_errors_const (catch_command_errors_const_ftype *command,
   END_CATCH
 
   return 1;
+}
+
+/* Adapter for symbol_file_add_main that translates 'from_tty' to a
+   symfile_add_flags.  */
+
+static void
+symbol_file_add_main_adapter (const char *arg, int from_tty)
+{
+  symfile_add_flags add_flags = 0;
+
+  if (from_tty)
+    add_flags |= SYMFILE_VERBOSE;
+
+  symbol_file_add_main (arg, add_flags);
 }
 
 /* Type of this option.  */
@@ -422,24 +444,26 @@ enum cmdarg_kind
 };
 
 /* Arguments of --command option and its counterpart.  */
-typedef struct cmdarg {
+struct cmdarg
+{
+  cmdarg (cmdarg_kind type_, char *string_)
+    : type (type_), string (string_)
+  {}
+
   /* Type of this option.  */
   enum cmdarg_kind type;
 
   /* Value of this option - filename or the GDB command itself.  String memory
      is not owned by this structure despite it is 'const'.  */
   char *string;
-} cmdarg_s;
+};
 
-/* Define type VEC (cmdarg_s).  */
-DEF_VEC_O (cmdarg_s);
-
-static int
-captured_main (void *data)
+static void
+captured_main_1 (struct captured_main_args *context)
 {
-  struct captured_main_args *context = (struct captured_main_args *) data;
   int argc = context->argc;
   char **argv = context->argv;
+
   static int quiet = 0;
   static int set_args = 0;
   static int inhibit_home_gdbinit = 0;
@@ -460,15 +484,10 @@ captured_main (void *data)
   static int print_configuration;
 
   /* Pointers to all arguments of --command option.  */
-  VEC (cmdarg_s) *cmdarg_vec = NULL;
-  struct cmdarg *cmdarg_p;
+  std::vector<struct cmdarg> cmdarg_vec;
 
-  /* Indices of all arguments of --directory option.  */
-  char **dirarg;
-  /* Allocated size.  */
-  int dirsize;
-  /* Number of elements used.  */
-  int ndir;
+  /* All arguments of --directory option.  */
+  std::vector<char *> dirarg;
 
   /* gdb init files.  */
   const char *system_gdbinit;
@@ -479,14 +498,14 @@ captured_main (void *data)
   int save_auto_load;
   struct objfile *objfile;
 
-  struct cleanup *pre_stat_chain;
+  struct cleanup *chain;
 
 #ifdef HAVE_SBRK
-  /* Set this before calling make_command_stats_cleanup.  */
+  /* Set this before constructing scoped_command_stats.  */
   lim_at_start = (char *) sbrk (0);
 #endif
 
-  pre_stat_chain = make_command_stats_cleanup (0);
+  scoped_command_stats stat_reporter (false);
 
 #if defined (HAVE_SETLOCALE) && defined (HAVE_LC_MESSAGES)
   setlocale (LC_MESSAGES, "");
@@ -494,21 +513,16 @@ captured_main (void *data)
 #if defined (HAVE_SETLOCALE)
   setlocale (LC_CTYPE, "");
 #endif
+#ifdef ENABLE_NLS
   bindtextdomain (PACKAGE, LOCALEDIR);
   textdomain (PACKAGE);
+#endif
 
   bfd_init ();
   notice_open_fds ();
+  save_original_signals_state ();
 
-  make_cleanup (VEC_cleanup (cmdarg_s), &cmdarg_vec);
-  dirsize = 1;
-  dirarg = (char **) xmalloc (dirsize * sizeof (*dirarg));
-  ndir = 0;
-
-  clear_quit_flag ();
-  saved_command_line = (char *) xmalloc (saved_command_line_size);
-  saved_command_line[0] = '\0';
-  instream = stdin;
+  saved_command_line = (char *) xstrdup ("");
 
 #ifdef __MINGW32__
   /* Ensure stderr is unbuffered.  A Cygwin pty or pipe is implemented
@@ -516,12 +530,9 @@ captured_main (void *data)
   setvbuf (stderr, NULL, _IONBF, BUFSIZ);
 #endif
 
-  gdb_stdout = stdio_fileopen (stdout);
-  gdb_stderr = stderr_fileopen ();
+  main_ui = new_ui (stdin, stdout, stderr);
+  current_ui = main_ui;
 
-  gdb_stdlog = gdb_stderr;	/* for moment */
-  gdb_stdtarg = gdb_stderr;	/* for moment */
-  gdb_stdin = stdio_fileopen (stdin);
   gdb_stdtargerr = gdb_stderr;	/* for moment */
   gdb_stdtargin = gdb_stdin;	/* for moment */
 
@@ -534,7 +545,9 @@ captured_main (void *data)
 #endif
 
   /* Prefix warning messages with the command name.  */
-  warning_pre_print = xstrprintf ("%s: warning: ", gdb_program_name);
+  gdb::unique_xmalloc_ptr<char> tmp_warn_preprint
+    (xstrprintf ("%s: warning: ", gdb_program_name));
+  warning_pre_print = tmp_warn_preprint.get ();
 
   if (! getcwd (gdb_dirbuf, sizeof (gdb_dirbuf)))
     perror_warning_with_name (_("error finding working directory"));
@@ -560,7 +573,7 @@ captured_main (void *data)
 #ifdef WITH_PYTHON_PATH
   {
     /* For later use in helping Python find itself.  */
-    char *tmp = concat (WITH_PYTHON_PATH, SLASH_STRING, "lib", NULL);
+    char *tmp = concat (WITH_PYTHON_PATH, SLASH_STRING, "lib", (char *) NULL);
 
     python_libdir = relocate_gdb_directory (tmp, PYTHON_PATH_RELOCATABLE);
     xfree (tmp);
@@ -739,36 +752,20 @@ captured_main (void *data)
 	    pidarg = optarg;
 	    break;
 	  case 'x':
-	    {
-	      struct cmdarg cmdarg = { CMDARG_FILE, optarg };
-
-	      VEC_safe_push (cmdarg_s, cmdarg_vec, &cmdarg);
-	    }
+	    cmdarg_vec.emplace_back (CMDARG_FILE, optarg);
 	    break;
 	  case 'X':
-	    {
-	      struct cmdarg cmdarg = { CMDARG_COMMAND, optarg };
-
-	      VEC_safe_push (cmdarg_s, cmdarg_vec, &cmdarg);
-	    }
+	    cmdarg_vec.emplace_back (CMDARG_COMMAND, optarg);
 	    break;
 	  case OPT_IX:
-	    {
-	      struct cmdarg cmdarg = { CMDARG_INIT_FILE, optarg };
-
-	      VEC_safe_push (cmdarg_s, cmdarg_vec, &cmdarg);
-	    }
+	    cmdarg_vec.emplace_back (CMDARG_INIT_FILE, optarg);
 	    break;
 	  case OPT_IEX:
-	    {
-	      struct cmdarg cmdarg = { CMDARG_INIT_COMMAND, optarg };
-
-	      VEC_safe_push (cmdarg_s, cmdarg_vec, &cmdarg);
-	    }
+	    cmdarg_vec.emplace_back (CMDARG_INIT_COMMAND, optarg);
 	    break;
 	  case 'B':
 	    batch_flag = batch_silent = 1;
-	    gdb_stdout = ui_file_new();
+	    gdb_stdout = new null_file ();
 	    break;
 	  case 'D':
 	    if (optarg[0] == '\0')
@@ -805,13 +802,7 @@ captured_main (void *data)
 	    interpreter_p = xstrdup (optarg);
 	    break;
 	  case 'd':
-	    dirarg[ndir++] = optarg;
-	    if (ndir >= dirsize)
-	      {
-		dirsize *= 2;
-		dirarg = (char **) xrealloc ((char *) dirarg,
-					     dirsize * sizeof (*dirarg));
-	      }
+	    dirarg.push_back (optarg);
 	    break;
 	  case 't':
 	    ttyarg = optarg;
@@ -963,17 +954,7 @@ captured_main (void *data)
 
   /* Install the default UI.  All the interpreters should have had a
      look at things by now.  Initialize the default interpreter.  */
-
-  {
-    /* Find it.  */
-    struct interp *interp = interp_lookup (interpreter_p);
-
-    if (interp == NULL)
-      error (_("Interpreter `%s' unrecognized"), interpreter_p);
-    /* Install it.  */
-    if (!interp_set (interp, 1))
-      error (_("Interpreter `%s' failed to initialize."), interpreter_p);
-  }
+  set_top_level_interpreter (interpreter_p);
 
   /* FIXME: cagney/2003-02-03: The big hack (part 2 of 2) that lets
      GDB retain the old MI1 interpreter startup behavior.  Output the
@@ -993,7 +974,7 @@ captured_main (void *data)
     }
 
   /* Set off error and warning messages with a blank line.  */
-  xfree (warning_pre_print);
+  tmp_warn_preprint.reset ();
   warning_pre_print = _("\nwarning: ");
 
   /* Read and execute the system-wide gdbinit file, if it exists.
@@ -1012,17 +993,21 @@ captured_main (void *data)
     catch_command_errors_const (source_script, home_gdbinit, 0);
 
   /* Process '-ix' and '-iex' options early.  */
-  for (i = 0; VEC_iterate (cmdarg_s, cmdarg_vec, i, cmdarg_p); i++)
-    switch (cmdarg_p->type)
+  for (i = 0; i < cmdarg_vec.size (); i++)
     {
-      case CMDARG_INIT_FILE:
-        catch_command_errors_const (source_script, cmdarg_p->string,
-				    !batch_flag);
-	break;
-      case CMDARG_INIT_COMMAND:
-        catch_command_errors (execute_command, cmdarg_p->string,
-			      !batch_flag);
-	break;
+      const struct cmdarg &cmdarg_p = cmdarg_vec[i];
+
+      switch (cmdarg_p.type)
+	{
+	case CMDARG_INIT_FILE:
+	  catch_command_errors_const (source_script, cmdarg_p.string,
+				      !batch_flag);
+	  break;
+	case CMDARG_INIT_COMMAND:
+	  catch_command_errors (execute_command, cmdarg_p.string,
+				!batch_flag);
+	  break;
+	}
     }
 
   /* Now perform all the actions indicated by the arguments.  */
@@ -1031,9 +1016,8 @@ captured_main (void *data)
       catch_command_errors (cd_command, cdarg, 0);
     }
 
-  for (i = 0; i < ndir; i++)
+  for (i = 0; i < dirarg.size (); i++)
     catch_command_errors (directory_switch, dirarg[i], 0);
-  xfree (dirarg);
 
   /* Skip auto-loading section-specified scripts until we've sourced
      local_gdbinit (which is often used to augment the source search
@@ -1050,7 +1034,7 @@ captured_main (void *data)
          catch_command_errors returns non-zero on success!  */
       if (catch_command_errors_const (exec_file_attach, execarg,
 				      !batch_flag))
-	catch_command_errors_const (symbol_file_add_main, symarg,
+	catch_command_errors_const (symbol_file_add_main_adapter, symarg,
 				    !batch_flag);
     }
   else
@@ -1059,7 +1043,7 @@ captured_main (void *data)
 	catch_command_errors_const (exec_file_attach, execarg,
 				    !batch_flag);
       if (symarg != NULL)
-	catch_command_errors_const (symbol_file_add_main, symarg,
+	catch_command_errors_const (symbol_file_add_main_adapter, symarg,
 				    !batch_flag);
     }
 
@@ -1122,17 +1106,21 @@ captured_main (void *data)
     load_auto_scripts_for_objfile (objfile);
 
   /* Process '-x' and '-ex' options.  */
-  for (i = 0; VEC_iterate (cmdarg_s, cmdarg_vec, i, cmdarg_p); i++)
-    switch (cmdarg_p->type)
+  for (i = 0; i < cmdarg_vec.size (); i++)
     {
-      case CMDARG_FILE:
-        catch_command_errors_const (source_script, cmdarg_p->string,
-				    !batch_flag);
-	break;
-      case CMDARG_COMMAND:
-        catch_command_errors (execute_command, cmdarg_p->string,
-			      !batch_flag);
-	break;
+      const struct cmdarg &cmdarg_p = cmdarg_vec[i];
+
+      switch (cmdarg_p.type)
+	{
+	case CMDARG_FILE:
+	  catch_command_errors_const (source_script, cmdarg_p.string,
+				      !batch_flag);
+	  break;
+	case CMDARG_COMMAND:
+	  catch_command_errors (execute_command, cmdarg_p.string,
+				!batch_flag);
+	  break;
+	}
     }
 
   /* Read in the old history after all the command files have been
@@ -1144,9 +1132,14 @@ captured_main (void *data)
       /* We have hit the end of the batch file.  */
       quit_force (NULL, 0);
     }
+}
 
-  /* Show time and/or space usage.  */
-  do_cleanups (pre_stat_chain);
+static void
+captured_main (void *data)
+{
+  struct captured_main_args *context = (struct captured_main_args *) data;
+
+  captured_main_1 (context);
 
   /* NOTE: cagney/1999-11-07: There is probably no reason for not
      moving this loop and the code found in captured_command_loop()
@@ -1162,7 +1155,16 @@ captured_main (void *data)
 int
 gdb_main (struct captured_main_args *args)
 {
-  catch_errors (captured_main, args, "", RETURN_MASK_ALL);
+  TRY
+    {
+      captured_main (args);
+    }
+  CATCH (ex, RETURN_MASK_ALL)
+    {
+      exception_print (gdb_stderr, ex);
+    }
+  END_CATCH
+
   /* The only way to end up here is by an error (normal exit is
      handled by quit_force()), hence always return an error status.  */
   return 1;

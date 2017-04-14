@@ -1,5 +1,5 @@
 /* tc-mcore.c -- Assemble code for M*Core
-   Copyright (C) 1999-2015 Free Software Foundation, Inc.
+   Copyright (C) 1999-2017 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -141,7 +141,7 @@ static struct hash_control * opcode_hash_control;	/* Opcode mnemonics.  */
 #define POOL_START_LABEL ".LS"
 
 static void
-make_name (char * s, char * p, int n)
+make_name (char * s, const char * p, int n)
 {
   static const char hex[] = "0123456789ABCDEF";
 
@@ -241,7 +241,7 @@ check_literals (int kind, int offset)
      kind == 2 means we just left a function
 
      The dump_literals (1) call inserts a branch around the table, so
-     we first look to see if its a situation where we won't have to
+     we first look to see if it's a situation where we won't have to
      insert a branch (e.g., the previous instruction was an unconditional
      branch).
 
@@ -454,18 +454,18 @@ const pseudo_typeS md_pseudo_table[] =
 void
 md_begin (void)
 {
-  const mcore_opcode_info * opcode;
-  char * prev_name = "";
+  const char * prev_name = "";
+  unsigned int i;
 
   opcode_hash_control = hash_new ();
 
   /* Insert unique names into hash table.  */
-  for (opcode = mcore_table; opcode->name; opcode ++)
+  for (i = 0; i < ARRAY_SIZE (mcore_table); i++)
     {
-      if (! streq (prev_name, opcode->name))
+      if (! streq (prev_name, mcore_table[i].name))
 	{
-	  prev_name = opcode->name;
-	  hash_insert (opcode_hash_control, opcode->name, (char *) opcode);
+	  prev_name = mcore_table[i].name;
+	  hash_insert (opcode_hash_control, mcore_table[i].name, (char *) &mcore_table[i]);
 	}
     }
 }
@@ -523,7 +523,7 @@ parse_reg (char * s, unsigned * reg)
 
 static struct Cregs
 {
-  char * name;
+  const char * name;
   unsigned int crnum;
 }
 cregs[] =
@@ -611,7 +611,7 @@ parse_psrmod (char * s, unsigned * reg)
   char buf[10];
   static struct psrmods
   {
-    char *       name;
+    const char *       name;
     unsigned int value;
   }
   psrmods[] =
@@ -979,7 +979,7 @@ md_assemble (char * str)
 	  as_bad (_("M340 specific opcode used when assembling for M210"));
 	  break;
 	}
-      /* drop through...  */
+      /* Fall through.  */
     case O2:
       op_end = parse_reg (op_end + 1, & reg);
       inst |= reg;
@@ -1598,6 +1598,9 @@ md_assemble (char * str)
   output[0] = INST_BYTE0 (inst);
   output[1] = INST_BYTE1 (inst);
 
+#ifdef OBJ_ELF
+  dwarf2_emit_insn (2);
+#endif
   check_literals (opcode->transfer, isize);
 }
 
@@ -1616,7 +1619,7 @@ md_mcore_end (void)
 
 /* Various routines to kill one day.  */
 
-char *
+const char *
 md_atof (int type, char * litP, int * sizeP)
 {
   return ieee_md_atof (type, litP, sizeP, target_big_endian);
@@ -1650,7 +1653,7 @@ struct option md_longopts[] =
 size_t md_longopts_size = sizeof (md_longopts);
 
 int
-md_parse_option (int c, char * arg)
+md_parse_option (int c, const char * arg)
 {
   switch (c)
     {
@@ -1763,7 +1766,7 @@ md_convert_frag (bfd * abfd ATTRIBUTE_UNUSED,
     case C (COND_JUMP, DISP32):
     case C (COND_JUMP, UNDEF_WORD_DISP):
       {
-	/* A conditional branch wont fit into 12 bits so:
+	/* A conditional branch won't fit into 12 bits so:
 	  	b!cond	1f
 	  	jmpi	0f
 	  	.align 2
@@ -1917,7 +1920,7 @@ md_apply_fix (fixS *   fixP,
 	       segT     segment ATTRIBUTE_UNUSED)
 {
   char *       buf  = fixP->fx_where + fixP->fx_frag->fr_literal;
-  char *       file = fixP->fx_file ? fixP->fx_file : _("unknown");
+  const char *       file = fixP->fx_file ? fixP->fx_file : _("unknown");
   const char * symname;
   /* Note: use offsetT because it is signed, valueT is unsigned.  */
   offsetT      val  = *valP;
@@ -1990,7 +1993,7 @@ md_apply_fix (fixS *   fixP,
 
     case BFD_RELOC_MCORE_PCREL_JSR_IMM11BY2:
       /* Conditional linker map jsri to bsr.  */
-      /* If its a local target and close enough, fix it.
+      /* If it's a local target and close enough, fix it.
 	 NB: >= -2k for backwards bsr; < 2k for forwards...  */
       if (fixP->fx_addsy == 0 && val >= -2048  && val < 2048)
 	{
@@ -2039,7 +2042,7 @@ md_apply_fix (fixS *   fixP,
 void
 md_operand (expressionS * expressionP)
 {
-  /* Ignore leading hash symbol, if poresent.  */
+  /* Ignore leading hash symbol, if present.  */
   if (* input_line_pointer == '#')
     {
       input_line_pointer ++;
@@ -2077,7 +2080,7 @@ md_estimate_size_before_relax (fragS * fragP, segT segment_type)
 	   sized - maybe it will fix up */
 	fragP->fr_subtype = C (COND_JUMP, DISP12);
       else if (fragP->fr_symbol)
-	/* Its got a segment, but its not ours, so it will always be long.  */
+	/* It's got a segment, but it's not ours, so it will always be long.  */
 	fragP->fr_subtype = C (COND_JUMP, UNDEF_WORD_DISP);
       else
 	/* We know the abs value.  */
@@ -2178,13 +2181,13 @@ tc_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
 	  code = fixp->fx_r_type;
 	  as_bad (_("Can not do %d byte %srelocation"),
 		  fixp->fx_size,
-		  fixp->fx_pcrel ? _("pc-relative") : "");
+		  fixp->fx_pcrel ? _("pc-relative ") : "");
 	}
       break;
   }
 
-  rel = xmalloc (sizeof (arelent));
-  rel->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+  rel = XNEW (arelent);
+  rel->sym_ptr_ptr = XNEW (asymbol *);
   *rel->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   rel->address = fixp->fx_frag->fr_address + fixp->fx_where;
   /* Always pass the addend along!  */

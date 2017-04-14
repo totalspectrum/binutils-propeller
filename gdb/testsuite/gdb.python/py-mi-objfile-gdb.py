@@ -1,4 +1,4 @@
-# Copyright (C) 2015 Free Software Foundation, Inc.
+# Copyright (C) 2015-2017 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,6 +22,5 @@ import gdb
 # This will create one for to_string=True and then another for the
 # parameter change notification.
 gdb.execute("set width 101", to_string=True)
-# And finally a command that will use the original MI stream, which in a
-# buggy gdb will use just-freed data.
-gdb.execute("list")
+# And finally a command that will use the console stream without redirection
+gdb.execute("list main")

@@ -1,6 +1,6 @@
 /* YACC parser for D expressions, for GDB.
 
-   Copyright (C) 2014-2015 Free Software Foundation, Inc.
+   Copyright (C) 2014-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -55,65 +55,10 @@
 #define parse_type(ps) builtin_type (parse_gdbarch (ps))
 #define parse_d_type(ps) builtin_d_type (parse_gdbarch (ps))
 
-/* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
-   as well as gratuitiously global symbol names, so we can have multiple
-   yacc generated parsers in gdb.  Note that these are only the variables
-   produced by yacc.  If other parser generators (bison, byacc, etc) produce
-   additional global names that conflict at link time, then those parser
-   generators need to be fixed instead of adding those names to this list.  */
-
-#define	yymaxdepth d_maxdepth
-#define	yyparse	d_parse_internal
-#define	yylex	d_lex
-#define	yyerror	d_error
-#define	yylval	d_lval
-#define	yychar	d_char
-#define	yydebug	d_debug
-#define	yypact	d_pact
-#define	yyr1	d_r1
-#define	yyr2	d_r2
-#define	yydef	d_def
-#define	yychk	d_chk
-#define	yypgo	d_pgo
-#define	yyact	d_act
-#define	yyexca	d_exca
-#define	yyerrflag d_errflag
-#define	yynerrs	d_nerrs
-#define	yyps	d_ps
-#define	yypv	d_pv
-#define	yys	d_s
-#define	yy_yys	d_yys
-#define	yystate	d_state
-#define	yytmp	d_tmp
-#define	yyv	d_v
-#define	yy_yyv	d_yyv
-#define	yyval	d_val
-#define	yylloc	d_lloc
-#define	yyreds	d_reds	/* With YYDEBUG defined */
-#define	yytoks	d_toks	/* With YYDEBUG defined */
-#define	yyname	d_name	/* With YYDEBUG defined */
-#define	yyrule	d_rule	/* With YYDEBUG defined */
-#define	yylhs	d_yylhs
-#define	yylen	d_yylen
-#define	yydefre	d_yydefred
-#define	yydgoto	d_yydgoto
-#define	yysindex d_yysindex
-#define	yyrindex d_yyrindex
-#define	yygindex d_yygindex
-#define	yytable	d_yytable
-#define	yycheck	d_yycheck
-#define	yyss	d_yyss
-#define	yysslim	d_yysslim
-#define	yyssp	d_yyssp
-#define	yystacksize d_yystacksize
-#define	yyvs	d_yyvs
-#define	yyvsp	d_yyvsp
-
-#ifndef YYDEBUG
-#define YYDEBUG 1	/* Default to yydebug support */
-#endif
-
-#define YYFPRINTF parser_fprintf
+/* Remap normal yacc parser interface names (yyparse, yylex, yyerror,
+   etc).  */
+#define GDB_YY_REMAP_PREFIX d_
+#include "yy-remap.h"
 
 /* The state of the parser, used internally when we are parsing the
    expression.  */
@@ -124,7 +69,7 @@ int yyparse (void);
 
 static int yylex (void);
 
-void yyerror (char *);
+void yyerror (const char *);
 
 static int type_aggregate_p (struct type *);
 
@@ -368,21 +313,20 @@ UnaryExpression:
 		{ write_exp_elt_opcode (pstate, UNOP_LOGICAL_NOT); }
 |	'~' UnaryExpression
 		{ write_exp_elt_opcode (pstate, UNOP_COMPLEMENT); }
+|	TypeExp '.' SIZEOF_KEYWORD
+		{ write_exp_elt_opcode (pstate, UNOP_SIZEOF); }
 |	CastExpression
 |	PowExpression
 ;
 
 CastExpression:
 	CAST_KEYWORD '(' TypeExp ')' UnaryExpression
-		{ write_exp_elt_opcode (pstate, UNOP_CAST);
-		  write_exp_elt_type (pstate, $3);
-		  write_exp_elt_opcode (pstate, UNOP_CAST); }
+		{ write_exp_elt_opcode (pstate, UNOP_CAST_TYPE); }
 	/* C style cast is illegal D, but is still recognised in
 	   the grammar, so we keep this around for convenience.  */
 |	'(' TypeExp ')' UnaryExpression
-		{ write_exp_elt_opcode (pstate, UNOP_CAST);
-		  write_exp_elt_type (pstate, $2);
-		  write_exp_elt_opcode (pstate, UNOP_CAST); }
+		{ write_exp_elt_opcode (pstate, UNOP_CAST_TYPE); }
+
 ;
 
 PowExpression:
@@ -410,6 +354,8 @@ PostfixExpression:
 		  write_exp_elt_opcode (pstate, STRUCTOP_STRUCT);
 		  write_exp_string (pstate, $3);
 		  write_exp_elt_opcode (pstate, STRUCTOP_STRUCT); }
+|	PostfixExpression '.' SIZEOF_KEYWORD
+		{ write_exp_elt_opcode (pstate, UNOP_SIZEOF); }
 |	PostfixExpression INCREMENT
 		{ write_exp_elt_opcode (pstate, UNOP_POSTINCREMENT); }
 |	PostfixExpression DECREMENT
@@ -483,9 +429,7 @@ PrimaryExpression:
 			}
 
 		      write_exp_elt_opcode (pstate, OP_VAR_VALUE);
-		      /* We want to use the selected frame, not another more inner frame
-			 which happens to be in the same block.  */
-		      write_exp_elt_block (pstate, NULL);
+		      write_exp_elt_block (pstate, sym.block);
 		      write_exp_elt_sym (pstate, sym.symbol);
 		      write_exp_elt_opcode (pstate, OP_VAR_VALUE);
 		    }
@@ -616,6 +560,8 @@ PrimaryExpression:
 		  write_exp_elt_longcst (pstate, (LONGEST) 0);
 		  write_exp_elt_longcst (pstate, (LONGEST) $1 - 1);
 		  write_exp_elt_opcode (pstate, OP_ARRAY); }
+|	TYPEOF_KEYWORD '(' Expression ')'
+		{ write_exp_elt_opcode (pstate, OP_TYPEOF); }
 ;
 
 ArrayLiteral:
@@ -702,6 +648,7 @@ type_aggregate_p (struct type *type)
 {
   return (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	  || TYPE_CODE (type) == TYPE_CODE_UNION
+	  || TYPE_CODE (type) == TYPE_CODE_MODULE
 	  || (TYPE_CODE (type) == TYPE_CODE_ENUM
 	      && TYPE_DECLARED_CLASS (type)));
 }
@@ -735,7 +682,6 @@ parse_number (struct parser_state *ps, const char *p,
 
   if (parsed_float)
     {
-      const struct builtin_d_type *builtin_d_types;
       const char *suffix;
       int suffix_len;
       char *s, *sp;
@@ -1001,7 +947,7 @@ parse_string_or_char (const char *tokptr, const char **outptr,
   else
     value->type = C_STRING;
 
-  value->ptr = obstack_base (&tempbuf);
+  value->ptr = (char *) obstack_base (&tempbuf);
   value->length = obstack_object_size (&tempbuf);
 
   *outptr = tokptr;
@@ -1011,7 +957,7 @@ parse_string_or_char (const char *tokptr, const char **outptr,
 
 struct token
 {
-  char *oper;
+  const char *oper;
   int token;
   enum exp_opcode opcode;
 };
@@ -1554,7 +1500,7 @@ yylex (void)
 	      obstack_grow (&name_obstack, next->value.sval.ptr,
 			    next->value.sval.length);
 
-	      yylval.sval.ptr = obstack_base (&name_obstack);
+	      yylval.sval.ptr = (char *) obstack_base (&name_obstack);
 	      yylval.sval.length = obstack_object_size (&name_obstack);
 
 	      current.token = classify_name (pstate, expression_context_block);
@@ -1634,7 +1580,7 @@ yylex (void)
 	  obstack_grow (&name_obstack, next->value.sval.ptr,
 			next->value.sval.length);
 
-	  yylval.sval.ptr = obstack_base (&name_obstack);
+	  yylval.sval.ptr = (char *) obstack_base (&name_obstack);
 	  yylval.sval.length = obstack_object_size (&name_obstack);
 	  current.value = yylval;
 	  current.token = classification;
@@ -1683,9 +1629,9 @@ d_parse (struct parser_state *par_state)
 
   back_to = make_cleanup (null_cleanup, NULL);
 
-  make_cleanup_restore_integer (&yydebug);
+  scoped_restore restore_yydebug = make_scoped_restore (&yydebug,
+							parser_debug);
   make_cleanup_clear_parser_state (&pstate);
-  yydebug = parser_debug;
 
   /* Initialize some state used by the lexer.  */
   last_was_structop = 0;
@@ -1702,7 +1648,7 @@ d_parse (struct parser_state *par_state)
 }
 
 void
-yyerror (char *msg)
+yyerror (const char *msg)
 {
   if (prev_lexptr)
     lexptr = prev_lexptr;

@@ -1,6 +1,6 @@
 /* Python interface to objfiles.
 
-   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+   Copyright (C) 2008-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,6 +24,7 @@
 #include "language.h"
 #include "build-id.h"
 #include "symtab.h"
+#include "py-ref.h"
 
 typedef struct
 {
@@ -78,9 +79,7 @@ objfpy_get_filename (PyObject *self, void *closure)
   objfile_object *obj = (objfile_object *) self;
 
   if (obj->objfile)
-    return PyString_Decode (objfile_name (obj->objfile),
-			    strlen (objfile_name (obj->objfile)),
-			    host_charset (), NULL);
+    return host_string_to_python_string (objfile_name (obj->objfile));
   Py_RETURN_NONE;
 }
 
@@ -96,8 +95,7 @@ objfpy_get_username (PyObject *self, void *closure)
     {
       const char *username = obj->objfile->original_name;
 
-      return PyString_Decode (username, strlen (username),
-			      host_charset (), NULL);
+      return host_string_to_python_string (username);
     }
 
   Py_RETURN_NONE;
@@ -152,8 +150,7 @@ objfpy_get_build_id (PyObject *self, void *closure)
       char *hex_form = make_hex_string (build_id->data, build_id->size);
       PyObject *result;
 
-      result = PyString_Decode (hex_form, strlen (hex_form),
-				host_charset (), NULL);
+      result = host_string_to_python_string (hex_form);
       xfree (hex_form);
       return result;
     }
@@ -200,7 +197,10 @@ static int
 objfpy_initialize (objfile_object *self)
 {
   self->objfile = NULL;
-  self->dict = NULL;
+
+  self->dict = PyDict_New ();
+  if (self->dict == NULL)
+    return 0;
 
   self->printers = PyList_New (0);
   if (self->printers == NULL)
@@ -228,18 +228,15 @@ objfpy_initialize (objfile_object *self)
 static PyObject *
 objfpy_new (PyTypeObject *type, PyObject *args, PyObject *keywords)
 {
-  objfile_object *self = (objfile_object *) type->tp_alloc (type, 0);
+  gdbpy_ref<objfile_object> self ((objfile_object *) type->tp_alloc (type, 0));
 
-  if (self)
+  if (self != NULL)
     {
-      if (!objfpy_initialize (self))
-	{
-	  Py_DECREF (self);
-	  return NULL;
-	}
+      if (!objfpy_initialize (self.get ()))
+	return NULL;
     }
 
-  return (PyObject *) self;
+  return (PyObject *) self.release ();
 }
 
 PyObject *
@@ -435,21 +432,20 @@ objfpy_is_valid (PyObject *self, PyObject *args)
 static PyObject *
 objfpy_add_separate_debug_file (PyObject *self, PyObject *args, PyObject *kw)
 {
-  static char *keywords[] = { "file_name", NULL };
+  static const char *keywords[] = { "file_name", NULL };
   objfile_object *obj = (objfile_object *) self;
   const char *file_name;
-  int symfile_flags = 0;
 
   OBJFPY_REQUIRE_VALID (obj);
 
-  if (!PyArg_ParseTupleAndKeywords (args, kw, "s", keywords, &file_name))
+  if (!gdb_PyArg_ParseTupleAndKeywords (args, kw, "s", keywords, &file_name))
     return NULL;
 
   TRY
     {
-      bfd *abfd = symfile_bfd_open (file_name);
+      gdb_bfd_ref_ptr abfd (symfile_bfd_open (file_name));
 
-      symbol_file_add_separate (abfd, file_name, symfile_flags, obj->objfile);
+      symbol_file_add_separate (abfd.get (), file_name, 0, obj->objfile);
     }
   CATCH (except, RETURN_MASK_ALL)
     {
@@ -563,14 +559,14 @@ objfpy_lookup_objfile_by_build_id (const char *build_id)
 PyObject *
 gdbpy_lookup_objfile (PyObject *self, PyObject *args, PyObject *kw)
 {
-  static char *keywords[] = { "name", "by_build_id", NULL };
+  static const char *keywords[] = { "name", "by_build_id", NULL };
   const char *name;
   PyObject *by_build_id_obj = NULL;
   int by_build_id;
   struct objfile *objfile;
 
-  if (! PyArg_ParseTupleAndKeywords (args, kw, "s|O!", keywords,
-				     &name, &PyBool_Type, &by_build_id_obj))
+  if (!gdb_PyArg_ParseTupleAndKeywords (args, kw, "s|O!", keywords,
+					&name, &PyBool_Type, &by_build_id_obj))
     return NULL;
 
   by_build_id = 0;
@@ -614,13 +610,9 @@ gdbpy_lookup_objfile (PyObject *self, PyObject *args, PyObject *kw)
 static void
 py_free_objfile (struct objfile *objfile, void *datum)
 {
-  struct cleanup *cleanup;
-  objfile_object *object = (objfile_object *) datum;
-
-  cleanup = ensure_python_env (get_objfile_arch (objfile), current_language);
+  gdbpy_enter enter_py (get_objfile_arch (objfile), current_language);
+  gdbpy_ref<objfile_object> object ((objfile_object *) datum);
   object->objfile = NULL;
-  Py_DECREF ((PyObject *) object);
-  do_cleanups (cleanup);
 }
 
 /* Return a borrowed reference to the Python object of type Objfile
@@ -631,26 +623,22 @@ py_free_objfile (struct objfile *objfile, void *datum)
 PyObject *
 objfile_to_objfile_object (struct objfile *objfile)
 {
-  objfile_object *object;
-
-  object = (objfile_object *) objfile_data (objfile, objfpy_objfile_data_key);
-  if (!object)
+  gdbpy_ref<objfile_object> object
+    ((objfile_object *) objfile_data (objfile, objfpy_objfile_data_key));
+  if (object == NULL)
     {
-      object = PyObject_New (objfile_object, &objfile_object_type);
-      if (object)
+      object.reset (PyObject_New (objfile_object, &objfile_object_type));
+      if (object != NULL)
 	{
-	  if (!objfpy_initialize (object))
-	    {
-	      Py_DECREF (object);
-	      return NULL;
-	    }
+	  if (!objfpy_initialize (object.get ()))
+	    return NULL;
 
 	  object->objfile = objfile;
-	  set_objfile_data (objfile, objfpy_objfile_data_key, object);
+	  set_objfile_data (objfile, objfpy_objfile_data_key, object.get ());
 	}
     }
 
-  return (PyObject *) object;
+  return (PyObject *) object.release ();
 }
 
 int
@@ -682,7 +670,7 @@ Add FILE_NAME to the list of files containing debug info for the objfile." },
   { NULL }
 };
 
-static PyGetSetDef objfile_getset[] =
+static gdb_PyGetSetDef objfile_getset[] =
 {
   { "__dict__", gdb_py_generic_dict, NULL,
     "The __dict__ for this objfile.", &objfile_object_type },

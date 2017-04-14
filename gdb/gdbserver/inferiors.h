@@ -1,5 +1,5 @@
 /* Inferior process information for the remote server for GDB.
-   Copyright (C) 1993-2015 Free Software Foundation, Inc.
+   Copyright (C) 1993-2017 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,6 +18,8 @@
 
 #ifndef INFERIORS_H
 #define INFERIORS_H
+
+#include "gdb_vecs.h"
 
 /* Generic information for tracking a list of ``inferiors'' - threads,
    processes, etc.  */
@@ -67,6 +69,10 @@ struct process_info
   /* The list of installed fast tracepoints.  */
   struct fast_tracepoint_jump *fast_tracepoint_jumps;
 
+  /* The list of syscalls to report, or just a single element, ANY_SYSCALL,
+     for unfiltered syscall reporting.  */
+  VEC (int) *syscalls_to_catch;
+
   const struct target_desc *tdesc;
 
   /* Private target data.  */
@@ -82,7 +88,7 @@ struct process_info
    no current thread selected.  */
 
 struct process_info *current_process (void);
-struct process_info *get_thread_process (struct thread_info *);
+struct process_info *get_thread_process (const struct thread_info *);
 
 extern struct inferior_list all_processes;
 
@@ -148,6 +154,11 @@ struct inferior_list_entry *find_inferior
       void *arg);
 struct inferior_list_entry *find_inferior_id (struct inferior_list *list,
 					      ptid_t id);
+struct inferior_list_entry *
+  find_inferior_in_random (struct inferior_list *,
+			   int (*func) (struct inferior_list_entry *,
+					void *),
+			   void *arg);
 
 void *inferior_target_data (struct thread_info *);
 void set_inferior_target_data (struct thread_info *, void *);

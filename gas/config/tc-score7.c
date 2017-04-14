@@ -1,5 +1,5 @@
 /* tc-score7.c -- Assembler for Score7
-   Copyright (C) 2009-2015 Free Software Foundation, Inc.
+   Copyright (C) 2009-2017 Free Software Foundation, Inc.
    Contributed by:
    Brain.lin (brain.lin@sunplusct.com)
    Mei Ligang (ligang@sunnorth.com.cn)
@@ -191,7 +191,7 @@ enum s7_insn_type_for_dependency
 
 struct s7_insn_to_dependency
 {
-  char *insn_name;
+  const char *insn_name;
   enum s7_insn_type_for_dependency type;
 };
 
@@ -324,7 +324,7 @@ static const struct s7_insn_to_dependency s7_insn_to_dependency_table[] =
   {"mvpl",      s7_D_cond_mv},
   {"mvvs",      s7_D_cond_mv},
   {"mvvc",      s7_D_cond_mv},
-  /* move spectial instruction.  */
+  /* move special instruction.  */
   {"mtcr",      s7_D_mtcr},
   {"mftlb",     s7_D_mftlb},
   {"mtptlb",    s7_D_mtptlb},
@@ -401,9 +401,9 @@ static const struct s7_data_dependency s7_data_dependency_table[] =
   {s7_D_mtcr, "cr1", s7_D_pce, "", 2, 1, 0},
   {s7_D_mtcr, "cr1", s7_D_cond_br, "", 1, 0, 1},
   {s7_D_mtcr, "cr1", s7_D_cond_mv, "", 1, 0, 1},
-  /* Status regiser.  */
+  /* Status register.  */
   {s7_D_mtcr, "cr0", s7_D_all_insn, "", 5, 4, 0},
-  /* CCR regiser.  */
+  /* CCR register.  */
   {s7_D_mtcr, "cr4", s7_D_all_insn, "", 6, 5, 0},
   /* EntryHi/EntryLo register.  */
   {s7_D_mftlb, "", s7_D_mtptlb, "", 1, 1, 1},
@@ -2491,7 +2491,7 @@ s7_handle_dependency (struct s7_score_it *theinst)
 	      if (remainder_bubbles <= 2)
 		{
 		  if (s7_warn_fix_data_dependency)
-		    as_warn (_("Fix data dependency: %s %s -- %s %s  (insert %d nop!/%d)"),
+		    as_warn (_("Fix data dependency: %s %s -- %s %s (insert %d nop!/%d)"),
 			     s7_dependency_vector[i].name, s7_dependency_vector[i].reg,
 			     s7_dependency_vector[0].name, s7_dependency_vector[0].reg,
 			     remainder_bubbles, bubbles);
@@ -2510,7 +2510,7 @@ s7_handle_dependency (struct s7_score_it *theinst)
 	      else
 		{
 		  if (s7_warn_fix_data_dependency)
-		    as_warn (_("Fix data dependency: %s %s -- %s %s  (insert 1 pflush/%d)"),
+		    as_warn (_("Fix data dependency: %s %s -- %s %s (insert 1 pflush/%d)"),
 			     s7_dependency_vector[i].name, s7_dependency_vector[i].reg,
 			     s7_dependency_vector[0].name, s7_dependency_vector[0].reg,
 			     bubbles);
@@ -2526,14 +2526,14 @@ s7_handle_dependency (struct s7_score_it *theinst)
             {
 	      if (warn_or_error)
 		{
-                  as_bad (_("data dependency: %s %s -- %s %s  (%d/%d bubble)"),
+                  as_bad (_("data dependency: %s %s -- %s %s (%d/%d bubble)"),
                            s7_dependency_vector[i].name, s7_dependency_vector[i].reg,
                            s7_dependency_vector[0].name, s7_dependency_vector[0].reg,
                            remainder_bubbles, bubbles);
 		}
 	      else
 		{
-                  as_warn (_("data dependency: %s %s -- %s %s  (%d/%d bubble)"),
+                  as_warn (_("data dependency: %s %s -- %s %s (%d/%d bubble)"),
                            s7_dependency_vector[i].name, s7_dependency_vector[i].reg,
                            s7_dependency_vector[0].name, s7_dependency_vector[0].reg,
                            remainder_bubbles, bubbles);
@@ -2723,7 +2723,7 @@ s7_gen_insn_frag (struct s7_score_it *part_1, struct s7_score_it *part_2)
   /* Here, we must call frag_grow in order to keep the instruction frag type is
      rs_machine_dependent.
      For, frag_var may change frag_now->fr_type to rs_fill by calling frag_grow which
-     acturally will call frag_wane.
+     actually will call frag_wane.
      Calling frag_grow first will create a new frag_now which free size is 20 that is enough
      for frag_var.  */
   frag_grow (20);
@@ -4271,7 +4271,7 @@ s7_build_la_pic (int reg_rd, expressionS exp)
 
       /* Var part
 	 For a local symbol: ldis r1, HI%<constant>
-         but, if lo is outof 16 bit, make hi plus 1  */
+         but, if lo is out of 16 bit, make hi plus 1  */
       if ((lo < -0x8000) || (lo > 0x7fff))
 	{
 	  hi += 1;
@@ -5121,14 +5121,15 @@ s7_build_dependency_insn_hsh (void)
       const struct s7_insn_to_dependency *tmp = s7_insn_to_dependency_table + i;
       size_t len = strlen (tmp->insn_name);
       struct s7_insn_to_dependency *new_i2d;
+      char *insn_name;
 
       new_i2d = (struct s7_insn_to_dependency *)
           obstack_alloc (&dependency_obstack,
                          sizeof (struct s7_insn_to_dependency));
-      new_i2d->insn_name = (char *) obstack_alloc (&dependency_obstack,
-                                                   len + 1);
+      insn_name = (char *) obstack_alloc (&dependency_obstack, len + 1);
 
-      strcpy (new_i2d->insn_name, tmp->insn_name);
+      strcpy (insn_name, tmp->insn_name);
+      new_i2d->insn_name = insn_name;
       new_i2d->type = tmp->type;
       hash_insert (s7_dependency_insn_hsh, new_i2d->insn_name,
                    (void *) new_i2d);
@@ -5225,7 +5226,7 @@ s7_judge_size_before_relax (fragS * fragp, asection *sec)
   if (change == 1)
     {
       /* Only at the first time determining whether s7_GP instruction relax should be done,
-         return the difference between insntruction size and instruction relax size.  */
+         return the difference between instruction size and instruction relax size.  */
       if (fragp->fr_opcode == NULL)
 	{
 	  fragp->fr_fix = s7_RELAX_NEW (fragp->fr_subtype);
@@ -5352,8 +5353,8 @@ s7_insert_reg (const struct s7_reg_entry *r, struct hash_control *htab)
 {
   int i = 0;
   int len = strlen (r->name) + 2;
-  char *buf = xmalloc (len);
-  char *buf2 = xmalloc (len);
+  char *buf = XNEWVEC (char, len);
+  char *buf2 = XNEWVEC (char, len);
 
   strcpy (buf + i, r->name);
   for (i = 0; buf[i]; i++)
@@ -6208,7 +6209,7 @@ s7_operand (expressionS * exp)
    the byte sequence 3f f1 99 99 99 99 99 9a, and in little endian mode is
    the byte sequence 99 99 f1 3f 9a 99 99 99.  */
 
-static char *
+static const char *
 s7_atof (int type, char *litP, int *sizeP)
 {
   int prec;
@@ -6479,7 +6480,7 @@ s7_relax_frag (asection * sec ATTRIBUTE_UNUSED,
                       grows -= 2;
                       do_relax_p = 1;
                     }
-                  /* Make the 32 bit insturction word align.  */
+                  /* Make the 32 bit instruction word align.  */
                   else
                     {
                       fragp->insn_addr += 2;
@@ -6634,7 +6635,7 @@ s7_section_align (segT segment, valueT size)
 {
   int align = bfd_get_section_alignment (stdoutput, segment);
 
-  return ((size + (1 << align) - 1) & (-1 << align));
+  return ((size + (1 << align) - 1) & -(1 << align));
 }
 
 static void
@@ -6786,7 +6787,7 @@ s7_apply_fix (fixS *fixP, valueT *valP, segT seg)
         }
       else
         {
-          /* In differnt section.  */
+          /* In different section.  */
           if ((S_GET_SEGMENT (fixP->fx_addsy) != seg) ||
               (fixP->fx_addsy != NULL && S_IS_EXTERNAL (fixP->fx_addsy)))
             value = fixP->fx_offset;
@@ -6874,12 +6875,12 @@ s7_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
   static arelent *retval[MAX_RELOC_EXPANSION + 1];  /* MAX_RELOC_EXPANSION equals 2.  */
   arelent *reloc;
   bfd_reloc_code_real_type code;
-  char *type;
+  const char *type;
 
-  reloc = retval[0] = xmalloc (sizeof (arelent));
+  reloc = retval[0] = XNEW (arelent);
   retval[1] = NULL;
 
-  reloc->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+  reloc->sym_ptr_ptr = XNEW (asymbol *);
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
   reloc->addend = fixp->fx_offset;
@@ -6907,9 +6908,9 @@ s7_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
       newval |= (((off >> 14) & 0x3) << 16);
       s7_number_to_chars (buf, newval, s7_INSN_SIZE);
 
-      retval[1] = xmalloc (sizeof (arelent));
+      retval[1] = XNEW (arelent);
       retval[2] = NULL;
-      retval[1]->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+      retval[1]->sym_ptr_ptr = XNEW (asymbol *);
       *retval[1]->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
       retval[1]->address = (reloc->address + s7_RELAX_RELOC2 (fixp->fx_frag->fr_subtype));
 
@@ -6929,6 +6930,7 @@ s7_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
           code = BFD_RELOC_32_PCREL;
           break;
         }
+      /* Fall through.  */
     case BFD_RELOC_HI16_S:
     case BFD_RELOC_LO16:
     case BFD_RELOC_SCORE_JMP:

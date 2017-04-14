@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 
-#   Copyright (C) 1999, 2000, 2001, 2003 Free Software Foundation, Inc.
+#   Copyright (C) 1999-2017 Free Software Foundation, Inc.
 
 # This file is part of GCC.
 
@@ -311,7 +311,7 @@ while(<$inf>) {
 	@columns = ();
 	for $column (split (/\s*\@tab\s*/, $1)) {
 	    # @strong{...} is used a @headitem work-alike
-	    $column =~ s/^\@strong{(.*)}$/$1/;
+	    $column =~ s/^\@strong\{(.*)\}$/$1/;
 	    push @columns, $column;
 	}
 	$_ = "\n=item ".join (" : ", @columns)."\n";
@@ -340,7 +340,7 @@ die "No filename or title\n" unless defined $fn && defined $tl;
 $sects{NAME} = "$fn \- $tl\n";
 $sects{FOOTNOTES} .= "=back\n" if exists $sects{FOOTNOTES};
 
-for $sect (qw(NAME SYNOPSIS DESCRIPTION OPTIONS ENVIRONMENT FILES
+for $sect (qw(NAME SYNOPSIS TARGET DESCRIPTION OPTIONS ENVIRONMENT FILES
 	      BUGS NOTES FOOTNOTES SEEALSO AUTHOR COPYRIGHT)) {
     if(exists $sects{$sect}) {
 	$head = $sect;
