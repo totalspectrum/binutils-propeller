@@ -37,7 +37,7 @@
 /* A representation for Propeller machine code.  */
 struct propeller_code
 {
-  char *error;
+  const char *error;
   int code;
   struct
   {
@@ -495,7 +495,7 @@ tc_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
   return reloc;
 }
 
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
   return ieee_md_atof (type, litP, sizeP, FALSE);
@@ -1542,7 +1542,7 @@ md_assemble (char *instruction_string)
   struct propeller_code insn, op1, op2, insn2, op3, op4;
   int error;
   int size;
-  char *err = NULL;
+  const char *err = NULL;
   char *str;
   char *p;
   char *to;
@@ -1660,8 +1660,6 @@ md_assemble (char *instruction_string)
 
     case PROPELLER_OPERAND_NO_OPS:
       str = skip_whitespace (str);
-      if (*str == 0)
-        str = "";
       break;
 
     case PROPELLER_OPERAND_DEST_ONLY:
@@ -2003,7 +2001,7 @@ md_assemble (char *instruction_string)
         else
           {
             char *arg;
-            char *macroname = "dummy";
+            const char *macroname = "dummy";
 
             switch (op->copc) {
             case MACRO_PUSHM:
@@ -2088,7 +2086,7 @@ md_assemble (char *instruction_string)
         else
           {
             char *arg;
-            char *macroname = "dummy";
+            const char *macroname = "dummy";
 
             switch (op->copc) {
             case MACRO_RET:
@@ -2462,11 +2460,11 @@ md_assemble (char *instruction_string)
       str = p;
       if (op->flags & eff->flag) {
         if (xmov_flag) {
-          insn2.code |= eff->or;
-          insn2.code &= eff->and;
+          insn2.code |= eff->ormask;
+          insn2.code &= eff->andmask;
         } else {
-          insn.code |= eff->or;
-          insn.code &= eff->and;
+          insn.code |= eff->ormask;
+          insn.code &= eff->andmask;
         }
       }
       else {
@@ -2865,7 +2863,7 @@ md_create_long_jump (char *ptr ATTRIBUTE_UNUSED,
 /* Invocation line includes a switch not recognized by the base assembler.
    See if it's a processor-specific option.  */
 int
-md_parse_option (int c, char *arg)
+md_parse_option (int c, const char *arg)
 {
   (void)arg;
   switch (c)

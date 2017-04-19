@@ -383,6 +383,7 @@ disassembler (bfd *abfd)
     case bfd_arch_propeller:
       disassemble = print_insn_propeller;
       break;
+#endif
 #ifdef ARCH_pru
     case bfd_arch_pru:
       disassemble = print_insn_pru;

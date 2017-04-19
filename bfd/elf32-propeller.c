@@ -776,13 +776,13 @@ propeller_elf_relocate_section (bfd * output_bfd,
 	  switch (r)
 	    {
 	    case bfd_reloc_overflow:
-	      r = info->callbacks->reloc_overflow
+	      info->callbacks->reloc_overflow
 		(info, (h ? &h->root : NULL), name, howto->name,
 		 (bfd_vma) 0, input_bfd, input_section, rel->r_offset);
 	      break;
 
 	    case bfd_reloc_undefined:
-	      r = info->callbacks->undefined_symbol
+	      info->callbacks->undefined_symbol
 		(info, name, input_bfd, input_section, rel->r_offset, TRUE);
 	      break;
 
@@ -804,7 +804,7 @@ propeller_elf_relocate_section (bfd * output_bfd,
 	    }
 
 	  if (msg)
-	    r = info->callbacks->warning
+	    info->callbacks->warning
 	      (info, msg, name, input_bfd, input_section, rel->r_offset);
 
 	  if (!r)
@@ -976,8 +976,9 @@ bfd_elf32_propeller_set_target_flags (bfd_boolean user_no_warn_mismatch)
    object file when linking.  */
 
 static bfd_boolean
-propeller_elf_merge_private_bfd_data (bfd * ibfd, bfd * obfd)
+propeller_elf_merge_private_bfd_data (bfd * ibfd, struct bfd_link_info *info)
 {
+  bfd *obfd = info->output_bfd;
   flagword old_flags;
   flagword new_flags;
   bfd_boolean error = FALSE;

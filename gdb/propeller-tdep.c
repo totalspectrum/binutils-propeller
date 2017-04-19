@@ -471,14 +471,15 @@ propeller_frame_cache (struct frame_info *this_frame, void **this_cache)
   int i;
 
   if (*this_cache)
-    return *this_cache;
+    return (struct propeller_frame_cache *)*this_cache;
+#if 0
   { CORE_ADDR sp;
     if (this_frame != NULL)
       sp = get_frame_register_signed (this_frame, + PROPELLER_SP_REGNUM);
     else
       sp = 0;
   }
-  
+#endif
   cache = propeller_alloc_frame_cache ();
   *this_cache = cache;
 

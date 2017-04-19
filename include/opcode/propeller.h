@@ -181,8 +181,8 @@ struct propeller_condition
 struct propeller_effect
 {
   const char *name;
-  int or;
-  int and;
+  int ormask;
+  int andmask;
   int flag;
 };
 
